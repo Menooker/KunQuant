@@ -1,0 +1,5 @@
+
+BasedOnStyle: LLVM
+IndentWidth: 4
+AlwaysBreakTemplateDeclarations : true
+# BreakBeforeBraces: Allman
