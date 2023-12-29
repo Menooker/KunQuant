@@ -77,15 +77,16 @@ struct RequireWindow {
     static_assert(TInput::containsWindow, "This stage needs window data");
 };
 
-template <typename TInput, int window>
+template <int window>
 struct FastWindowedSum {
     f32x8 v = _mm256_setzero_ps();
-    f32x8 step(TInput &input, size_t index) {
+    template <typename TInput>
+    f32x8 step(TInput &input, f32x8 cur, size_t index) {
         RequireWindow<TInput>;
         if (index >= window) {
             v = _mm256_sub_ps(v, input.getWindow(index, window));
         }
-        v = _mm256_add_ps(v, input.getCurrent());
+        v = _mm256_add_ps(v, cur);
         if (index >= window) {
             return v;
         }
@@ -98,6 +99,9 @@ struct ReduceAdd {
     void step(f32x8 input, size_t index) {
         v= _mm256_add_ps(v, input);
     }
+    operator f32x8() {
+        return v;
+    }
 };
 
 struct ReduceMin {
@@ -105,12 +109,18 @@ struct ReduceMin {
     void step(f32x8 input, size_t index) {
         v= _mm256_min_ps(v, input);
     }
+    operator f32x8() {
+        return v;
+    }
 };
 
 struct ReduceMax {
     f32x8 v = _mm256_set1_ps(-std::numeric_limits<float>::infinity());
     void step(f32x8 input, size_t index) {
         v= _mm256_max_ps(v, input);
+    }
+    operator f32x8() {
+        return v;
     }
 };
 
