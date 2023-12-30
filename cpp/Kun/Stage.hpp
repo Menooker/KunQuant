@@ -22,17 +22,16 @@ struct Stage {
     size_t *out_buffers;
     size_t num_out_buffers;
     size_t orig_pending;
-
-
-
-    Stage(FuncType f, Stage **dependers, size_t num_dependers,
-          size_t *in_buffers, size_t num_in_buffers, size_t *out_buffers,
-          size_t num_out_buffers, size_t orig_pending)
-        : f{f}, dependers{dependers}, num_dependers{num_dependers},
-          in_buffers{in_buffers}, num_in_buffers{num_in_buffers},
-          out_buffers{out_buffers}, num_out_buffers{num_out_buffers},
-          orig_pending{orig_pending} {
-          }
+    size_t num_tasks;
+    size_t id;
+    // Stage(FuncType f, Stage **dependers, size_t num_dependers,
+    //       size_t *in_buffers, size_t num_in_buffers, size_t *out_buffers,
+    //       size_t num_out_buffers, size_t orig_pending)
+    //     : f{f}, dependers{dependers}, num_dependers{num_dependers},
+    //       in_buffers{in_buffers}, num_in_buffers{num_in_buffers},
+    //       out_buffers{out_buffers}, num_out_buffers{num_out_buffers},
+    //       orig_pending{orig_pending} {
+    //       }
 };
 
 } // namespace kun

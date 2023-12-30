@@ -1,0 +1,8 @@
+project(KunRunner)
+cmake_minimum_required(VERSION 3.5)
+add_subdirectory(3rdparty/pybind11)
+include_directories(${pybind11_INCLUDE_DIRS})
+message(STATUS ${pybind11_INCLUDE_DIRS})
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fvisibility=hidden -fvisibility-inlines-hidden")
+file(GLOB_RECURSE KunRuntimeSrc ${PROJECT_SOURCE_DIR}/cpp/Kun/*.cpp)
+pybind11_add_module(KunRunner ${KunRuntimeSrc})

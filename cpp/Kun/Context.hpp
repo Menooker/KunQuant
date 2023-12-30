@@ -1,12 +1,13 @@
 #pragma once
 
 #include "Stage.hpp"
+#include <atomic>
 #include <memory>
 #include <stdlib.h>
 
 namespace kun {
 
-struct RuntimeStage {
+struct KUN_API RuntimeStage {
     const Stage *stage;
     Context *ctx;
 
@@ -18,14 +19,24 @@ struct RuntimeStage {
         reset();
     }
 
+    bool doJob();
+
     void reset() {
         pending = stage->orig_pending;
         doing_index = 0;
-        done_count = 0;
+        done_count = stage->num_tasks;
     }
 
-    void beforeEnqueue(Context *ctx);
-    void onDone(Context *ctx);
+    void enqueue();
+    void onDone(size_t cnt);
+};
+
+struct KUN_API Executor {
+    virtual void enqueue(RuntimeStage *stage) = 0;
+    virtual void dequeue(RuntimeStage *stage) = 0;
+    virtual bool takeSingleJob() = 0;
+    virtual void runUntilDone() = 0;
+    virtual ~Executor() = 0;
 };
 
 struct Buffer {
@@ -49,6 +60,8 @@ struct Buffer {
         refcount = -1000;
     }
 
+    void ref() { ++refcount; }
+
     void deref() {
         auto new_cnt = --refcount;
         if (new_cnt == 0) {
@@ -58,7 +71,7 @@ struct Buffer {
     }
 
     ~Buffer() {
-        if(ptr && refcount.load() >= 0) {
+        if (ptr && refcount.load() >= 0) {
             free(ptr);
         }
     }
@@ -71,6 +84,11 @@ struct Context {
     std::vector<RuntimeStage> stages;
     std::shared_ptr<Executor> executor;
     size_t buffer_len;
+
+    size_t stock_count;
+    size_t total_time;
+    size_t start;
+    size_t length;
 };
 
 } // namespace kun
