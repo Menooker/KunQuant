@@ -34,12 +34,15 @@ struct SingleThreadExecutor: Executor
     ~SingleThreadExecutor() = default;
 };
 
+std::shared_ptr<Executor> createSingleThreadExecutor() {
+    return std::make_shared<SingleThreadExecutor>();
+}
 
 bool RuntimeStage::doJob() {
     auto cur_idx = doing_index.load();
     while (cur_idx < stage->num_tasks) {
         if(doing_index.compare_exchange_strong(cur_idx, cur_idx + 1)) {
-            stage->f(ctx, cur_idx * 8, ctx->total_time, ctx->start, ctx->length);
+            stage->f(ctx, cur_idx, ctx->total_time, ctx->start, ctx->length);
             onDone(1);
             return true;
         }
@@ -50,11 +53,11 @@ bool RuntimeStage::doJob() {
 void RuntimeStage::enqueue() {
     for (size_t i = 0; i < stage->num_in_buffers; i++) {
         auto buf_id = stage->in_buffers[i];
-        ctx->buffers[buf_id].ref();
+        ctx->buffers[buf_id->id].ref();
     }
     for (size_t i = 0; i < stage->num_out_buffers; i++) {
         auto buf_id = stage->out_buffers[i];
-        ctx->buffers[buf_id].alloc(ctx->buffer_len);
+        ctx->buffers[buf_id->id].alloc(ctx->buffer_len);
     }
     ctx->executor->enqueue(this);
 }
@@ -73,7 +76,7 @@ void RuntimeStage::onDone(size_t cnt) {
         }
         for (size_t i = 0; i < stage->num_in_buffers; i++) {
             auto buf_id = stage->in_buffers[i];
-            ctx->buffers[buf_id].deref();
+            ctx->buffers[buf_id->id].deref();
         }
         ctx->executor->dequeue(this);
     }

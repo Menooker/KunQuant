@@ -1,25 +1,23 @@
-#pragma once
-
-#include "Stage.hpp"
+#include "Module.hpp"
+#include <dlfcn.h>
+#include <memory>
 
 namespace kun {
 
-enum class BufferKind: int32_t {
-    INPUT = 0,
-    OUTPUT,
-    TEMP,
-};
-
-struct BufferInfo {
-    const char* name;
-    BufferKind kind;
-};
-
-struct Module {
-    size_t num_stages;
-    Stage* stages;
-    size_t num_buffers;
-    BufferInfo* buffers;
-};
-
+const Module *Library::getModule(const char *name) {
+    return (const Module *)dlsym(handle, name);
 }
+std::shared_ptr<Library> Library::load(const char *filename) {
+    auto handle = dlopen(filename, RTLD_LOCAL);
+    if (!handle) {
+        return nullptr;
+    }
+    return std::make_shared<Library>(handle);
+}
+Library::~Library() {
+    if (handle) {
+        dlclose(handle);
+    }
+}
+
+} // namespace kun

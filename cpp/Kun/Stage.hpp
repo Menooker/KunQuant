@@ -13,13 +13,27 @@ namespace kun {
 using FuncType = void (*)(Context *__ctx, size_t __stock_idx,
                           size_t __total_time, size_t __start, size_t __length);
 
+
+enum class BufferKind: int32_t {
+    INPUT = 0,
+    OUTPUT,
+    TEMP,
+};
+
+
+struct BufferInfo {
+    size_t id;
+    const char* name;
+    BufferKind kind;
+};
+
 struct Stage {
     FuncType f;
     Stage **dependers;
     size_t num_dependers;
-    size_t *in_buffers;
+    BufferInfo **in_buffers;
     size_t num_in_buffers;
-    size_t *out_buffers;
+    BufferInfo **out_buffers;
     size_t num_out_buffers;
     size_t orig_pending;
     size_t num_tasks;

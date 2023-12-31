@@ -91,4 +91,6 @@ struct Context {
     size_t length;
 };
 
+std::shared_ptr<Executor> createSingleThreadExecutor();
+
 } // namespace kun
