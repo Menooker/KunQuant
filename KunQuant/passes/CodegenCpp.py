@@ -54,12 +54,14 @@ def _get_buffer_name(op: OpBase, idx: int) -> str:
         name = op.attrs["name"]
         return f"buf_{name}"
     elif isinstance(op, WindowedTempOutput):
-        return f"temp_{idx}."
+        return f"temp_{idx}"
     raise RuntimeError("Bad buffer" + str(op))
 
 vector_len = 8
 
 def codegen_cpp(f: Function, input_stride: int, output_stride: int, input_name_to_idx: Dict[str, int], inputs: List[Input], outputs: List[Output]) -> str:
+    if len(f.ops) == 3 and isinstance(f.ops[1], Rank):
+        return f'''static auto stage_{f.name} = RankST8sTimeStride8;'''
     header = f'''void stage_{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
     toplevel = _CppScope(None)
     buffer_type: Dict[OpBase, str] = dict()
@@ -69,14 +71,14 @@ def codegen_cpp(f: Function, input_stride: int, output_stride: int, input_name_t
         name = inp.attrs["name"]
         idx_in_ctx = input_name_to_idx[name]
         buffer_type[inp] = f"Input<{input_stride}>"
-        code = f"Input<{input_stride}> buf_{name}{{__ctx.buffers[{idx_in_ctx}] + __stock_idx * __total_time +  __start * {input_stride} }};"
+        code = f"Input<{input_stride}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr + __stock_idx * __total_time * {input_stride} +  __start * {input_stride} }};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
     assert(output_stride == vector_len)
     for idx, outp in enumerate(outputs):
         name = outp.attrs["name"]
         idx_in_ctx = input_name_to_idx[name]
         buffer_type[outp] = f"Output<{output_stride}>"
-        code = f"Output<{output_stride}> buf_{name}{{__ctx.buffers[{idx_in_ctx}] + __stock_idx * __length}};"
+        code = f"Output<{output_stride}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr + __stock_idx * __length * {input_stride}}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
     for op in f.ops:
         if op.get_parent() is None and isinstance(op, WindowedTempOutput):
@@ -91,7 +93,6 @@ def codegen_cpp(f: Function, input_stride: int, output_stride: int, input_name_t
     top_body = top_for.body
     cur_body = top_body
     loop_to_cpp_loop: Dict[ForeachBackWindow, _CppScope] = {None: top_body}
-
     for op in f.ops:
         idx = f.get_op_idx(op)
         inp = [f.get_op_idx(inpv) for inpv in op.inputs]
@@ -110,7 +111,10 @@ def codegen_cpp(f: Function, input_stride: int, output_stride: int, input_name_t
             assert(op.__class__.__name__.endswith("Const"))
             thename = op.__class__.__name__.replace("Const", "")
             rhs = op.attrs["value"]
-            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]}, {rhs});"))
+            if not op.attrs["swap"]:
+                scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]}, {rhs});"))
+            else:
+                scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}({rhs}, v{inp[0]});"))
         elif isinstance(op, BinaryElementwiseOp):
             thename = op.__class__.__name__
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]}, v{inp[1]});"))
@@ -126,8 +130,9 @@ def codegen_cpp(f: Function, input_stride: int, output_stride: int, input_name_t
             the_for.body.scope.append(_CppSingleLine(the_for.body, f"auto v{idx} = {buf_name}.getWindow(i, idx_{idx});"))
         elif isinstance(op, ReductionOp):
             thename = op.__class__.__name__
-            loop_body = loop_to_cpp_loop[op.inputs[0].get_parent()]
-            loop_var_idx = f.get_op_idx(op.inputs[0].get_parent())
+            loop_op = op.inputs[0] if isinstance(op.inputs[0], ForeachBackWindow) else op.inputs[0].get_parent()
+            loop_body = loop_to_cpp_loop[loop_op]
+            loop_var_idx = f.get_op_idx(loop_op)
             loop = loop_body.parent_for
             # insert a var definition before the for-loop
             loop_parent = loop.parent
@@ -135,12 +140,18 @@ def codegen_cpp(f: Function, input_stride: int, output_stride: int, input_name_t
             loop_parent.scope.insert(loop_parent.scope.index(loop), _CppSingleLine(loop_parent, f"{thename} v{idx};"))
             # insert a step in the for-loop
             loop_body.scope.append(_CppSingleLine(loop_body, f"v{idx}.step(v{inp[0]}, idx_{loop_var_idx});"))
+        elif isinstance(op, BackRef):
+            assert(op.get_parent() is None)
+            buf_name = _get_buffer_name(op.inputs[0], inp[0])
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = windowedRef<{op.attrs["window"]}>({buf_name}, i);'))
         elif isinstance(op, FastWindowedSum):
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
             window = op.attrs["window"]
             toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"FastWindowedSum<{window}> sum_{idx};"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = sum_{idx}.step({buf_name}, v{inp[0]}, i);"))
+        elif isinstance(op, Select):
+            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
         else:
             raise RuntimeError("Cannot generate " + str(op))
     return header + str(toplevel)

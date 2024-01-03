@@ -5,8 +5,8 @@
 #include <unordered_map>
 
 namespace kun {
-void runGraph(std::shared_ptr<Executor> exec, Module *m,
+void runGraph(std::shared_ptr<Executor> exec, const Module *m,
               std::unordered_map<std::string, float *> &buffers,
-              size_t num_stocks, size_t total_time, size_t cur_time);
+              size_t num_stocks, size_t total_time, size_t cur_time, size_t length);
 
 }

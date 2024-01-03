@@ -10,9 +10,11 @@
 
 namespace kun {
 
+struct RuntimeStage;
 using FuncType = void (*)(Context *__ctx, size_t __stock_idx,
                           size_t __total_time, size_t __start, size_t __length);
-
+using RankFuncType = void (*)(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
 
 enum class BufferKind: int32_t {
     INPUT = 0,
@@ -27,8 +29,25 @@ struct BufferInfo {
     BufferKind kind;
 };
 
-struct Stage {
+enum class TaskExecKind {
+    SLICE_BY_STOCK,
+    SLICE_BY_TIME,
+};
+
+union FuncHolder
+{
+    RankFuncType rankf;
     FuncType f;
+    FuncHolder(RankFuncType r): rankf{r} {}
+    FuncHolder(FuncType r): f{r} {}
+};
+
+
+static constexpr size_t simd_len = 8;
+static constexpr size_t time_stride = 8;
+
+struct Stage {
+    FuncHolder f;
     Stage **dependers;
     size_t num_dependers;
     BufferInfo **in_buffers;
@@ -36,7 +55,7 @@ struct Stage {
     BufferInfo **out_buffers;
     size_t num_out_buffers;
     size_t orig_pending;
-    size_t num_tasks;
+    TaskExecKind kind;
     size_t id;
     // Stage(FuncType f, Stage **dependers, size_t num_dependers,
     //       size_t *in_buffers, size_t num_in_buffers, size_t *out_buffers,

@@ -179,20 +179,23 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                     if inp.get_parent():
                         raise RuntimeError("Bad cross partition op: " + str(inp))
                     inp_info = f.op_to_id[inp]
-                    outop = _search_output_use(inp, inp_info)
-                    if not outop:
-                        # add an output op to that partition
-                        out_name = add_to_naming_table(inp.hash_hex())
-                        outop = Output(inp, out_name)
-                        inp_info.uses[outop] = 1
-                        inp_partition = op_lookup_table[inp]
-                        inp_partition.add(None, outop)
-                        op_lookup_table[outop] = inp_partition
+                    if not isinstance(inp, Input):
+                        outop = _search_output_use(inp, inp_info)
+                        if not outop:
+                            # add an output op to that partition
+                            out_name = add_to_naming_table(inp.hash_hex())
+                            outop = Output(inp, out_name)
+                            inp_info.uses[outop] = 1
+                            inp_partition = op_lookup_table[inp]
+                            inp_partition.add(None, outop)
+                            op_lookup_table[outop] = inp_partition
+                        else:
+                            out_name = outop.attrs["name"]
+                            inp_partition = op_lookup_table[outop]
+                        if inp_partition != p:
+                            depending[inp_partition] = None
                     else:
-                        out_name = outop.attrs["name"]
-                        inp_partition = op_lookup_table[outop]
-                    if inp_partition != p:
-                        depending[inp_partition] = None
+                        out_name = inp.attrs["name"]
                     if op in inp_info.uses:
                         del inp_info.uses[op]
                     

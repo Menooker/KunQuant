@@ -1,6 +1,6 @@
-from .ReduceOp import ReduceAdd
+from .ReduceOp import ReduceAdd, ReduceArgMax
 from KunQuant.Op import OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder
-from .ElewiseOp import DivConst, Sub, Mul, Sqrt
+from .ElewiseOp import DivConst, Sub, Mul, Sqrt, SubConst
 from collections import OrderedDict
 from typing import Union, List, Tuple
 
@@ -39,4 +39,14 @@ class WindowedStddev(WindowedCompositiveOp):
             b.set_loop(self.get_parent())
             vsum = ReduceAdd(sqr)
             out = Sqrt(DivConst(vsum, window - 1))
+        return b.ops
+    
+class TsArgMax(WindowedCompositiveOp):
+    def decompose(self) -> List[OpBase]:
+        b = Builder(self.get_parent())
+        with b:
+            v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
+            v1 = ForeachBackWindow(v0, self.attrs["window"])
+            v2 = ReduceArgMax(v1)
+            v3 = SubConst(v2, self.attrs["window"] - 1, True)
         return b.ops

@@ -4,39 +4,71 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
-int add(int i, int j) { return i + j; }
-
 namespace py = pybind11;
 
 PYBIND11_MODULE(KunRunner, m) {
     m.doc() = R"(Code Runner for KunQuant generated code)";
 
-    m.def("add", &add);
-    py::class_<kun::Executor>(m, "Executor");
+    py::class_<kun::Executor, std::shared_ptr<kun::Executor>>(m, "Executor");
     m.def("createSingleThreadExecutor", &kun::createSingleThreadExecutor);
 
     py::class_<kun::Module>(m, "Module");
-    py::class_<kun::Library>(m, "Library")
+    py::class_<kun::Library, std::shared_ptr<kun::Library>>(m, "Library")
         .def_static("load", &kun::Library::load)
         .def("getModule", &kun::Library::getModule,
              py::return_value_policy::reference);
-    m.def("runGraph",
-          [](std::shared_ptr<kun::Executor> exec, const kun::Module *mod,
-             const py::dict inputs, size_t cur_time) {
-                std::unordered_map<std::string, float*> bufs;
-                for(auto kv: inputs) {
-                    auto name = py::cast<std::string>(kv.first);
-                    auto buf_obj = py::cast<py::buffer>(kv.second);
-                    auto info = buf_obj.request();
-                    if (info.format != py::format_descriptor<float>::format()) {
-                        throw std::runtime_error("Expecting float buffer at " + name);
-                    }
-                    // ST8t layout
-                    if (info.ndim != 3 || info.shape.back() != 8) {
-                        throw std::runtime_error("Bad shape at " + name);
-                    }
-                    // fix-me: other checks
-                    bufs[name] = (float*)info.ptr;
+    m.def("runGraph", [](std::shared_ptr<kun::Executor> exec,
+                         const kun::Module *mod, const py::dict inputs,
+                         size_t cur_time, size_t length) {
+        std::unordered_map<std::string, float *> bufs;
+        py::ssize_t known_S = 0;
+        py::ssize_t known_T = 0;
+        for (auto kv : inputs) {
+            auto name = py::cast<std::string>(kv.first);
+            auto buf_obj = py::cast<py::buffer>(kv.second);
+            auto info = buf_obj.request();
+            if (info.format != py::format_descriptor<float>::format()) {
+                throw std::runtime_error("Expecting float buffer at " + name);
+            }
+            // ST8t layout
+            if (info.ndim != 3 || info.shape.back() != kun::simd_len) {
+                throw std::runtime_error("Bad shape at " + name);
+            }
+            auto S = info.shape[0];
+            auto T = info.shape[1];
+            if (known_S == 0) {
+                known_S = S;
+                known_T = T;
+            } else {
+                if (S != known_S || T != known_T) {
+                    throw std::runtime_error("Expecting same shape for " +
+                                             name);
                 }
-          });
+            }
+            if (known_S <= 0 || known_T <= 0) {
+                throw std::runtime_error("Bad input shape" + name);
+            }
+            py::ssize_t expectedS0 = T * kun::simd_len * sizeof(float);
+            py::ssize_t expectedS1 = kun::simd_len * sizeof(float);
+            py::ssize_t expectedS2 = sizeof(float);
+            if (info.strides !=
+                std::vector<py::ssize_t>{expectedS0, expectedS1, expectedS2}) {
+                throw std::runtime_error(
+                    "Bad stride. Dense buffer is expected: " + name);
+            }
+            bufs[name] = (float *)info.ptr;
+        }
+        py::dict ret{};
+        for (size_t i = 0; i < mod->num_buffers; i++) {
+            auto &buf = mod->buffers[i];
+            if (buf.kind == kun::BufferKind::OUTPUT) {
+                py::array_t<float, py::array::c_style> outbuffer{
+                    py::array::ShapeContainer{known_S, known_T, (py::ssize_t) kun::simd_len}};
+                ret[buf.name] = outbuffer;
+                bufs[buf.name] = (float *)outbuffer.request().ptr;
+            }
+        }
+        kun::runGraph(exec, mod, bufs, known_S * kun::simd_len, known_T, cur_time, length);
+        return ret;
+    });
 }

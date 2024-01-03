@@ -16,15 +16,25 @@ struct KUN_API RuntimeStage {
     std::atomic<size_t> done_count;
 
     RuntimeStage(Stage *stage, Context *ctx) : stage{stage}, ctx{ctx} {
-        reset();
+        reset(ctx);
+    }
+
+    RuntimeStage(RuntimeStage &&other) noexcept {
+        stage = other.stage;
+        ctx = other.ctx;
+        pending = other.pending.load(std::memory_order_relaxed);
+        doing_index = other.doing_index.load(std::memory_order_relaxed);
+        done_count = other.done_count.load(std::memory_order_relaxed);
     }
 
     bool doJob();
 
-    void reset() {
+    size_t getNumTasks() ;
+
+    void reset(Context *ctx) {
         pending = stage->orig_pending;
         doing_index = 0;
-        done_count = stage->num_tasks;
+        done_count = getNumTasks();
     }
 
     void enqueue();
@@ -36,7 +46,7 @@ struct KUN_API Executor {
     virtual void dequeue(RuntimeStage *stage) = 0;
     virtual bool takeSingleJob() = 0;
     virtual void runUntilDone() = 0;
-    virtual ~Executor() = 0;
+    virtual ~Executor() = default;
 };
 
 struct Buffer {
@@ -44,8 +54,10 @@ struct Buffer {
     std::atomic<int> refcount;
 
     void alloc(size_t count) {
-        ptr = (float *)aligned_alloc(32, count * sizeof(float));
-        refcount = 0;
+        if(!ptr) {
+            ptr = (float *)aligned_alloc(32, count * sizeof(float));
+            refcount = 0;
+        }
     }
 
     Buffer() {
@@ -54,6 +66,11 @@ struct Buffer {
     }
 
     Buffer(const Buffer &) = delete;
+    Buffer(Buffer &&other) noexcept {
+        ptr = other.ptr;
+        refcount = other.refcount.load();
+        other.ptr = nullptr;
+    }
 
     Buffer(float *inptr) {
         ptr = inptr;
@@ -91,6 +108,9 @@ struct Context {
     size_t length;
 };
 
-std::shared_ptr<Executor> createSingleThreadExecutor();
-
+KUN_API std::shared_ptr<Executor> createSingleThreadExecutor();
+namespace ops {
+   KUN_API void RankST8sTimeStride8(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
+}
 } // namespace kun

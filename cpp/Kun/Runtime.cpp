@@ -18,7 +18,7 @@ struct SingleThreadExecutor : Executor {
         if (q.empty()) {
             return false;
         }
-        q.front()->doJob();
+        return q.front()->doJob();
     }
 
     void runUntilDone() override {
@@ -34,11 +34,26 @@ std::shared_ptr<Executor> createSingleThreadExecutor() {
     return std::make_shared<SingleThreadExecutor>();
 }
 
+static size_t divideAndCeil(size_t x, size_t y) {
+    return (x + y - 1) / y;
+}
+
+size_t RuntimeStage::getNumTasks() {
+    return stage->kind == TaskExecKind::SLICE_BY_STOCK
+                ? divideAndCeil(ctx->stock_count, simd_len)
+                : divideAndCeil(ctx->length, time_stride);
+}
+
 bool RuntimeStage::doJob() {
     auto cur_idx = doing_index.load();
-    while (cur_idx < stage->num_tasks) {
+    auto num_tasks = getNumTasks();
+    while (cur_idx < num_tasks) {
         if (doing_index.compare_exchange_strong(cur_idx, cur_idx + 1)) {
-            stage->f(ctx, cur_idx, ctx->total_time, ctx->start, ctx->length);
+            if(stage->kind == TaskExecKind::SLICE_BY_STOCK) {
+                stage->f.f(ctx, cur_idx, ctx->total_time, ctx->start, ctx->length);
+            } else {
+                stage->f.rankf(this, cur_idx, ctx->total_time, ctx->start, ctx->length);
+            }
             onDone(1);
             return true;
         }
@@ -78,9 +93,10 @@ void RuntimeStage::onDone(size_t cnt) {
     }
 }
 
-void runGraph(std::shared_ptr<Executor> exec, Module *m,
+void runGraph(std::shared_ptr<Executor> exec, const Module *m,
               std::unordered_map<std::string, float *> &buffers,
-              size_t num_stocks, size_t total_time, size_t cur_time) {
+              size_t num_stocks, size_t total_time, size_t cur_time,
+              size_t length) {
     std::vector<Buffer> rtlbuffers;
     rtlbuffers.reserve(m->num_buffers);
     for (size_t i = 0; i < m->num_buffers; i++) {
@@ -101,8 +117,9 @@ void runGraph(std::shared_ptr<Executor> exec, Module *m,
                 exec,
                 num_stocks * (total_time - cur_time),
                 num_stocks,
+                total_time,
                 cur_time,
-                total_time};
+                length};
     std::vector<RuntimeStage> &stages = ctx.stages;
     stages.reserve(m->num_stages);
     for (size_t i = 0; i < m->num_stages; i++) {
@@ -112,7 +129,7 @@ void runGraph(std::shared_ptr<Executor> exec, Module *m,
     for (size_t i = 0; i < m->num_stages; i++) {
         auto &stage = m->stages[i];
         if (stage.orig_pending == 0) {
-            exec->enqueue(&stages[i]);
+            stages[i].enqueue();
         }
     }
     exec->runUntilDone();
