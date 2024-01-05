@@ -111,7 +111,7 @@ def codegen_cpp(f: Function, input_stride: int, output_stride: int, input_name_t
             assert(op.__class__.__name__.endswith("Const"))
             thename = op.__class__.__name__.replace("Const", "")
             rhs = op.attrs["value"]
-            if not op.attrs["swap"]:
+            if not op.attrs.get("swap", False):
                 scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]}, {rhs});"))
             else:
                 scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}({rhs}, v{inp[0]});"))
@@ -126,8 +126,10 @@ def codegen_cpp(f: Function, input_stride: int, output_stride: int, input_name_t
             the_for = _CppFor(scope, f"for(size_t idx_{idx} = 0;idx_{idx} < {window};idx_{idx}++) ")
             scope.scope.append(the_for)
             loop_to_cpp_loop[op] = the_for.body
-            buf_name = _get_buffer_name(op.inputs[0], inp[0])
-            the_for.body.scope.append(_CppSingleLine(the_for.body, f"auto v{idx} = {buf_name}.getWindow(i, idx_{idx});"))
+        elif isinstance(op, IterValue):
+            loop = op.inputs[0]
+            buf_name = _get_buffer_name(op.inputs[1], inp[1])
+            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {buf_name}.getWindow(i, idx_{f.get_op_idx(loop)});"))
         elif isinstance(op, ReductionOp):
             thename = op.__class__.__name__
             loop_op = op.inputs[0] if isinstance(op.inputs[0], ForeachBackWindow) else op.inputs[0].get_parent()

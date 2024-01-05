@@ -48,8 +48,9 @@ def check_rank2():
 def check_alpha101():
     builder = Builder()
     with builder:
-        all_data = AllData(close=Input("close"))
+        all_data = AllData(close=Input("close"),open=Input("open"), volume=Input("volume"))
         alpha001(all_data)
+        alpha006(all_data)
     f = Function(builder.ops)
     src = compileit(f, "alpha_101", 8, 8, 4)
     with open("./tests/cpp/generated/Alpha101.cpp", 'w') as f:

@@ -16,6 +16,10 @@ struct DataSource {
 
 struct dummy {};
 
+inline f32x8 Select(f32x8 cond, f32x8 vtrue, f32x8 vfalse) {
+    return _mm256_blendv_ps(vfalse, vtrue, cond);
+}
+
 template <int stride>
 struct Input : DataSource<true> {
     float *buf;
@@ -80,25 +84,50 @@ struct OutputWindow : DataSource<true> {
     }
 };
 
+static inline __m256i blendvps_si256(__m256i a, __m256i b, __m256i mask) {
+    __m256 res =
+        _mm256_blendv_ps(_mm256_castsi256_ps(a), _mm256_castsi256_ps(b),
+                         _mm256_castsi256_ps(mask));
+    return _mm256_castps_si256(res);
+}
+
 template <typename TInput>
 struct RequireWindow {
     static_assert(TInput::containsWindow, "This stage needs window data");
 };
 
+inline f32x8 isNAN(f32x8 v) { return _mm256_cmp_ps(v, v, _CMP_UNORD_Q); }
+
+// returns true when v1 or v2 is NAN
+inline f32x8 isNAN(f32x8 v1, f32x8 v2) {
+    return _mm256_cmp_ps(v1, v2, _CMP_UNORD_Q);
+}
+
 template <int window>
 struct FastWindowedSum {
     f32x8 v = _mm256_setzero_ps();
+    __m256i num_nans = _mm256_set1_epi32(window);
     template <typename TInput>
     f32x8 step(TInput &input, f32x8 cur, size_t index) {
         RequireWindow<TInput>{};
-        if (index >= window) {
-            v = _mm256_sub_ps(v, input.getWindow(index, window));
-        }
-        v = _mm256_add_ps(v, cur);
-        if (index >= window - 1) {
-            return v;
-        }
-        return _mm256_set1_ps(NAN);
+        auto old = input.getWindow(index, window);
+        auto old_is_nan = isNAN(old);
+        auto new_is_nan = isNAN(cur);
+        // v = old_is_nan? v : (v-old)
+        v = Select(old_is_nan, v, _mm256_sub_ps(v, old));
+        // v = new_is_nan? v : (v-cur)
+        v = Select(new_is_nan, v, _mm256_add_ps(v, cur));
+        num_nans = _mm256_sub_epi32(
+            num_nans,
+            blendvps_si256(_mm256_setzero_si256(), _mm256_set1_epi32(1),
+                           _mm256_castps_si256(old_is_nan)));
+        num_nans = _mm256_add_epi32(
+            num_nans,
+            blendvps_si256(_mm256_setzero_si256(), _mm256_set1_epi32(1),
+                           _mm256_castps_si256(new_is_nan)));
+        auto out_is_normal = _mm256_castsi256_ps(
+            _mm256_cmpeq_epi32(num_nans, _mm256_setzero_si256()));
+        return Select(out_is_normal, v, _mm256_set1_ps(NAN));
     }
 };
 
@@ -120,10 +149,6 @@ struct ReduceMax {
     operator f32x8() { return v; }
 };
 
-inline f32x8 Select(f32x8 cond, f32x8 vtrue, f32x8 vfalse) {
-    return _mm256_blendv_ps(vfalse, vtrue, cond);
-}
-
 template <int window, typename TInput>
 f32x8 windowedRef(TInput &input, size_t index) {
     RequireWindow<TInput>{};
@@ -134,18 +159,25 @@ f32x8 windowedRef(TInput &input, size_t index) {
 }
 
 inline f32x8 LessThan(f32x8 a, f32x8 b) {
-    return _mm256_cmp_ps(a, b, _CMP_NGE_UQ);
+    return _mm256_cmp_ps(a, b, _CMP_LT_OQ);
 }
 inline f32x8 LessThan(f32x8 a, float b) {
-    return _mm256_cmp_ps(a, _mm256_set1_ps(b), _CMP_NGE_UQ);
+    return _mm256_cmp_ps(a, _mm256_set1_ps(b), _CMP_LT_OQ);
+}
+inline f32x8 LessThanOrNan(f32x8 a, f32x8 b) {
+    return _mm256_cmp_ps(a, b, _CMP_NGE_UQ);
 }
 
 struct ReduceArgMax {
     f32x8 v = _mm256_set1_ps(-std::numeric_limits<float>::infinity());
     f32x8 idx = _mm256_setzero_ps();
     void step(f32x8 input, size_t index) {
+        auto is_nan = isNAN(v, input);
         auto cmp = LessThan(v, input);
+        v = Select(cmp, input, v);
+        v = Select(is_nan, _mm256_set1_ps(NAN), v);
         idx = Select(cmp, _mm256_set1_ps(float(index)), idx);
+        idx = Select(is_nan, _mm256_set1_ps(NAN), idx);
     }
     operator f32x8() { return idx; }
 };
@@ -171,6 +203,11 @@ inline f32x8 Div(f32x8 a, float b) {
 }
 
 inline f32x8 Sqrt(f32x8 a) { return _mm256_sqrt_ps(a); }
+
+inline f32x8 SetInfOrNanToZero(f32x8 a) {
+    auto mask = isNAN(_mm256_sub_ps(a, a));
+    return Select(mask, _mm256_setzero_ps(), a);
+}
 
 } // namespace ops
 } // namespace kun

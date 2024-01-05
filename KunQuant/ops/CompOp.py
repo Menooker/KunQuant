@@ -1,12 +1,15 @@
 from .ReduceOp import ReduceAdd, ReduceArgMax
-from KunQuant.Op import OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder
-from .ElewiseOp import DivConst, Sub, Mul, Sqrt, SubConst
+from KunQuant.Op import OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
+from .ElewiseOp import DivConst, Sub, Mul, Sqrt, SubConst, Div
 from collections import OrderedDict
 from typing import Union, List, Tuple
 
 class WindowedCompositiveOp(CompositiveOp, WindowedTrait):
-    def __init__(self, v: OpBase, window: int) -> None:
-        super().__init__([v], [("window", window)])
+    def __init__(self, v: OpBase, window: int, v2 = None) -> None:
+        inputs = [v]
+        if v2 is not None:
+            inputs.append(v2)
+        super().__init__(inputs, [("window", window)])
 
 class WindowedSum(WindowedCompositiveOp):
     def decompose(self) -> List[OpBase]:
@@ -14,7 +17,8 @@ class WindowedSum(WindowedCompositiveOp):
         with b:
             v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
             v1 = ForeachBackWindow(v0, self.attrs["window"])
-            v2 = ReduceAdd(v1)
+            itr = IterValue(v1, v0)
+            v2 = ReduceAdd(itr)
         return b.ops
 
 class WindowedAvg(WindowedCompositiveOp):
@@ -34,19 +38,44 @@ class WindowedStddev(WindowedCompositiveOp):
             v0 = WindowedTempOutput(self.inputs[0], window)
             each = ForeachBackWindow(v0, window)
             b.set_loop(each)
-            diff = Sub(each, avg)
+            diff = Sub(IterValue(each, v0), avg)
             sqr = Mul(diff, diff)
             b.set_loop(self.get_parent())
             vsum = ReduceAdd(sqr)
             out = Sqrt(DivConst(vsum, window - 1))
         return b.ops
     
+class WindowedCorrelation(WindowedCompositiveOp):
+    def decompose(self) -> List[OpBase]:
+        window = self.attrs["window"]
+        x = self.inputs[0]
+        y = self.inputs[1]
+        b = Builder(self.get_parent())
+        with b:
+            avgX = WindowedAvg(x, window)
+            avgY = WindowedAvg(y, window)
+            wX = WindowedTempOutput(x, window)
+            wY = WindowedTempOutput(y, window)
+            each = ForeachBackWindow(wX, window, wY)
+            b.set_loop(each)
+            diffX = Sub(IterValue(each, wX), avgX)
+            diffY = Sub(IterValue(each, wY), avgY)
+            sqrX = Mul(diffX, diffX)
+            sqrY = Mul(diffY, diffY)
+            xy = Mul(diffX, diffY)
+            b.set_loop(self.get_parent())
+            vsum1 = ReduceAdd(xy)
+            vsum_x = ReduceAdd(sqrX)
+            vsum_y = ReduceAdd(sqrY)
+            sum_xy = Mul(vsum_x, vsum_y)
+            out = Div(vsum1, Sqrt(sum_xy))
+        return b.ops
 class TsArgMax(WindowedCompositiveOp):
     def decompose(self) -> List[OpBase]:
         b = Builder(self.get_parent())
         with b:
             v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
             v1 = ForeachBackWindow(v0, self.attrs["window"])
-            v2 = ReduceArgMax(v1)
-            v3 = SubConst(v2, self.attrs["window"] - 1, True)
+            v2 = ReduceArgMax(IterValue(v1, v0))
+            v3 = SubConst(v2, self.attrs["window"], True)
         return b.ops

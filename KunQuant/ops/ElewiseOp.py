@@ -2,12 +2,18 @@ from KunQuant.Op import UnaryElementwiseOp, BinaryElementwiseOp, OpBase
 
 class BinaryConstOp(UnaryElementwiseOp):
     def __init__(self, inp: OpBase, v: float, swap: bool = False) -> None:
-        super().__init__(inp, [("value", v), ("swap", swap)])
+        attrs = [("value", v)]
+        if swap:
+            attrs.append(("swap", swap))
+        super().__init__(inp, attrs)
 
 class AddConst(BinaryConstOp):
     pass
 
 class SubConst(BinaryConstOp):
+    pass
+
+class MulConst(BinaryConstOp):
     pass
 
 class DivConst(BinaryConstOp):
@@ -38,6 +44,9 @@ class LessThanConst(BinaryConstOp):
     pass
 
 class Sqrt(UnaryElementwiseOp):
+    pass
+
+class SetInfOrNanToZero(UnaryElementwiseOp):
     pass
 
 class Select(OpBase):

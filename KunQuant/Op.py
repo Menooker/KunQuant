@@ -43,7 +43,10 @@ def make_indents(indent: int, spaces = 2) -> str:
     return " "*(indent*spaces)
 
 def print_attrs(attr: OrderedDict) -> str:
-    return ",".join([f"{{{kv[0]}:{kv[1]}}}" for kv in attr.items()])
+    inner = ",".join([f"{kv[0]}:{kv[1]}" for kv in attr.items()])
+    if not inner:
+        return inner
+    return f"{{{inner}}}"
 
 _clazzBackWindow = None
 _clazzWindowedTrait = None
@@ -73,7 +76,7 @@ class OpBase:
             self._parent_loop = traverse_replace_map(self._parent_loop, replace_map)
 
     def set_parent(self, loop: 'ForeachBackWindow') -> None:
-        if not isinstance(loop, _clazzBackWindow):
+        if loop is not None and not isinstance(loop, _clazzBackWindow):
             raise RuntimeError("set_parent failed")
         self._parent_loop = loop
 
@@ -164,8 +167,20 @@ class WindowedTrait:
 _clazzWindowedTrait = WindowedTrait
 
 class ForeachBackWindow(OpBase, WindowedTrait):
-    def __init__(self, inp: WindowedTempOutput, window: int) -> None:
-        super().__init__([inp], [("window", window)])
+    def __init__(self, inp: WindowedTempOutput, window: int, *args) -> None:
+        inputs = [inp]
+        if args:
+            inputs.extend(args)
+        super().__init__(inputs, [("window", window)])
+
+class IterValue(OpBase):
+    def __init__(self, loop: ForeachBackWindow, src: OpBase) -> None:
+        super().__init__([loop, src], None)
+        self.set_parent(loop)
+    def verify(self, func: 'KunQuant.Stage.Function') -> None:
+        super().verify(func)
+        if not isinstance(self.inputs[0], ForeachBackWindow):
+            raise RuntimeError("Bad IterValue: " + str(self))
 
 _clazzBackWindow = ForeachBackWindow
 

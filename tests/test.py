@@ -40,21 +40,24 @@ def check_decompose():
     expect_output(f, '''v0 = Input@{name:a}()
 v1 = WindowedTempOutput@{window:10}(v0)
 v2 = ForeachBackWindow@{window:10}(v1)
-v3 = ReduceAdd@(v2)
-v4 = DivConst@{value:10}(v3)
-v5 = WindowedTempOutput@{window:10}(v0)
-v6 = ForeachBackWindow@{window:10}(v5)
-v7 = ReduceAdd@(v6)
-v8 = DivConst@{value:10}(v7)
-v9 = WindowedTempOutput@{window:10}(v0)
-v10 = ForeachBackWindow@{window:10}(v9)
-v11 = Sub@(v10,v8) in v10
-v12 = Mul@(v11,v11) in v10
-v13 = ReduceAdd@(v12)
-v14 = DivConst@{value:9}(v13)
-v15 = Sqrt@(v14)
-v16 = Output@{name:ou1}(v4)
-v17 = Output@{name:ou2}(v15)''')
+v3 = IterValue@(v2,v1) in v2
+v4 = ReduceAdd@(v3)
+v5 = DivConst@{value:10}(v4)
+v6 = WindowedTempOutput@{window:10}(v0)
+v7 = ForeachBackWindow@{window:10}(v6)
+v8 = IterValue@(v7,v6) in v7
+v9 = ReduceAdd@(v8)
+v10 = DivConst@{value:10}(v9)
+v11 = WindowedTempOutput@{window:10}(v0)
+v12 = ForeachBackWindow@{window:10}(v11)
+v13 = IterValue@(v12,v11) in v12
+v14 = Sub@(v13,v10) in v12
+v15 = Mul@(v14,v14) in v12
+v16 = ReduceAdd@(v15)
+v17 = DivConst@{value:9}(v16)
+v18 = Sqrt@(v17)
+v19 = Output@{name:ou1}(v5)
+v20 = Output@{name:ou2}(v18)''')
 
 def check_fold():
     f = build_avg_and_stddev()
@@ -63,30 +66,33 @@ def check_fold():
     expected = '''v0 = Input@{name:a}()
 v1 = WindowedTempOutput@{window:10}(v0)
 v2 = ForeachBackWindow@{window:10}(v1)
-v3 = ReduceAdd@(v2)
-v4 = DivConst@{value:10}(v3)
-v5 = ForeachBackWindow@{window:10}(v1)
-v6 = Sub@(v5,v4) in v5
-v7 = Mul@(v6,v6) in v5
-v8 = ReduceAdd@(v7)
-v9 = DivConst@{value:9}(v8)
-v10 = Sqrt@(v9)
-v11 = Output@{name:ou1}(v4)
-v12 = Output@{name:ou2}(v10)'''
+v3 = IterValue@(v2,v1) in v2
+v4 = ReduceAdd@(v3)
+v5 = DivConst@{value:10}(v4)
+v6 = ForeachBackWindow@{window:10}(v1)
+v7 = IterValue@(v6,v1) in v6
+v8 = Sub@(v7,v5) in v6
+v9 = Mul@(v8,v8) in v6
+v10 = ReduceAdd@(v9)
+v11 = DivConst@{value:9}(v10)
+v12 = Sqrt@(v11)
+v13 = Output@{name:ou1}(v5)
+v14 = Output@{name:ou2}(v12)'''
     expect_output(f, expected)
     special_optimize(f)
     expected2 = '''v0 = Input@{name:a}()
-v1 = WindowedTempOutput@{window:10}(v0)
+v1 = WindowedTempOutput@{window:11}(v0)
 v2 = FastWindowedSum@{window:10}(v1)
 v3 = DivConst@{value:10}(v2)
 v4 = ForeachBackWindow@{window:10}(v1)
-v5 = Sub@(v4,v3) in v4
-v6 = Mul@(v5,v5) in v4
-v7 = ReduceAdd@(v6)
-v8 = DivConst@{value:9}(v7)
-v9 = Sqrt@(v8)
-v10 = Output@{name:ou1}(v3)
-v11 = Output@{name:ou2}(v9)'''
+v5 = IterValue@(v4,v1) in v4
+v6 = Sub@(v5,v3) in v4
+v7 = Mul@(v6,v6) in v4
+v8 = ReduceAdd@(v7)
+v9 = DivConst@{value:9}(v8)
+v10 = Sqrt@(v9)
+v11 = Output@{name:ou1}(v3)
+v12 = Output@{name:ou2}(v10)'''
     expect_output(f, expected2)
 
 def check_gc():
@@ -186,10 +192,10 @@ def check_opt_sum():
     decompose(f)
     special_optimize(f)
     expect_output(f, '''v0 = Input@{name:a}()
-v1 = WindowedTempOutput@{window:10}(v0)
+v1 = WindowedTempOutput@{window:11}(v0)
 v2 = FastWindowedSum@{window:10}(v1)
 v3 = AddConst@{value:10}(v2)
-v4 = WindowedTempOutput@{window:10}(v3)
+v4 = WindowedTempOutput@{window:11}(v3)
 v5 = FastWindowedSum@{window:10}(v4)
 v6 = Output@{name:}(v3)
 v7 = Output@{name:}(v5)''')
