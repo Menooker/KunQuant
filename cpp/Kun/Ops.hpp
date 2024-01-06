@@ -204,6 +204,15 @@ inline f32x8 Div(f32x8 a, float b) {
 
 inline f32x8 Sqrt(f32x8 a) { return _mm256_sqrt_ps(a); }
 
+inline f32x8 Log(f32x8 a) {
+    alignas(32) float v[8];
+    _mm256_store_ps(v, a);
+    for (int i = 0; i < 8; i++) {
+        v[i] = std::log(v[i]);
+    }
+    return _mm256_load_ps(v);
+}
+
 inline f32x8 SetInfOrNanToZero(f32x8 a) {
     auto mask = isNAN(_mm256_sub_ps(a, a));
     return Select(mask, _mm256_setzero_ps(), a);

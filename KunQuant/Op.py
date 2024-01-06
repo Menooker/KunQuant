@@ -188,10 +188,11 @@ class WindowedTrait:
             if not isinstance(inp, WindowedDataSourceOp):
                 raise RuntimeError(
                     "bad input for this op. The input should be windowed: " + str(inp) + "\n This op = " + str(self))
-            if not isinstance(inp, Input) and not isinstance(inp, Output) and inp.attrs["window"] < self.attrs["window"]:
+            if not isinstance(inp, Input) and not isinstance(inp, Output) and inp.attrs["window"] < self.required_input_window():
                 raise RuntimeError(
                     "bad input for this op. The window does not match: " + str(inp) + "\n This op = " + str(self))
-
+    def required_input_window(self) -> int:
+        return self.attrs["window"]
 
 _clazzWindowedTrait = WindowedTrait
 

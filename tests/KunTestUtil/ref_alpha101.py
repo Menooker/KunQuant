@@ -187,7 +187,7 @@ def decay_linear(df, period=10):
 def get_alpha(df):
         stock=Alphas(df)
         df['alpha001']=stock.alpha001() 
-        # df['alpha002']=stock.alpha002()
+        df['alpha002']=stock.alpha002()
         # df['alpha003']=stock.alpha003()
         # df['alpha004']=stock.alpha004()
         # df['alpha005']=stock.alpha005()

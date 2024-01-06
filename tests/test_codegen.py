@@ -50,6 +50,7 @@ def check_alpha101():
     with builder:
         all_data = AllData(close=Input("close"),open=Input("open"), volume=Input("volume"))
         alpha001(all_data)
+        alpha002(all_data)
         alpha006(all_data)
     f = Function(builder.ops)
     src = compileit(f, "alpha_101", 8, 8, 4)

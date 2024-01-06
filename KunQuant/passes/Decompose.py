@@ -20,7 +20,7 @@ def decompose_impl(ops: List[OpBase]) -> List[OpBase]:
             out.extend(decomposed)
             replace_map[op] = decomposed[-1]
         elif isinstance(op, WindowedTrait):
-            window = op.attrs["window"]
+            window = op.required_input_window()
             for idx, inp in enumerate(op.inputs):
                 if not isinstance(inp, WindowedDataSourceOp):
                     changed = True

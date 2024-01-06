@@ -46,6 +46,9 @@ class LessThanConst(BinaryConstOp):
 class Sqrt(UnaryElementwiseOp):
     pass
 
+class Log(UnaryElementwiseOp):
+    pass
+
 class SetInfOrNanToZero(UnaryElementwiseOp):
     pass
 
