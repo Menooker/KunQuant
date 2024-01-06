@@ -39,6 +39,10 @@ def alpha002(d: AllData):
     v = MulConst(WindowedCorrelation(Rank(delta(Log(d.volume), 2)), 6, Rank(Div(Sub(d.close, d.open), d.open))), -1)
     Output(SetInfOrNanToZero(v), "alpha002")
 
+def alpha003(d: AllData):
+    df = MulConst(correlation(Rank(d.open), Rank(d.volume), 10), -1)
+    Output(SetInfOrNanToZero(df), "alpha003")
+
 def alpha006(d: AllData):
     dopen = d.open
     vol = d.volume
