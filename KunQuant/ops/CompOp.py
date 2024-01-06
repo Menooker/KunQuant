@@ -65,10 +65,10 @@ class WindowedCorrelation(WindowedCompositiveOp):
             xy = Mul(diffX, diffY)
             b.set_loop(self.get_parent())
             vsum1 = ReduceAdd(xy)
-            vsum_x = ReduceAdd(sqrX)
-            vsum_y = ReduceAdd(sqrY)
+            vsum_x = Sqrt(ReduceAdd(sqrX))
+            vsum_y = Sqrt(ReduceAdd(sqrY))
             sum_xy = Mul(vsum_x, vsum_y)
-            out = Div(vsum1, Sqrt(sum_xy))
+            out = Div(vsum1, sum_xy)
         return b.ops
 class TsArgMax(WindowedCompositiveOp):
     def decompose(self) -> List[OpBase]:

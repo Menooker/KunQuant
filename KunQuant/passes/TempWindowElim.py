@@ -1,3 +1,4 @@
+from KunQuant.passes.Util import kun_pass
 from KunQuant.Op import OpBase, WindowedTempOutput, Input, Output, traverse_replace_map
 from KunQuant.Stage import Function
 from typing import List, Dict, Tuple
@@ -41,6 +42,7 @@ def temp_window_elim_impl(ops: List[OpBase], f: Function) -> List[OpBase]:
         return out
     return None
 
+@kun_pass
 def temp_window_elim(f: Function):
     newops = temp_window_elim_impl(f.ops, f)
     if newops is not None:

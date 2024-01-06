@@ -1,3 +1,4 @@
+from KunQuant.passes.Util import kun_pass
 from KunQuant.Op import OpBase, ForeachBackWindow, WindowedTempOutput, Output, IterValue
 from KunQuant.ops import ReduceAdd, FastWindowedSum, SubConst, MulConst
 from KunQuant.Stage import Function
@@ -50,6 +51,7 @@ def special_impl(ops: List[OpBase]) -> List[OpBase]:
         return out
     return None
 
+@kun_pass
 def special_optimize(f: Function):
     '''
     Optimize:

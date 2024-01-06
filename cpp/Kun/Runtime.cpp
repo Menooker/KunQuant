@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <list>
 #include <unordered_map>
+#include <stdexcept>
+#include <string>
+#include <cstdio>
 
 namespace kun {
 

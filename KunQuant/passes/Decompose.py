@@ -1,6 +1,7 @@
 from KunQuant.Op import OpBase, Output, CompositiveOp, WindowedTrait, WindowedTempOutput, WindowedDataSourceOp, Rank, Input
 from KunQuant.Stage import Function
 from typing import List
+from .Util import kun_pass
 
 
 def decompose_impl(ops: List[OpBase]) -> List[OpBase]:
@@ -41,6 +42,7 @@ def decompose_impl(ops: List[OpBase]) -> List[OpBase]:
         return out
     return None
 
+@kun_pass
 def decompose(f: Function):
     newops = decompose_impl(f.ops)
     f.strict_window = True

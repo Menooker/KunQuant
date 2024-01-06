@@ -5,12 +5,21 @@ from typing import Dict, List
 import typing
 from collections import OrderedDict
 from dataclasses import dataclass
+from KunQuant.passes import Util as PassUtil
 
 def optimize(f: Function)->None:
+    if PassUtil.debug_mode:
+        print("Before optimize: ", f)
     decompose(f)
     expr_fold(f)
     temp_window_elim(f)
     special_optimize(f)
+
+def post_optimize(impl: List[Function])->None:
+    if PassUtil.debug_mode:
+        print("Post optimize:","=====================")
+    for f in impl:
+        temp_window_elim(f)
 
 @dataclass
 class _Buffer:
@@ -54,6 +63,7 @@ def compileit(f: Function, module_name: str, input_stride: int, output_stride: i
 
     optimize(f)
     mainf, impl = do_partition(f, partition_factor)
+    post_optimize(impl)
 
     impl_src = ['''#include <Kun/Context.hpp>
 #include <Kun/Module.hpp>

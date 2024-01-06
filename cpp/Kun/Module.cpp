@@ -1,6 +1,7 @@
 #include "Module.hpp"
 #include <dlfcn.h>
 #include <memory>
+#include <cstdio>
 
 namespace kun {
 

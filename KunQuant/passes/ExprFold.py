@@ -1,3 +1,4 @@
+from KunQuant.passes.Util import kun_pass
 from KunQuant.Op import OpBase, ForeachBackWindow, Output
 from KunQuant.Stage import Function
 from typing import List, Dict
@@ -26,6 +27,7 @@ def fold_impl(ops: List[OpBase]) -> List[OpBase]:
         return out
     return None
 
+@kun_pass
 def expr_fold(f: Function):
     newops = fold_impl(f.ops)
     if newops is not None:

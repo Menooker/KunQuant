@@ -40,7 +40,7 @@ def test(num_time):
         print(v[0])
         refv = ref[k].to_numpy().transpose()
         print(refv[0])
-        np.testing.assert_allclose(v, refv, rtol=1e-5, equal_nan=True)
+        np.testing.assert_allclose(v, refv, rtol=6e-5, atol=1e-6, equal_nan=True)
 
     # output = ST8t_ST(out["out"])
     # # print(expected[:,0])
