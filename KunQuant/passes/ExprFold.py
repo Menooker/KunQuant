@@ -15,7 +15,7 @@ def fold_impl(ops: List[OpBase]) -> List[OpBase]:
             # don't fold for-each-backwindow
             out.append(op)
             continue
-        thekey = (str(op), op.get_parent())
+        thekey = (op.to_string(0, True) , op.get_parent())
         found_op = computed.get(thekey, None)
         if not found_op:
             out.append(op)

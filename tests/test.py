@@ -200,6 +200,51 @@ v5 = FastWindowedSum@{window:10}(v4)
 v6 = Output@{name:}(v3)
 v7 = Output@{name:}(v5)''')
 
+# check print identity
+def check_fold_window():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inp2 = Input("b")
+        v1 = WindowedCorrelation(inp1, 10, inp2)
+        v2 = WindowedStddev(inp1, 10)
+        out1 = Output(v1, "ou1")
+        out2 = Output(v2, "ou2")
+    f = Function(builder.ops)
+    decompose(f)
+    expr_fold(f)
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = Input@{name:b}()
+v2 = WindowedTempOutput@{window:10}(v0)
+v3 = ForeachBackWindow@{window:10}(v2)
+v4 = IterValue@(v3,v2) in v3
+v5 = ReduceAdd@(v4)
+v6 = DivConst@{value:10}(v5)
+v7 = WindowedTempOutput@{window:10}(v1)
+v8 = ForeachBackWindow@{window:10}(v7)
+v9 = IterValue@(v8,v7) in v8
+v10 = ReduceAdd@(v9)
+v11 = DivConst@{value:10}(v10)
+v12 = ForeachBackWindow@{window:10}(v2,v7)
+v13 = IterValue@(v12,v2) in v12
+v14 = Sub@(v13,v6) in v12
+v15 = IterValue@(v12,v7) in v12
+v16 = Sub@(v15,v11) in v12
+v17 = Mul@(v14,v14) in v12
+v18 = Mul@(v16,v16) in v12
+v19 = Mul@(v14,v16) in v12
+v20 = ReduceAdd@(v19)
+v21 = ReduceAdd@(v17)
+v22 = Sqrt@(v21)
+v23 = ReduceAdd@(v18)
+v24 = Sqrt@(v23)
+v25 = Mul@(v22,v24)
+v26 = Div@(v20,v25)
+v27 = DivConst@{value:9}(v21)
+v28 = Sqrt@(v27)
+v29 = Output@{name:ou1}(v26)
+v30 = Output@{name:ou2}(v28)''')
+
 if __name__ == "__main__":
     check_window()
     check_simple()
@@ -208,3 +253,4 @@ if __name__ == "__main__":
     check_fold()
     check_tempwindow_elim()
     check_opt_sum()
+    check_fold_window()
