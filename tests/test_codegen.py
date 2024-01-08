@@ -45,14 +45,22 @@ def check_rank2():
     with open("./tests/cpp/generated/TestRank2.cpp", 'w') as f:
         f.write(src)
 
+def check_log():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        Output(Log(inp1), "outlog")
+    f = Function(builder.ops)
+    src = compileit(f, "test_log", 8, 8)
+    with open("./tests/cpp/generated/TestLog.cpp", 'w') as f:
+        f.write(src)
+
 def check_alpha101():
     builder = Builder()
     with builder:
-        all_data = AllData(close=Input("close"),open=Input("open"), volume=Input("volume"))
-        alpha001(all_data)
-        alpha002(all_data)
-        alpha003(all_data)
-        alpha006(all_data)
+        all_data = AllData(low=Input("low"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
+        for f in all_alpha:
+            f(all_data)
     f = Function(builder.ops)
     src = compileit(f, "alpha_101", 8, 8, 4)
     with open("./tests/cpp/generated/Alpha101.cpp", 'w') as f:
@@ -61,4 +69,5 @@ def check_alpha101():
 #check_1()
 #check_rank()
 #check_rank2()
+#check_log()
 check_alpha101()

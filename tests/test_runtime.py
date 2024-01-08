@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import sys
+import warnings
 
 sys.path.append("./build/")
 import KunRunner as kr
@@ -81,7 +82,27 @@ def test_rank2():
     # print(output[:,0])
     np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)
 
+def test_log():
+    modu = lib.getModule("test_log")
+    inp = np.zeros(shape=(24, 20), dtype="float32")
+    for i in range(24):
+        inp[i,:] = pow(10, i-10)
+    inp[0,:] = -10
+    inp[-1,:] = 0
+    inp[1,:] = np.nan
+    # print(inp)
+    blocked = ST_ST8t(inp)
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": blocked}, 0, 20)
+    output = ST8t_ST(out["outlog"])
+    # print(expected[:,0])
+    # print(output[:,0])
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', r'(divide by zero encountered)|(invalid value encountered)')
+        np.testing.assert_allclose(output, np.log(inp), rtol=1e-5, atol=1e-5, equal_nan=True)
+
 test_runtime()
 test_avg_stddev()
 test_rank()
 test_rank2()
+test_log()

@@ -107,6 +107,8 @@ def codegen_cpp(f: Function, input_stride: int, output_stride: int, input_name_t
         elif isinstance(op, WindowedTempOutput):
             scope.scope.append(_CppSingleLine(scope, f"temp_{idx}.store(i, v{inp[0]});"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = v{inp[0]};"))
+        elif isinstance(op, ConstantOp):
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = constVec({op.attrs["value"]});'))
         elif isinstance(op, BinaryConstOp):
             assert(op.__class__.__name__.endswith("Const"))
             thename = op.__class__.__name__.replace("Const", "")
@@ -139,7 +141,8 @@ def codegen_cpp(f: Function, input_stride: int, output_stride: int, input_name_t
             # insert a var definition before the for-loop
             loop_parent = loop.parent
             assert(isinstance(loop_parent, _CppScope))
-            loop_parent.scope.insert(loop_parent.scope.index(loop), _CppSingleLine(loop_parent, f"{thename} v{idx};"))
+            init_val = "" if len(op.inputs) == 1 else f"v{inp[1]}"
+            loop_parent.scope.insert(loop_parent.scope.index(loop), _CppSingleLine(loop_parent, f"{thename} v{idx}{{{init_val}}};"))
             # insert a step in the for-loop
             loop_body.scope.append(_CppSingleLine(loop_body, f"v{idx}.step(v{inp[0]}, idx_{loop_var_idx});"))
         elif isinstance(op, BackRef):

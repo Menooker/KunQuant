@@ -3,7 +3,7 @@ import pandas as pd
 from numpy import abs
 from numpy import log
 from numpy import sign
-#from scipy.stats import rankdata
+# from scipy.stats import rankdata
 
 # region Auxiliary functions
 def ts_sum(df, window=10):
@@ -67,7 +67,8 @@ def ts_rank(df, window=10):
     :param window: the rolling window.
     :return: a pandas DataFrame with the time-series rank over the past window days.
     """
-    return df.rolling(window).apply(rolling_rank)
+    # changed by Menooker: using panda's rank() instead of scipy's
+    return df.rolling(window).rank()
 
 def rolling_prod(na):
     """
@@ -189,11 +190,11 @@ def get_alpha(df):
         df['alpha001']=stock.alpha001() 
         df['alpha002']=stock.alpha002()
         df['alpha003']=stock.alpha003()
-        # df['alpha004']=stock.alpha004()
-        # df['alpha005']=stock.alpha005()
+        df['alpha004']=stock.alpha004()
+        df['alpha005']=stock.alpha005()
         df['alpha006']=stock.alpha006()
-        # df['alpha007']=stock.alpha007()
-        # df['alpha008']=stock.alpha008()
+        df['alpha007']=stock.alpha007()
+        df['alpha008']=stock.alpha008()
         # df['alpha009']=stock.alpha009()
         # df['alpha010']=stock.alpha010()
         # df['alpha011']=stock.alpha011()
@@ -275,11 +276,11 @@ class Alphas(object):
 
         self.open: pd.DataFrame = df_data['S_DQ_OPEN'] 
         #self.high = df_data['S_DQ_HIGH'] 
-        #self.low = df_data['S_DQ_LOW']   
+        self.low = df_data['S_DQ_LOW']
         self.close: pd.DataFrame = df_data['S_DQ_CLOSE']
         self.volume: pd.DataFrame = df_data['S_DQ_VOLUME']
         self.returns = self.close.pct_change() #df_data['S_DQ_PCTCHANGE']
-        #self.vwap = (df_data['S_DQ_AMOUNT']*1000)/(df_data['S_DQ_VOLUME']*100+1) 
+        self.vwap = (df_data['S_DQ_AMOUNT'])/(self.volume + 1)
         
     # Alpha#1	 (rank(Ts_ArgMax(SignedPower(((returns < 0) ? stddev(returns, 20) : close), 2.), 5)) -0.5)
     def alpha001(self):
@@ -303,7 +304,7 @@ class Alphas(object):
     
     # Alpha#5	 (rank((open - (sum(vwap, 10) / 10))) * (-1 * abs(rank((close - vwap)))))
     def alpha005(self):
-        return  (rank((self.open - (sum(self.vwap, 10) / 10))) * (-1 * abs(rank((self.close - self.vwap)))))
+        return  (rank((self.open - (ts_sum(self.vwap, 10) / 10))) * (-1 * abs(rank((self.close - self.vwap)))))
     
     # Alpha#6	 (-1 * correlation(open, volume, 10))
     def alpha006(self):

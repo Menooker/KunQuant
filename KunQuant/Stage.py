@@ -86,7 +86,7 @@ class Function:
                 raise RuntimeError("Duplicated ops: " + str(op))
             for inp in op.inputs:
                 if not isinstance(inp, OpBase):
-                    raise RuntimeError("Bad input:" + str(inp))
+                    raise RuntimeError(f"Bad input: {str(inp)} in {op.__class__.__name__}. op.inputs={op.inputs}")
                 if inp not in op_to_id:
                     raise RuntimeError(
                         f"Bad op: {str(op)}, because the input has not been executed: {str(inp)}")

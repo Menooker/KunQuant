@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Base.hpp"
+#include "Math.hpp"
 #include <cmath>
 #include <limits>
 #include <stdint.h>
@@ -161,6 +162,15 @@ f32x8 windowedRef(TInput &input, size_t index) {
 inline f32x8 LessThan(f32x8 a, f32x8 b) {
     return _mm256_cmp_ps(a, b, _CMP_LT_OQ);
 }
+
+inline f32x8 GreaterEqual(f32x8 a, f32x8 b) {
+    return _mm256_cmp_ps(a, b, _CMP_GE_OQ);
+}
+
+inline f32x8 Equals(f32x8 a, f32x8 b) {
+    return _mm256_cmp_ps(a, b, _CMP_EQ_OQ);
+}
+
 inline f32x8 LessThan(f32x8 a, float b) {
     return _mm256_cmp_ps(a, _mm256_set1_ps(b), _CMP_LT_OQ);
 }
@@ -181,6 +191,25 @@ struct ReduceArgMax {
     }
     operator f32x8() { return idx; }
 };
+
+struct ReduceRank {
+    kun_simd::vec_f32x8 v;
+    kun_simd::vec_f32x8 less_count = 0;
+    kun_simd::vec_f32x8 eq_count = 0;
+    ReduceRank(f32x8 cur) : v{cur} {}
+    void step(f32x8 input, size_t index) {
+        using namespace kun_simd;
+        auto is_nan = sc_isnan(v, input);
+        auto cmpless = input < v;
+        auto cmpeq = input == v;
+        less_count = sc_select(is_nan, NAN, less_count);
+        less_count = sc_select(cmpless, less_count + 1.0f, less_count);
+        eq_count = sc_select(cmpeq, eq_count + 1.0f, eq_count);
+    }
+    operator f32x8() { return less_count + (eq_count + 1.0f) / 2.0f; }
+};
+
+inline f32x8 Abs(f32x8 a) { return kun_simd::sc_abs(kun_simd::vec_f32x8(a)); }
 
 inline f32x8 Add(f32x8 a, f32x8 b) { return _mm256_add_ps(a, b); }
 inline f32x8 Add(f32x8 a, float b) {
@@ -204,14 +233,26 @@ inline f32x8 Div(f32x8 a, float b) {
 
 inline f32x8 Sqrt(f32x8 a) { return _mm256_sqrt_ps(a); }
 
-inline f32x8 Log(f32x8 a) {
-    alignas(32) float v[8];
-    _mm256_store_ps(v, a);
-    for (int i = 0; i < 8; i++) {
-        v[i] = std::log(v[i]);
-    }
-    return _mm256_load_ps(v);
+inline f32x8 constVec(float v) { return _mm256_set1_ps(v); }
+
+inline f32x8 Sign(f32x8 in) {
+    using namespace kun_simd;
+    vec_f32x8 v = in;
+    auto is_nan = sc_isnan(v);
+    auto v1 = sc_select(is_nan, NAN, 1.0f);
+    v1 = sc_select(v < 0.0f, -1.0f, v1);
+    v1 = sc_select(v == 0.0f, 0.0f, v1);
+    return v1;
 }
+
+// inline f32x8 Log(f32x8 a) {
+//     alignas(32) float v[8];
+//     _mm256_store_ps(v, a);
+//     for (int i = 0; i < 8; i++) {
+//         v[i] = std::log(v[i]);
+//     }
+//     return _mm256_load_ps(v);
+// }
 
 inline f32x8 SetInfOrNanToZero(f32x8 a) {
     auto mask = isNAN(_mm256_sub_ps(a, a));

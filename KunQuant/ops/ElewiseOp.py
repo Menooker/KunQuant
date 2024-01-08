@@ -31,10 +31,16 @@ class Sub(BinaryElementwiseOp):
 class Div(BinaryElementwiseOp):
     pass
 
-class Greater(BinaryElementwiseOp):
+class CmpOp(BinaryElementwiseOp):
     pass
 
-class Less(BinaryElementwiseOp):
+class GreaterThan(CmpOp):
+    pass
+
+class GreaterEqual(CmpOp):
+    pass
+
+class LessThan(CmpOp):
     pass
 
 class GreaterThanConst(BinaryConstOp):
@@ -47,6 +53,12 @@ class Sqrt(UnaryElementwiseOp):
     pass
 
 class Log(UnaryElementwiseOp):
+    pass
+
+class Abs(UnaryElementwiseOp):
+    pass
+
+class Sign(UnaryElementwiseOp):
     pass
 
 class SetInfOrNanToZero(UnaryElementwiseOp):

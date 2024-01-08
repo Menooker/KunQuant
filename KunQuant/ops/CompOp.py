@@ -1,6 +1,6 @@
-from .ReduceOp import ReduceAdd, ReduceArgMax
+from .ReduceOp import ReduceAdd, ReduceArgMax, ReduceRank
 from KunQuant.Op import OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
-from .ElewiseOp import DivConst, Sub, Mul, Sqrt, SubConst, Div
+from .ElewiseOp import DivConst, Sub, Mul, Sqrt, SubConst, Div, CmpOp
 from collections import OrderedDict
 from typing import Union, List, Tuple
 
@@ -78,4 +78,13 @@ class TsArgMax(WindowedCompositiveOp):
             v1 = ForeachBackWindow(v0, self.attrs["window"])
             v2 = ReduceArgMax(IterValue(v1, v0))
             v3 = SubConst(v2, self.attrs["window"], True)
+        return b.ops
+
+class TsRank(WindowedCompositiveOp):
+    def decompose(self) -> List[OpBase]:
+        b = Builder(self.get_parent())
+        with b:
+            v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
+            v1 = ForeachBackWindow(v0, self.attrs["window"])
+            v2 = ReduceRank(IterValue(v1, v0), self.inputs[0])
         return b.ops

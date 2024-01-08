@@ -136,6 +136,13 @@ class OpBase:
                         "verify() failed: referencing cross loop results: " + str(self))
 
 
+class GraphSourceTrait:
+    pass
+
+class ConstantOp(OpBase, GraphSourceTrait):
+    def __init__(self, v: float) -> None:
+        super().__init__([], [("value", v)])
+
 class UnaryElementwiseOp(OpBase):
     def __init__(self, lhs: OpBase, attrs: Union[List[Tuple[str, object]], OrderedDict, None] = None) -> None:
         super().__init__([lhs], attrs)
@@ -156,7 +163,7 @@ class WindowedDataSourceOp(OpBase):
     pass
 
 
-class Input(WindowedDataSourceOp):
+class Input(WindowedDataSourceOp, GraphSourceTrait):
     def __init__(self, name: str) -> None:
         super().__init__([], [("name", name)])
 
@@ -237,22 +244,23 @@ class StatefulOpTrait:
 
 
 class ReductionOp(OpBase, StatefulOpTrait):
-    def __init__(self, v: OpBase, attrs: Union[List[Tuple[str, object]], OrderedDict, None] = None) -> None:
-        super().__init__([v], attrs)
+    def __init__(self, v: OpBase, init_val: OpBase = None, attrs: Union[List[Tuple[str, object]], OrderedDict, None] = None) -> None:
+        super().__init__([v] if init_val is None else [v, init_val], attrs)
 
     def verify(self, func: 'KunQuant.Stage.Function') -> None:
-        for inp in self.inputs:
-            # The inputs must be in a loop. we must be in a parent of it
-            loop = inp.get_parent()
-            # if directly using a for-each var, the loop is itself
-            if isinstance(inp, ForeachBackWindow):
-                loop = inp
-            if loop is None or loop == self._parent_loop:
-                raise RuntimeError(
-                    f"verify() failed: ReductionOp using non-loop result: {self}\nself._parent_loop = {self._parent_loop}\nloop = {loop}")
-            if self._parent_loop != loop.get_parent():
-                raise RuntimeError(
-                    f"verify() failed: ReductionOp not in parent of input: {self}\nself._parent_loop = {self._parent_loop}\nloop.get_parent() = {loop.get_parent()}")
+        assert(self.inputs.__len__() <= 2)
+        inp = self.inputs[0]
+        # The inputs must be in a loop. we must be in a parent of it
+        loop = inp.get_parent()
+        # if directly using a for-each var, the loop is itself
+        if isinstance(inp, ForeachBackWindow):
+            loop = inp
+        if loop is None or loop == self._parent_loop:
+            raise RuntimeError(
+                f"verify() failed: ReductionOp using non-loop result: {self}\nself._parent_loop = {self._parent_loop}\nloop = {loop}")
+        if self._parent_loop != loop.get_parent():
+            raise RuntimeError(
+                f"verify() failed: ReductionOp not in parent of input: {self}\nself._parent_loop = {self._parent_loop}\nloop.get_parent() = {loop.get_parent()}")
 
 # the rank among different stocks. Between [0, 1]
 

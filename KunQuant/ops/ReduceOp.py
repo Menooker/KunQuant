@@ -5,3 +5,5 @@ class ReduceAdd(ReductionOp):
 
 class ReduceArgMax(ReductionOp):
     pass
+class ReduceRank(ReductionOp):
+    pass

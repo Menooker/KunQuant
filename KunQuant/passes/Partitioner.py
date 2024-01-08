@@ -1,4 +1,4 @@
-from KunQuant.Op import OpBase, Output, Input, Rank
+from KunQuant.Op import OpBase, Output, Input, Rank, GraphSourceTrait, ConstantOp
 from KunQuant.Stage import Function, OpInfo
 from KunQuant.ops import GenericPartition
 from typing import List, Dict, Set, Tuple
@@ -29,7 +29,7 @@ class _Partition:
     def add(self, info: Dict[OpBase, _PartitionOpInfo], op: OpBase):
         self.ops[op] = None
         # input op is replicated in all partitions, referencing it will not cause cylic dependency
-        if not isinstance(op, Input):
+        if not isinstance(op, GraphSourceTrait):
             if info is not None:
                 self.depender.update(info[op].depender)
             if isinstance(op, Output):
@@ -90,7 +90,7 @@ def _select_next(ready_ops: List[OpBase], info: Dict[OpBase, _PartitionOpInfo], 
 def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
     opinfo = _collect_op_info(f)
     partitions: List[_Partition] = []
-    ready_ops = list(filter(lambda op: isinstance(op, Input), f.ops))
+    ready_ops = list(filter(lambda op: isinstance(op, GraphSourceTrait), f.ops))
     to_visit = dict([(op, None) for op in f.ops])
     while len(ready_ops):
         partition = _Partition(OrderedDict(), set())
@@ -105,7 +105,7 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
                     ready_ops.append(user)
             del to_visit[selected]
             ready_ops.remove(selected)
-            if isinstance(selected, Input):
+            if isinstance(selected, GraphSourceTrait):
                 # don't put input in partition yet
                 pass
             elif isinstance(selected, Rank):
@@ -122,7 +122,7 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
                 # add op to partition
                 for inp in selected.inputs:
                     # only put the referenced inputs into partition
-                    if isinstance(inp, Input):
+                    if isinstance(inp, GraphSourceTrait):
                         partition.add(opinfo, inp)
                 partition.add(opinfo, selected)
                 # print("@@@add ", selected)
@@ -164,7 +164,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
     op_lookup_table: Dict[OpBase, _Partition] = dict()
     for p in partitions:
         for op in p.ops:
-            if not isinstance(op, Input):
+            if not isinstance(op, GraphSourceTrait):
                 # input is shared by all ops
                 assert(op not in op_lookup_table)
                 op_lookup_table[op] = p
@@ -179,6 +179,13 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                     if inp.get_parent():
                         raise RuntimeError("Bad cross partition op: " + str(inp))
                     inp_info = f.op_to_id[inp]
+                    if isinstance(inp, ConstantOp):
+                        if op in inp_info.uses:
+                            del inp_info.uses[op]
+                        inop = ConstantOp(inp.attrs["value"])
+                        p.add(None, inop)
+                        op.inputs[idx] = inop
+                        continue
                     if not isinstance(inp, Input):
                         outop = _search_output_use(inp, inp_info)
                         if not outop:
