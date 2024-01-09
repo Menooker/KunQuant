@@ -39,6 +39,17 @@ class _Partition:
         if op in self.ops:
             return False
         return op in self.depender
+    
+    def get_edge_ops(self, f: Function) -> Dict[OpBase, bool]:
+        out = dict()
+        for op in self.ops:
+            if isinstance(op, GraphSourceTrait):
+                continue
+            is_in_loop = op.get_parent() is not None
+            for user in f.op_to_id[op].uses:
+                if user not in self.ops:
+                    out[user] = is_in_loop or out.get(user, False)
+        return out
 
 def _collect_op_info(f: Function)-> Dict[OpBase, _PartitionOpInfo]:
     ret: Dict[OpBase, _PartitionOpInfo] = dict()
@@ -51,7 +62,14 @@ def _collect_op_info(f: Function)-> Dict[OpBase, _PartitionOpInfo]:
         ret[op] = _PartitionOpInfo(depender, dict([(inp, None) for inp in op.inputs]))
     return ret
 
-def _select_next(ready_ops: List[OpBase], info: Dict[OpBase, _PartitionOpInfo], partiton: _Partition) -> OpBase:
+def del_from_ready_op(ready_ops: List[Tuple[OpBase, int]], op: OpBase):
+    for idx, tup in enumerate(ready_ops):
+        if tup[0] == op:
+            del ready_ops[idx]
+            return
+    raise RuntimeError("del_from_ready_op: OP not found")
+
+def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _PartitionOpInfo], partiton: _Partition, f: Function) -> OpBase:
     '''
     Select the next op to put into the partition.
     1. If there is Rank Op, always select it first
@@ -61,7 +79,8 @@ def _select_next(ready_ops: List[OpBase], info: Dict[OpBase, _PartitionOpInfo], 
     '''
     cur_best = 999999999999999999
     cur_best_op: OpBase = None
-    for idx, op in enumerate(ready_ops):
+    edge_ops = partiton.get_edge_ops(f)
+    for op, idx in ready_ops:
         if isinstance(op, Rank):
             return op
         # correctness check, if the partition has another path to the op and the path itself is not
@@ -78,10 +97,26 @@ def _select_next(ready_ops: List[OpBase], info: Dict[OpBase, _PartitionOpInfo], 
         if has_bad_input:
             continue
         cur_cost = 0
+        op_info = info[op]
+        # check for critical op
+        critical = 0
+        for edge_op, is_in_loop in edge_ops.items():
+            if edge_op in op_info.depender:
+                if is_in_loop:
+                    critical = 3
+                    break
+                else:
+                    critical = 1
+        # if critical = 1, it means an op in the partition is blocked, because this ready op has not been executed
+        # if critical = 3, it means besides critical = 1, the blocked op in the partition is an op in loop
+        cur_cost -= 50000 * critical
         if connected_to_parti:
+            cur_cost -= 100000
+        # need to run the ops in the loop as soon as possible
+        if op.get_parent() is not None:
             cur_cost -= 10000
-        cur_cost += (len(ready_ops) - idx) * 10
-        cur_cost += len(info[op].depender)
+        cur_cost += idx * -10
+        cur_cost += len(op_info.depender)
         if cur_cost <= cur_best:
             cur_best = cur_cost
             cur_best_op = op
@@ -90,21 +125,23 @@ def _select_next(ready_ops: List[OpBase], info: Dict[OpBase, _PartitionOpInfo], 
 def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
     opinfo = _collect_op_info(f)
     partitions: List[_Partition] = []
-    ready_ops = list(filter(lambda op: isinstance(op, GraphSourceTrait), f.ops))
+    ready_ops = [(v,0) for v in filter(lambda op: isinstance(op, GraphSourceTrait), f.ops)]
     to_visit = dict([(op, None) for op in f.ops])
+    num_batch = 0
     while len(ready_ops):
         partition = _Partition(OrderedDict(), set())
         # print("============\nnew partition:", partition)
-        selected = _select_next(ready_ops, opinfo, partition)
+        selected = _select_next(ready_ops, opinfo, partition, f)
         while selected:
+            num_batch += 1
             # maintain the ready queue for topology sort
             for user in f.op_to_id[selected].uses:
                 pendingset = opinfo[user].pending_dep
                 del pendingset[selected]
                 if len(pendingset) == 0:
-                    ready_ops.append(user)
+                    ready_ops.append((user, num_batch))
             del to_visit[selected]
-            ready_ops.remove(selected)
+            del_from_ready_op(ready_ops, selected)
             if isinstance(selected, GraphSourceTrait):
                 # don't put input in partition yet
                 pass
@@ -114,7 +151,7 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
                 # if an output op is directly connected with Rank, merge it in the partition
                 for user in f.op_to_id[selected].uses:
                     if isinstance(user, Output):
-                        ready_ops.remove(user)
+                        del_from_ready_op(ready_ops, user)
                         single_partition.add(opinfo, user)
                         del to_visit[user]
                 partitions.append(single_partition)
@@ -129,7 +166,7 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
             if partition.num_outputs > partition_thres:
                 # too many outputs visited, make a new partition
                 break
-            selected = _select_next(ready_ops, opinfo, partition)
+            selected = _select_next(ready_ops, opinfo, partition, f)
         if partition.ops.__len__():
             partitions.append(partition)
     assert(to_visit.__len__()==0)

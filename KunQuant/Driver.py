@@ -44,12 +44,15 @@ def compileit(f: Function, module_name: str, input_stride: int, output_stride: i
     input_name_to_idx: Dict[str, int] = dict()
     buffer_names: List[_Buffer] = []
     partitions: typing.OrderedDict[str, _Partition] = OrderedDict()
+    num_temp_buffer = 0
     def insert_name(op: OpBase, kind: str) -> _Buffer:
-        nonlocal input_name_to_idx
+        nonlocal input_name_to_idx, num_temp_buffer
         name = op.attrs["name"]
         if name not in input_name_to_idx:
             newidx = len(input_name_to_idx)
             newbuf =  _Buffer(newidx, name, kind)
+            if kind == "TEMP":
+                num_temp_buffer += 1
             input_name_to_idx[name] = newidx
             buffer_names.append(newbuf)
             return newbuf
@@ -96,6 +99,9 @@ using namespace kun::ops;
         cur = partitions[p.attrs["name"]]
         cur.num_in_dep = len(p.inputs)
         cur.outs = [partitions[use.attrs["name"]] for use in mainf.op_to_id[p].uses]
+
+    if PassUtil.debug_mode:
+        print("Num temp buffers: ", num_temp_buffer)
 
     buffer_src = ",\n".join(["    "+ str(v) for v in buffer_names])
     impl_src.append(f"static BufferInfo __buffers[]{{\n{buffer_src}\n}};")
