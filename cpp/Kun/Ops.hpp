@@ -21,10 +21,11 @@ inline f32x8 Select(f32x8 cond, f32x8 vtrue, f32x8 vfalse) {
     return _mm256_blendv_ps(vfalse, vtrue, cond);
 }
 
-template <int stride>
-struct Input : DataSource<true> {
+struct InputST8s : DataSource<true> {
+    constexpr static size_t stride = 8;
     float *buf;
-    Input(float *buf) : buf{buf} {}
+    InputST8s(float *base, size_t stock_idx, size_t total_time, size_t start)
+        : buf{base + stock_idx * total_time * stride + start * stride} {}
     f32x8 step(size_t index) { return _mm256_loadu_ps(&buf[index * stride]); }
 
     f32x8 getWindow(size_t index, size_t offset) {
@@ -39,10 +40,11 @@ struct Input : DataSource<true> {
     }
 };
 
-template <int stride>
-struct Output : DataSource<true> {
+struct OutputST8s : DataSource<true> {
+    constexpr static size_t stride = 8;
     float *buf;
-    Output(float *buf) : buf{buf} {}
+    OutputST8s(float *base, size_t stock_idx, size_t length, size_t start)
+        : buf{base + stock_idx * length * stride} {}
     void store(size_t index, const f32x8 &v) {
         _mm256_storeu_ps(&buf[index * stride], v);
     }

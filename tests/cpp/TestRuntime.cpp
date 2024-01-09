@@ -90,5 +90,6 @@ KUN_API Module testRuntimeModule{
     arraySize(stages),
     stages,
     arraySize(buffers),
-    buffers
+    buffers,
+    OutputLayout::ST8s
 };

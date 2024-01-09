@@ -8,41 +8,55 @@
 namespace kun {
 namespace ops {
 
-void RankST8sTimeStride8(RuntimeStage *stage, size_t __stock_idx,
-                         size_t __total_time, size_t __start, size_t __length) {
+struct MapperST8s {
+    static size_t call(size_t stockid, size_t t, size_t num_time) {
+        auto S = stockid / simd_len;
+        return S * num_time * simd_len + t * simd_len + stockid % simd_len;
+    }
+};
+
+template <typename INPUT, typename OUTPUT>
+static void RankStocks(RuntimeStage *stage, size_t time_idx,
+                       size_t __total_time, size_t __start, size_t __length) {
     auto num_stocks = stage->ctx->stock_count;
     auto num_time = stage->ctx->total_time;
-    float* input = stage->ctx->buffers[stage->stage->in_buffers[0]->id].ptr;
-    float* output = stage->ctx->buffers[stage->stage->out_buffers[0]->id].ptr;
+    float *input = stage->ctx->buffers[stage->stage->in_buffers[0]->id].ptr;
+    float *output = stage->ctx->buffers[stage->stage->out_buffers[0]->id].ptr;
     auto time_end =
-        std::min(__start + (__stock_idx + 1) * time_stride, __start + __length);
+        std::min(__start + (time_idx + 1) * time_stride, __start + __length);
     std::vector<float> data;
     data.reserve(num_stocks);
-    for (size_t t = __start + __stock_idx * time_stride; t < time_end; t++) {
+    for (size_t t = __start + time_idx * time_stride; t < time_end; t++) {
         for (size_t i = 0; i < num_stocks; i++) {
             auto S = i / simd_len;
-            float in = input[S * num_time * simd_len + t * simd_len + i % simd_len];
-            if(!std::isnan(in)) {
+            float in = input[INPUT::call(i, t, num_time)];
+            if (!std::isnan(in)) {
                 data.push_back(in);
             }
         }
         std::sort(data.begin(), data.end());
         for (size_t i = 0; i < num_stocks; i++) {
             auto S = i / simd_len;
-            float in = input[S * num_time * simd_len + t * simd_len + i % simd_len];
+            float in = input[INPUT::call(i, t, num_time)];
             float out;
-            if(!std::isnan(in)) {
+            if (!std::isnan(in)) {
                 auto pos = std::equal_range(data.begin(), data.end(), in);
                 auto start = pos.first - data.begin();
                 auto end = pos.second - data.begin();
-                out = ((start+end-1)/2.0f + 1.0f)/data.size(); 
+                out = ((start + end - 1) / 2.0f + 1.0f) / data.size();
             } else {
                 out = NAN;
             }
-            output[S * num_time * simd_len + t * simd_len + i % simd_len] = out;
+            output[OUTPUT::call(i, t, num_time)] = out;
         }
         data.clear();
     }
+}
+
+void RankStocksST8s_ST8s(RuntimeStage *stage, size_t time_idx,
+                         size_t __total_time, size_t __start, size_t __length) {
+    RankStocks<MapperST8s, MapperST8s>(stage, time_idx, __total_time,
+                                       __start, __length);
 }
 } // namespace ops
 } // namespace kun

@@ -40,7 +40,9 @@ class _Partition:
     num_in_dep = 0
     is_rank = False
 
-def compileit(f: Function, module_name: str, input_stride: int, output_stride: int, partition_factor = 4):
+def compileit(f: Function, module_name: str, partition_factor = 4, output_layout = "ST8s"):
+    if output_layout not in ["ST8s", "FTS"]:
+        raise RuntimeError("Bad output_layout name " + output_layout)
     input_name_to_idx: Dict[str, int] = dict()
     buffer_names: List[_Buffer] = []
     partitions: typing.OrderedDict[str, _Partition] = OrderedDict()
@@ -57,6 +59,14 @@ def compileit(f: Function, module_name: str, input_stride: int, output_stride: i
             buffer_names.append(newbuf)
             return newbuf
         return buffer_names[input_name_to_idx[name]]
+
+    def set_buffer_layout(op: OpBase, buf: _Buffer):
+        if buf.kind == "TEMP":
+            op.attrs["layout"] = "ST8s"
+        elif buf.kind == "INPUT":
+            op.attrs["layout"] = "ST8s"
+        elif buf.kind == "OUTPUT":
+            op.attrs["layout"] = output_layout
 
     for op in f.ops:
         if isinstance(op, Input):
@@ -85,11 +95,13 @@ using namespace kun::ops;
                 buf = insert_name(op, "TEMP")
                 pins.append(buf)
                 ins.append(op)
+                set_buffer_layout(op, buf)
             elif isinstance(op, Output):
                 buf = insert_name(op, "TEMP")
                 pouts.append(buf)
                 outs.append(op)
-        src = codegen_cpp(func, input_stride, output_stride, input_name_to_idx, ins, outs)
+                set_buffer_layout(op, buf)
+        src = codegen_cpp(func, input_name_to_idx, ins, outs)
         impl_src.append(src)
         newparti = _Partition(func.name, len(partitions), pins, pouts)
         if len(func.ops) == 3 and isinstance(func.ops[1], Rank):
@@ -143,6 +155,7 @@ using namespace kun::ops;
     {len(partitions)},
     __stages,
     {len(buffer_names)},
-    __buffers
+    __buffers,
+    OutputLayout::{output_layout}
 }};''')
     return "\n\n".join(impl_src)

@@ -18,7 +18,7 @@ def build_avg_and_stddev():
 
 def check_1():
     f = build_avg_and_stddev()
-    src = compileit(f, "avg_and_stddev", 8, 8)
+    src = compileit(f, "avg_and_stddev")
     with open("./tests/cpp/generated/AvgAndStddev.cpp", 'w') as f:
         f.write(src)
 
@@ -28,7 +28,7 @@ def check_rank():
         inp1 = Input("a")
         out2 = Output(Rank(inp1), "ou2")
     f = Function(builder.ops)
-    src = compileit(f, "test_rank", 8, 8)
+    src = compileit(f, "test_rank")
     with open("./tests/cpp/generated/TestRank.cpp", 'w') as f:
         f.write(src)
 
@@ -41,7 +41,7 @@ def check_rank2():
         v3 = Add(v2, v1)
         Output(v3, "out")
     f = Function(builder.ops)
-    src = compileit(f, "test_rank2", 8, 8)
+    src = compileit(f, "test_rank2")
     with open("./tests/cpp/generated/TestRank2.cpp", 'w') as f:
         f.write(src)
 
@@ -51,7 +51,7 @@ def check_log():
         inp1 = Input("a")
         Output(Log(inp1), "outlog")
     f = Function(builder.ops)
-    src = compileit(f, "test_log", 8, 8)
+    src = compileit(f, "test_log")
     with open("./tests/cpp/generated/TestLog.cpp", 'w') as f:
         f.write(src)
 
@@ -62,12 +62,12 @@ def check_alpha101():
         for f in all_alpha:
             f(all_data)
     f = Function(builder.ops)
-    src = compileit(f, "alpha_101", 8, 8, 4)
+    src = compileit(f, "alpha_101", output_layout="ST8s")
     with open("./tests/cpp/generated/Alpha101.cpp", 'w') as f:
         f.write(src)
 
-#check_1()
-#check_rank()
-#check_rank2()
-#check_log()
+check_1()
+check_rank()
+check_rank2()
+check_log()
 check_alpha101()
