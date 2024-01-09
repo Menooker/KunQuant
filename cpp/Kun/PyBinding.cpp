@@ -19,7 +19,7 @@ PYBIND11_MODULE(KunRunner, m) {
              py::return_value_policy::reference);
     m.def("runGraph", [](std::shared_ptr<kun::Executor> exec,
                          const kun::Module *mod, const py::dict inputs,
-                         size_t cur_time, size_t length) {
+                         size_t cur_time, size_t length, const py::dict outputs) {
         std::unordered_map<std::string, float *> bufs;
         py::ssize_t known_S = 0;
         py::ssize_t known_T = 0;
@@ -59,11 +59,24 @@ PYBIND11_MODULE(KunRunner, m) {
             bufs[name] = (float *)info.ptr;
         }
         py::dict ret{};
+        py::array::ShapeContainer expected_out_shape;
+        if (mod->layout == kun::OutputLayout::ST8s) {
+            expected_out_shape = {known_S, known_T, (py::ssize_t) kun::simd_len};
+        } else {
+            expected_out_shape = {known_T, known_S * (py::ssize_t) kun::simd_len};
+        }
         for (size_t i = 0; i < mod->num_buffers; i++) {
             auto &buf = mod->buffers[i];
             if (buf.kind == kun::BufferKind::OUTPUT) {
-                py::array_t<float, py::array::c_style> outbuffer{
-                    py::array::ShapeContainer{known_S, known_T, (py::ssize_t) kun::simd_len}};
+                py::array_t<float, py::array::c_style> outbuffer;
+                if (outputs.contains(buf.name)) {
+                    outbuffer = outputs[buf.name].cast<py::array_t<float, py::array::c_style>>();
+                    if (outbuffer.ndim() != expected_out_shape->size()) {
+                        
+                    }
+                } else {
+                    outbuffer = py::array_t<float, py::array::c_style>{expected_out_shape};
+                }
                 ret[buf.name] = outbuffer;
                 bufs[buf.name] = (float *)outbuffer.request().ptr;
             }
