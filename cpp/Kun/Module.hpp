@@ -7,7 +7,7 @@ namespace kun {
 
 enum class OutputLayout {
     ST8s,
-    FTS,
+    TS,
 };
 
 struct Module {

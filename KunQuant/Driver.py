@@ -41,7 +41,7 @@ class _Partition:
     is_rank = False
 
 def compileit(f: Function, module_name: str, partition_factor = 4, output_layout = "ST8s"):
-    if output_layout not in ["ST8s", "FTS"]:
+    if output_layout not in ["ST8s", "TS"]:
         raise RuntimeError("Bad output_layout name " + output_layout)
     input_name_to_idx: Dict[str, int] = dict()
     buffer_names: List[_Buffer] = []

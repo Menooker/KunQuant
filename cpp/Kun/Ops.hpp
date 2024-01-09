@@ -60,6 +60,32 @@ struct OutputST8s : DataSource<true> {
     }
 };
 
+struct OutputTS : DataSource<true> {
+    constexpr static size_t stride = 8;
+    float *buf;
+    size_t stock_idx;
+    size_t num_stock;
+    OutputTS(float *base, size_t stock_idx, size_t num_stock)
+        : buf{base}, stock_idx{stock_idx}, num_stock{num_stock} {}
+        
+    float* getPtr(size_t index) {
+        return &buf[index * num_stock + stride * stock_idx];
+    }
+    void store(size_t index, const f32x8 &v) {
+        _mm256_storeu_ps(getPtr(index), v);
+    }
+
+    f32x8 getWindow(size_t index, size_t offset) {
+        if (index < offset) {
+            return _mm256_set1_ps(NAN);
+        }
+        return _mm256_loadu_ps(getPtr(index - offset));
+    }
+    f32x8 getWindowUnordered(size_t index, size_t offset) {
+        return getWindow(index, offset);
+    }
+};
+
 template <size_t window>
 struct OutputWindow : DataSource<true> {
     constexpr static size_t stride = 8;
