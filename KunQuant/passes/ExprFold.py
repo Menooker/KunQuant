@@ -28,7 +28,7 @@ def fold_impl(ops: List[OpBase]) -> List[OpBase]:
     return None
 
 @kun_pass
-def expr_fold(f: Function):
+def expr_fold(f: Function, options: dict = {}):
     newops = fold_impl(f.ops)
     if newops is not None:
         f.set_ops(newops)

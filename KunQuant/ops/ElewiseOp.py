@@ -28,6 +28,9 @@ class Add(BinaryElementwiseOp):
 class Sub(BinaryElementwiseOp):
     pass
 
+class Or(BinaryElementwiseOp):
+    pass
+
 class Div(BinaryElementwiseOp):
     pass
 

@@ -43,7 +43,7 @@ def decompose_impl(ops: List[OpBase]) -> List[OpBase]:
     return None
 
 @kun_pass
-def decompose(f: Function):
+def decompose(f: Function, options: dict = {}):
     newops = decompose_impl(f.ops)
     f.strict_window = True
     if newops is not None:

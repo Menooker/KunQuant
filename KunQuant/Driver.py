@@ -7,19 +7,19 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from KunQuant.passes import Util as PassUtil
 
-def optimize(f: Function)->None:
+def optimize(f: Function, options: dict)->None:
     if PassUtil.debug_mode:
         print("Before optimize: ", f)
-    decompose(f)
-    expr_fold(f)
-    temp_window_elim(f)
-    special_optimize(f)
+    decompose(f, options)
+    expr_fold(f, options)
+    temp_window_elim(f, options)
+    special_optimize(f, options)
 
-def post_optimize(impl: List[Function])->None:
+def post_optimize(impl: List[Function], options: dict)->None:
     if PassUtil.debug_mode:
         print("Post optimize:","=====================")
     for f in impl:
-        temp_window_elim(f)
+        temp_window_elim(f, options)
 
 @dataclass
 class _Buffer:
@@ -40,7 +40,7 @@ class _Partition:
     num_in_dep = 0
     is_rank = False
 
-def compileit(f: Function, module_name: str, partition_factor = 4, output_layout = "ST8s"):
+def compileit(f: Function, module_name: str, partition_factor = 3, output_layout = "ST8s", options = {}):
     if output_layout not in ["ST8s", "TS"]:
         raise RuntimeError("Bad output_layout name " + output_layout)
     input_name_to_idx: Dict[str, int] = dict()
@@ -74,9 +74,9 @@ def compileit(f: Function, module_name: str, partition_factor = 4, output_layout
         elif isinstance(op, Output):
             insert_name(op, "OUTPUT")
 
-    optimize(f)
-    mainf, impl = do_partition(f, partition_factor)
-    post_optimize(impl)
+    optimize(f, options)
+    mainf, impl = do_partition(f, partition_factor, options)
+    post_optimize(impl, options)
 
     impl_src = ['''#include <Kun/Context.hpp>
 #include <Kun/Module.hpp>
@@ -101,7 +101,7 @@ using namespace kun::ops;
                 pouts.append(buf)
                 outs.append(op)
                 set_buffer_layout(op, buf)
-        src = codegen_cpp(func, input_name_to_idx, ins, outs)
+        src = codegen_cpp(func, input_name_to_idx, ins, outs, options)
         impl_src.append(src)
         newparti = _Partition(func.name, len(partitions), pins, pouts)
         if len(func.ops) == 3 and isinstance(func.ops[1], Rank):

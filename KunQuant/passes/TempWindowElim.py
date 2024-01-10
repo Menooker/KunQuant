@@ -43,7 +43,7 @@ def temp_window_elim_impl(ops: List[OpBase], f: Function) -> List[OpBase]:
     return None
 
 @kun_pass
-def temp_window_elim(f: Function):
+def temp_window_elim(f: Function, options: dict = {}):
     newops = temp_window_elim_impl(f.ops, f)
     if newops is not None:
         newops = Function.topo_sort_ops(newops)

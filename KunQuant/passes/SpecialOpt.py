@@ -4,7 +4,9 @@ from KunQuant.ops import ReduceAdd, FastWindowedSum, SubConst, MulConst
 from KunQuant.Stage import Function
 from typing import List, Dict, Tuple
 
-def _is_ok_for_reduce_opt(op: OpBase) -> Tuple[OpBase, int]:
+def _is_ok_for_reduce_opt(op: OpBase, enabled: bool) -> Tuple[OpBase, int]:
+    if not enabled:
+        return None
     if not isinstance(op, ReduceAdd):
         return None
     if op.get_parent() is not None:
@@ -19,7 +21,7 @@ def _is_ok_for_reduce_opt(op: OpBase) -> Tuple[OpBase, int]:
     window = loop.attrs["window"]
     return window_data, window
 
-def special_impl(ops: List[OpBase]) -> List[OpBase]:
+def special_impl(ops: List[OpBase], options: dict = {}) -> List[OpBase]:
     replace_map = dict()
     out = []
     changed = False
@@ -33,7 +35,7 @@ def special_impl(ops: List[OpBase]) -> List[OpBase]:
             replace_map[op] = newop
             continue
         # if it is reduce-sum in non-loop context
-        result = _is_ok_for_reduce_opt(op)
+        result = _is_ok_for_reduce_opt(op, options.get("opt_reduce", True))
         if result is None:
             out.append(op)
             continue
@@ -52,7 +54,7 @@ def special_impl(ops: List[OpBase]) -> List[OpBase]:
     return None
 
 @kun_pass
-def special_optimize(f: Function):
+def special_optimize(f: Function, options: dict = {}):
     '''
     Optimize:
     y = ...
@@ -65,6 +67,6 @@ def special_optimize(f: Function):
 
     And Mul(-1) => Sub(0, X)
     '''
-    newops = special_impl(f.ops)
+    newops = special_impl(f.ops, options)
     if newops is not None:
         f.set_ops(newops)

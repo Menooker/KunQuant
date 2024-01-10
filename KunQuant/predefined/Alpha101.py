@@ -31,6 +31,12 @@ def ts_rank(v: OpBase, window: int) -> OpBase:
 def ts_sum(v: OpBase, window: int) -> OpBase:
     return WindowedSum(v, window)
 
+def ts_min(v: OpBase, window: int) -> OpBase:
+    return WindowedMin(v, window)
+
+def ts_max(v: OpBase, window: int) -> OpBase:
+    return WindowedMax(v, window)
+
 def correlation(v1: OpBase, v2: OpBase, window: int) -> OpBase:
     return WindowedCorrelation(v1, window, v2)
 
@@ -82,4 +88,20 @@ def alpha008(d: AllData):
     v = rank(Sub(Mul(ts_sum(d.open, 5), ts_sum(d.returns, 5)), BackRef(Mul(ts_sum(d.open, 5), ts_sum(d.returns, 5)), 10)))
     Output(MulConst(v, -1), "alpha008")
 
-all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008]
+def alpha009(d: AllData):
+    delta_close = delta(d.close, 1)
+    cond_1 = GreaterThan(ts_min(delta_close, 5), ConstantOp(0))
+    cond_2 = LessThan(ts_max(delta_close, 5), ConstantOp(0))
+    alpha = MulConst(delta_close, -1)
+    alpha = Select(Or(cond_1, cond_2), delta_close, alpha)
+    Output(alpha, "alpha009")
+
+def alpha010(d: AllData):
+    delta_close = delta(d.close, 1)
+    cond_1 = GreaterThan(ts_min(delta_close, 4), ConstantOp(0))
+    cond_2 = LessThan(ts_max(delta_close, 4), ConstantOp(0))
+    alpha = MulConst(delta_close, -1)
+    alpha = Select(Or(cond_1, cond_2), delta_close, alpha)
+    Output(alpha, "alpha010")
+
+all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010]
