@@ -12,8 +12,9 @@ def optimize(f: Function, options: dict)->None:
         print("Before optimize: ", f)
     decompose(f, options)
     expr_fold(f, options)
-    temp_window_elim(f, options)
     special_optimize(f, options)
+    decompose_rank(f, options)
+    temp_window_elim(f, options)
 
 def post_optimize(impl: List[Function], options: dict)->None:
     if PassUtil.debug_mode:

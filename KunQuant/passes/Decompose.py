@@ -28,7 +28,19 @@ def decompose_impl(ops: List[OpBase]) -> List[OpBase]:
                     op.inputs[idx] = newin
                     out.append(newin)
             out.append(op)
-        elif isinstance(op, Rank):
+        else:
+            out.append(op)
+    if changed:
+        return out
+    return None
+
+def decompose_rank_impl(ops: List[OpBase]) -> List[OpBase]:
+    replace_map = dict()
+    out = []
+    changed = False
+    for op in ops:
+        op.replace_inputs(replace_map)
+        if isinstance(op, Rank):
             inp = op.inputs[0]
             if not isinstance(inp, Input):
                 changed = True
@@ -48,5 +60,10 @@ def decompose(f: Function, options: dict = {}):
     f.strict_window = True
     if newops is not None:
         f.set_ops(newops)
-    
+
+@kun_pass
+def decompose_rank(f: Function, options: dict = {}):
+    newops = decompose_rank_impl(f.ops)
+    if newops is not None:
+        f.set_ops(newops)
             
