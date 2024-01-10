@@ -1,4 +1,4 @@
-from KunQuant.Op import OpBase, Output, Input, Rank, GraphSourceTrait, ConstantOp
+from KunQuant.Op import OpBase, Output, Input, Rank, GraphSourceTrait, ConstantOp, ReductionOp
 from KunQuant.Stage import Function, OpInfo
 from KunQuant.ops import GenericPartition
 from typing import List, Dict, Set, Tuple
@@ -113,7 +113,7 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
         if connected_to_parti:
             cur_cost -= 100000
         # need to run the ops in the loop as soon as possible
-        if op.get_parent() is not None:
+        if op.get_parent() is not None or isinstance(op, ReductionOp):
             cur_cost -= 10000
         cur_cost += idx * -10
         cur_cost += len(op_info.depender)
@@ -271,6 +271,6 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
     out_stages = Function.topo_sort_ops(out_stages)
     return Function(out_stages), out_impl
 
-def do_partition(f: Function, factor: int) -> Tuple[Function, List[Function]]:
+def do_partition(f: Function, factor: int, options: dict = {}) -> Tuple[Function, List[Function]]:
     partitions = _partition(f, factor)
     return _transform_partitions(partitions, f)

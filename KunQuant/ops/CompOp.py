@@ -1,4 +1,4 @@
-from .ReduceOp import ReduceAdd, ReduceArgMax, ReduceRank
+from .ReduceOp import ReduceAdd, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax
 from KunQuant.Op import OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
 from .ElewiseOp import DivConst, Sub, Mul, Sqrt, SubConst, Div, CmpOp
 from collections import OrderedDict
@@ -11,15 +11,30 @@ class WindowedCompositiveOp(CompositiveOp, WindowedTrait):
             inputs.append(v2)
         super().__init__(inputs, [("window", window)])
 
-class WindowedSum(WindowedCompositiveOp):
+class WindowedReduce(WindowedCompositiveOp):
+    def make_reduce(self, v: OpBase) -> OpBase:
+        raise RuntimeError("Not implemented")
+    
     def decompose(self) -> List[OpBase]:
         b = Builder(self.get_parent())
         with b:
             v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
             v1 = ForeachBackWindow(v0, self.attrs["window"])
             itr = IterValue(v1, v0)
-            v2 = ReduceAdd(itr)
+            v2 = self.make_reduce(itr)
         return b.ops
+
+class WindowedSum(WindowedReduce):
+    def make_reduce(self, v: OpBase) -> OpBase:
+        return ReduceAdd(v)
+    
+class WindowedMin(WindowedReduce):
+    def make_reduce(self, v: OpBase) -> OpBase:
+        return ReduceMin(v)
+    
+class WindowedMax(WindowedReduce):
+    def make_reduce(self, v: OpBase) -> OpBase:
+        return ReduceMax(v)
 
 class WindowedAvg(WindowedCompositiveOp):
     def decompose(self) -> List[OpBase]:

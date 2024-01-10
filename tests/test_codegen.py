@@ -62,7 +62,7 @@ def check_alpha101():
         for f in all_alpha:
             f(all_data)
     f = Function(builder.ops)
-    src = compileit(f, "alpha_101", output_layout="TS")
+    src = compileit(f, "alpha_101", output_layout="TS", options={"opt_reduce": False, "fast_log": False})
     with open("./tests/cpp/generated/Alpha101.cpp", 'w') as f:
         f.write(src)
 

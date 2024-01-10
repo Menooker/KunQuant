@@ -9,7 +9,7 @@
 namespace kun {
 namespace ops {
 
-inline f32x8 Log(f32x8 v) {
+inline f32x8 LogFast(f32x8 v) {
     return kun_simd::log<float, 8>(v);
 }
 

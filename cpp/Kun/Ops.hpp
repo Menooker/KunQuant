@@ -43,7 +43,8 @@ struct InputST8s : DataSource<true> {
 struct OutputST8s : DataSource<true> {
     constexpr static size_t stride = 8;
     float *buf;
-    OutputST8s(float *base, size_t stock_idx, size_t length, size_t start)
+    OutputST8s(float *base, size_t stock_idx, size_t num_stock, size_t length,
+               size_t start)
         : buf{base + stock_idx * length * stride} {}
     void store(size_t index, const f32x8 &v) {
         _mm256_storeu_ps(&buf[index * stride], v);
@@ -65,10 +66,11 @@ struct OutputTS : DataSource<true> {
     float *buf;
     size_t stock_idx;
     size_t num_stock;
-    OutputTS(float *base, size_t stock_idx, size_t num_stock)
+    OutputTS(float *base, size_t stock_idx, size_t num_stock, size_t length,
+             size_t start)
         : buf{base}, stock_idx{stock_idx}, num_stock{num_stock} {}
-        
-    float* getPtr(size_t index) {
+
+    float *getPtr(size_t index) {
         return &buf[index * num_stock + stride * stock_idx];
     }
     void store(size_t index, const f32x8 &v) {
@@ -191,6 +193,10 @@ inline f32x8 LessThan(f32x8 a, f32x8 b) {
     return _mm256_cmp_ps(a, b, _CMP_LT_OQ);
 }
 
+inline f32x8 GreaterThan(f32x8 a, f32x8 b) {
+    return _mm256_cmp_ps(a, b, _CMP_GT_OQ);
+}
+
 inline f32x8 GreaterEqual(f32x8 a, f32x8 b) {
     return _mm256_cmp_ps(a, b, _CMP_GE_OQ);
 }
@@ -259,6 +265,8 @@ inline f32x8 Div(f32x8 a, float b) {
     return _mm256_div_ps(a, _mm256_set1_ps(b));
 }
 
+inline f32x8 Or(f32x8 a, f32x8 b) { return _mm256_or_ps(a, b); }
+
 inline f32x8 Sqrt(f32x8 a) { return _mm256_sqrt_ps(a); }
 
 inline f32x8 constVec(float v) { return _mm256_set1_ps(v); }
@@ -273,14 +281,14 @@ inline f32x8 Sign(f32x8 in) {
     return v1;
 }
 
-// inline f32x8 Log(f32x8 a) {
-//     alignas(32) float v[8];
-//     _mm256_store_ps(v, a);
-//     for (int i = 0; i < 8; i++) {
-//         v[i] = std::log(v[i]);
-//     }
-//     return _mm256_load_ps(v);
-// }
+inline f32x8 Log(f32x8 a) {
+    alignas(32) float v[8];
+    _mm256_store_ps(v, a);
+    for (int i = 0; i < 8; i++) {
+        v[i] = std::log(v[i]);
+    }
+    return _mm256_load_ps(v);
+}
 
 inline f32x8 SetInfOrNanToZero(f32x8 a) {
     auto mask = isNAN(_mm256_sub_ps(a, a));

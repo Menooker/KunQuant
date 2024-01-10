@@ -59,7 +59,7 @@ def _get_buffer_name(op: OpBase, idx: int) -> str:
 
 vector_len = 8
 
-def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Input], outputs: List[Output]) -> str:
+def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Input], outputs: List[Output], options: dict) -> str:
     if len(f.ops) == 3 and isinstance(f.ops[1], Rank):
         return f'''static auto stage_{f.name} = RankStocks{f.ops[0].attrs["layout"]}_{f.ops[2].attrs["layout"]};'''
     header = f'''void stage_{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
@@ -75,10 +75,10 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Inp
 
     for idx, outp in enumerate(outputs):
         name = outp.attrs["name"]
-        layout = inp.attrs["layout"]
+        layout = outp.attrs["layout"]
         idx_in_ctx = input_name_to_idx[name]
         buffer_type[outp] = f"Output{layout}"
-        code = f"Output{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __length, __start}};"
+        code = f"Output{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, __length, __start}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
     for op in f.ops:
         if op.get_parent() is None and isinstance(op, WindowedTempOutput):
@@ -109,6 +109,9 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Inp
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = v{inp[0]};"))
         elif isinstance(op, ConstantOp):
             scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = constVec({op.attrs["value"]});'))
+        elif isinstance(op, Log):
+            funcname = "LogFast" if options.get("fast_log", True) else "Log"
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}(v{inp[0]});'))
         elif isinstance(op, BinaryConstOp):
             assert(op.__class__.__name__.endswith("Const"))
             thename = op.__class__.__name__.replace("Const", "")

@@ -112,5 +112,11 @@ KUN_API std::shared_ptr<Executor> createSingleThreadExecutor();
 namespace ops {
    KUN_API void RankStocksST8s_ST8s(RuntimeStage *stage, size_t __stock_idx,
                          size_t __total_time, size_t __start, size_t __length);
+   KUN_API void RankStocksST8s_TS(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
+   KUN_API void RankStocksTS_ST8s(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
+   KUN_API void RankStocksTS_TS(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
 }
 } // namespace kun

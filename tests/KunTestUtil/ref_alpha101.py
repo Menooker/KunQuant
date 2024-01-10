@@ -195,8 +195,8 @@ def get_alpha(df):
         df['alpha006']=stock.alpha006()
         df['alpha007']=stock.alpha007()
         df['alpha008']=stock.alpha008()
-        # df['alpha009']=stock.alpha009()
-        # df['alpha010']=stock.alpha010()
+        df['alpha009']=stock.alpha009()
+        df['alpha010']=stock.alpha010()
         # df['alpha011']=stock.alpha011()
         # df['alpha012']=stock.alpha012()
         # df['alpha013']=stock.alpha013()
@@ -281,7 +281,7 @@ class Alphas(object):
         self.volume: pd.DataFrame = df_data['S_DQ_VOLUME']
         self.returns = self.close.pct_change() #df_data['S_DQ_PCTCHANGE']
         self.vwap = (df_data['S_DQ_AMOUNT'])/(self.volume + 1)
-        
+
     # Alpha#1	 (rank(Ts_ArgMax(SignedPower(((returns < 0) ? stddev(returns, 20) : close), 2.), 5)) -0.5)
     def alpha001(self):
         inner = self.close.copy()
@@ -292,7 +292,7 @@ class Alphas(object):
     def alpha002(self):
         df = -1 * correlation(rank(delta(log(self.volume), 2)), rank((self.close - self.open) / self.open), 6)
         return df.replace([-np.inf, np.inf], 0).fillna(value=0)
-    
+
     # Alpha#3	 (-1 * correlation(rank(open), rank(volume), 10))
     def alpha003(self):
         df = -1 * correlation(rank(self.open), rank(self.volume), 10)
