@@ -1,6 +1,6 @@
 from .ReduceOp import ReduceAdd, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax
-from KunQuant.Op import OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
-from .ElewiseOp import DivConst, Sub, Mul, Sqrt, SubConst, Div, CmpOp
+from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
+from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, Sub, Mul, Sqrt, SubConst, Div, CmpOp
 from collections import OrderedDict
 from typing import Union, List, Tuple
 
@@ -123,4 +123,19 @@ class TsRank(WindowedCompositiveOp):
             v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
             v1 = ForeachBackWindow(v0, self.attrs["window"])
             v2 = ReduceRank(IterValue(v1, v0), self.inputs[0])
+        return b.ops
+
+class ClipZero(CompositiveOp):
+    def __init__(self, v: OpBase, eps: float) -> None:
+        inputs = [v]
+        super().__init__(inputs, [("value", eps)])
+
+    def decompose(self) -> List[OpBase]:
+        eps = self.attrs["value"]
+        inp = self.inputs[0]
+        b = Builder(self.get_parent())
+        with b:
+            v0 = LessThan(inp, ConstantOp(eps))
+            v1 = GreaterThan(inp, ConstantOp(-eps))
+            out = Select(And(v0, v1), ConstantOp(0), inp)
         return b.ops

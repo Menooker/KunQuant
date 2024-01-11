@@ -130,6 +130,9 @@ def alpha015(d: AllData):
     df = SetInfOrNanToZero(correlation(rank(d.high), rank(d.volume), 3))
     Output(-1 * ts_sum(rank(df), 3), "alpha015")
 
+def alpha016(d: AllData):
+    Output(-1 * rank(covariance(rank(d.high), rank(d.volume), 5)), "alpha016")
+
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
-    alpha011, alpha012, alpha013, alpha014, alpha015
+    alpha011, alpha012, alpha013, alpha014, alpha015, alpha016
     ]

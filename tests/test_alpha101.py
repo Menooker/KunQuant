@@ -92,11 +92,9 @@ def test(num_time):
         print(k)
         cur_rtol = rtol
         cur_atol = atol
-        if k == "alpha013":
+        if k in ["alpha013", "alpha015", "alpha016"]:
             # alpha013 has rank(cov(rank(X), rank(Y))). Output of cov seems to have very similar results
             # like 1e-6 and 0. Thus the rank result will be different
-            cur_atol = 0.49
-        elif k == "alpha015":
             cur_atol = 0.49
         v = out[k]
         refv = ref[k].to_numpy().transpose()

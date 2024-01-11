@@ -202,7 +202,7 @@ def get_alpha(df):
         df['alpha013']=stock.alpha013()
         df['alpha014']=stock.alpha014()
         df['alpha015']=stock.alpha015()
-        # df['alpha016']=stock.alpha016()
+        df['alpha016']=stock.alpha016()
         # df['alpha017']=stock.alpha017()
         # df['alpha018']=stock.alpha018()
         # df['alpha019']=stock.alpha019()

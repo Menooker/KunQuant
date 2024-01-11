@@ -266,6 +266,7 @@ inline f32x8 Div(f32x8 a, float b) {
 }
 
 inline f32x8 Or(f32x8 a, f32x8 b) { return _mm256_or_ps(a, b); }
+inline f32x8 And(f32x8 a, f32x8 b) { return _mm256_and_ps(a, b); }
 
 inline f32x8 Sqrt(f32x8 a) { return _mm256_sqrt_ps(a); }
 
