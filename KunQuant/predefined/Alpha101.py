@@ -49,6 +49,9 @@ def rank(v: OpBase)-> OpBase:
 def sign(v: OpBase)-> OpBase:
     return Sign(v)
 
+def covariance(v: OpBase, v2: OpBase, window: int) -> OpBase:
+    return WindowedCovariance(v, window, v2)
+
 def alpha001(d: AllData):
     inner = d.close
     cond = LessThanConst(d.returns, 0.0)
@@ -104,4 +107,20 @@ def alpha010(d: AllData):
     alpha = Select(Or(cond_1, cond_2), delta_close, alpha)
     Output(alpha, "alpha010")
 
-all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010]
+def alpha011(d: AllData):
+    v = ((rank(ts_max((d.vwap - d.close), 3)) + rank(ts_min((d.vwap - d.close), 3))) *rank(delta(d.volume, 3)))
+    Output(v, "alpha011")
+
+# Alpha#12	 (sign(delta(volume, 1)) * (-1 * delta(close, 1)))
+def alpha012(d: AllData):
+    v = sign(delta(d.volume, 1)) * (-1 * delta(d.close, 1))
+    Output(v, "alpha012")
+
+def alpha013(d: AllData):
+    # alpha013 has rank(cov(rank(X), rank(Y))). Output of cov seems to have very similar results
+    # like 1e-6 and 0. Thus the rank result will be different from pandas's reference
+    Output(-1 * rank(covariance(rank(d.close), rank(d.volume), 5)), "alpha013")
+
+all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
+    alpha011, alpha012, alpha013
+    ]

@@ -135,6 +135,34 @@ class OpBase:
                     raise RuntimeError(
                         "verify() failed: referencing cross loop results: " + str(self))
 
+    def _build_op(self, other, TBinary, TConst, isreverse):
+        if type(other) in [int, float]:
+            if isreverse:
+                return TConst(self, other, [("swap", True)])
+            return TConst(self, other)
+        if isinstance(other, OpBase):
+            return TBinary(self, other)
+        raise RuntimeError("Don't know how to build binary " + str(type(other)))
+
+    def __sub__(self, other):
+        from KunQuant.ops.ElewiseOp import SubConst, Sub
+        return self._build_op(other, Sub, SubConst, False)
+
+    def __add__(self, other):
+        from KunQuant.ops.ElewiseOp import Add, AddConst
+        return self._build_op(other, Add, AddConst, False)
+
+    def __rmul__(self, other):
+        from KunQuant.ops.ElewiseOp import Mul, MulConst
+        return self._build_op(other, Mul, MulConst, True)
+
+    def __mul__(self, other):
+        from KunQuant.ops.ElewiseOp import Mul, MulConst
+        return self._build_op(other, Mul, MulConst, False)
+    
+    def __truediv__ (self, other):
+        from KunQuant.ops.ElewiseOp import Div, DivConst
+        return self._build_op(other, Div, DivConst, False)
 
 class GraphSourceTrait:
     pass

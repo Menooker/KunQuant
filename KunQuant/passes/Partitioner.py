@@ -164,6 +164,15 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
                 partition.add(opinfo, selected)
                 # print("@@@add ", selected)
             if partition.num_outputs > partition_thres:
+                # if an output is directly connected with the partition, add it
+                direct_output = None
+                for candidate, bat in ready_ops:
+                    if isinstance(candidate, Output):
+                        direct_output = candidate
+                        break
+                if direct_output is not None:
+                    selected = direct_output
+                    continue
                 # too many outputs visited, make a new partition
                 break
             selected = _select_next(ready_ops, opinfo, partition, f)

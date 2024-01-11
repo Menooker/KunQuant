@@ -59,7 +59,27 @@ class WindowedStddev(WindowedCompositiveOp):
             vsum = ReduceAdd(sqr)
             out = Sqrt(DivConst(vsum, window - 1))
         return b.ops
-    
+
+class WindowedCovariance(WindowedCompositiveOp):
+    def decompose(self) -> List[OpBase]:
+        window = self.attrs["window"]
+        x = self.inputs[0]
+        y = self.inputs[1]
+        b = Builder(self.get_parent())
+        with b:
+            avgX = WindowedAvg(x, window)
+            avgY = WindowedAvg(y, window)
+            wX = WindowedTempOutput(x, window)
+            wY = WindowedTempOutput(y, window)
+            each = ForeachBackWindow(wX, window, wY)
+            b.set_loop(each)
+            diffX = Sub(IterValue(each, wX), avgX)
+            diffY = Sub(IterValue(each, wY), avgY)
+            xy = Mul(diffX, diffY)
+            b.set_loop(self.get_parent())
+            vsum1 = ReduceAdd(xy) / (window-1)
+        return b.ops
+
 class WindowedCorrelation(WindowedCompositiveOp):
     def decompose(self) -> List[OpBase]:
         window = self.attrs["window"]
@@ -85,6 +105,7 @@ class WindowedCorrelation(WindowedCompositiveOp):
             sum_xy = Mul(vsum_x, vsum_y)
             out = Div(vsum1, sum_xy)
         return b.ops
+
 class TsArgMax(WindowedCompositiveOp):
     def decompose(self) -> List[OpBase]:
         b = Builder(self.get_parent())

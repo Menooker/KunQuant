@@ -1,5 +1,5 @@
 from KunQuant.ops.MiscOp import BackRef
-from KunQuant.ops.ElewiseOp import AddConst, Sqrt, Sub, Log, Div
+from KunQuant.ops.ElewiseOp import AddConst, DivConst, Sqrt, Sub, Log, Div
 from KunQuant.passes.Util import kun_pass
 from KunQuant.Op import Builder, OpBase, ForeachBackWindow, Rank, WindowedTempOutput, Output, IterValue
 from KunQuant.ops import ReduceAdd, FastWindowedSum, SubConst, MulConst
@@ -51,6 +51,8 @@ def _is_mul_1(op: OpBase) -> OpBase:
     return None
 
 _monotonic_ops = {Sqrt, Log}
+_monotonic_add = {AddConst, MulConst}
+_monotonic_sub = {SubConst, DivConst}
 def _is_rank_monotonic_inc(op: OpBase) -> OpBase:
     '''
     check if is Rank(T(x)) where T is monotonicly increasing
@@ -60,7 +62,10 @@ def _is_rank_monotonic_inc(op: OpBase) -> OpBase:
     internal = op.inputs[0]
     if internal.__class__ in _monotonic_ops:
         return Rank(internal.inputs[0])
-    
+    if internal.__class__ in _monotonic_sub and not internal.attrs.get("swap") and internal.attrs["value"] > 0:
+        return Rank(internal.inputs[0])
+    if internal.__class__ in _monotonic_add and internal.attrs["value"] > 0:
+        return Rank(internal.inputs[0])
     return None
 
 def special_impl(ops: List[OpBase], options: dict = {}) -> List[OpBase]:
