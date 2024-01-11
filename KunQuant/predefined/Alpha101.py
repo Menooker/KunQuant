@@ -121,6 +121,15 @@ def alpha013(d: AllData):
     # like 1e-6 and 0. Thus the rank result will be different from pandas's reference
     Output(-1 * rank(covariance(rank(d.close), rank(d.volume), 5)), "alpha013")
 
+def alpha014(d: AllData):
+    df = SetInfOrNanToZero(correlation(d.open, d.volume, 10))
+    Output(-1 * (rank(delta(d.returns, 3)) * df), "alpha014")
+
+def alpha015(d: AllData):
+    # due to corr on Rank data, the rank result will be different from pandas's reference
+    df = SetInfOrNanToZero(correlation(rank(d.high), rank(d.volume), 3))
+    Output(-1 * ts_sum(rank(df), 3), "alpha015")
+
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
-    alpha011, alpha012, alpha013
+    alpha011, alpha012, alpha013, alpha014, alpha015
     ]

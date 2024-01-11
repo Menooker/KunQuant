@@ -58,7 +58,7 @@ def check_log():
 def check_alpha101():
     builder = Builder()
     with builder:
-        all_data = AllData(low=Input("low"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
+        all_data = AllData(low=Input("low"),high=Input("high"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
         for f in all_alpha:
             f(all_data)
     f = Function(builder.ops)

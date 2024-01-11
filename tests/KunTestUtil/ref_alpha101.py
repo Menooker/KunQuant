@@ -200,8 +200,8 @@ def get_alpha(df):
         df['alpha011']=stock.alpha011()
         df['alpha012']=stock.alpha012()
         df['alpha013']=stock.alpha013()
-        # df['alpha014']=stock.alpha014()
-        # df['alpha015']=stock.alpha015()
+        df['alpha014']=stock.alpha014()
+        df['alpha015']=stock.alpha015()
         # df['alpha016']=stock.alpha016()
         # df['alpha017']=stock.alpha017()
         # df['alpha018']=stock.alpha018()
@@ -275,7 +275,7 @@ class Alphas(object):
     def __init__(self, df_data):
 
         self.open: pd.DataFrame = df_data['S_DQ_OPEN'] 
-        #self.high = df_data['S_DQ_HIGH'] 
+        self.high = df_data['S_DQ_HIGH'] 
         self.low = df_data['S_DQ_LOW']
         self.close: pd.DataFrame = df_data['S_DQ_CLOSE']
         self.volume: pd.DataFrame = df_data['S_DQ_VOLUME']

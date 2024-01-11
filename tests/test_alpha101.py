@@ -56,14 +56,15 @@ def test(num_time):
     modu = lib.getModule("alpha_101")
     rng = np.random.get_state()
     dopen, dclose, dhigh, dlow, dvol, damount = gen_stock_data(0.5, 100, 16, num_time)
-    my_input = {"low": ST_ST8t(dlow), "close": ST_ST8t(dclose), "open": ST_ST8t(dopen), "volume": ST_ST8t(dvol), "amount": ST_ST8t(damount)}
+    my_input = {"high": ST_ST8t(dhigh), "low": ST_ST8t(dlow), "close": ST_ST8t(dclose), "open": ST_ST8t(dopen), "volume": ST_ST8t(dvol), "amount": ST_ST8t(damount)}
 
     df_dclose = pd.DataFrame(dclose.transpose())
     df_dopen = pd.DataFrame(dopen.transpose())
     df_vol = pd.DataFrame(dvol.transpose())
     df_low = pd.DataFrame(dlow.transpose())
+    df_high = pd.DataFrame(dhigh.transpose())
     df_amount = pd.DataFrame(damount.transpose())
-    ref = ref_alpha101.get_alpha({"S_DQ_LOW": df_low, "S_DQ_CLOSE": df_dclose, 'S_DQ_OPEN': df_dopen, "S_DQ_VOLUME": df_vol, "S_DQ_AMOUNT": df_amount})
+    ref = ref_alpha101.get_alpha({"S_DQ_HIGH": df_high, "S_DQ_LOW": df_low, "S_DQ_CLOSE": df_dclose, 'S_DQ_OPEN': df_dopen, "S_DQ_VOLUME": df_vol, "S_DQ_AMOUNT": df_amount})
 
     # prepare outputs
     outnames = modu.getOutputNames()
@@ -94,6 +95,8 @@ def test(num_time):
         if k == "alpha013":
             # alpha013 has rank(cov(rank(X), rank(Y))). Output of cov seems to have very similar results
             # like 1e-6 and 0. Thus the rank result will be different
+            cur_atol = 0.49
+        elif k == "alpha015":
             cur_atol = 0.49
         v = out[k]
         refv = ref[k].to_numpy().transpose()
