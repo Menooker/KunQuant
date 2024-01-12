@@ -40,6 +40,7 @@ PYBIND11_MODULE(KunRunner, m) {
 
     py::class_<kun::Executor, std::shared_ptr<kun::Executor>>(m, "Executor");
     m.def("createSingleThreadExecutor", &kun::createSingleThreadExecutor);
+    m.def("createMultiThreadExecutor", &kun::createMultiThreadExecutor);
 
     py::class_<kun::Module>(m, "Module")
         .def_property_readonly("output_layout", [](kun::Module& mod){

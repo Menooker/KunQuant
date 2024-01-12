@@ -29,7 +29,12 @@ struct KUN_API RuntimeStage {
 
     bool doJob();
 
-    size_t getNumTasks() ;
+    bool hasJobToDo() const {
+        auto cur_idx = doing_index.load();
+        auto num_tasks = getNumTasks();
+        return (cur_idx < num_tasks);
+    }
+    size_t getNumTasks() const;
 
     void reset(Context *ctx) {
         pending = stage->orig_pending;
@@ -44,7 +49,7 @@ struct KUN_API RuntimeStage {
 struct KUN_API Executor {
     virtual void enqueue(RuntimeStage *stage) = 0;
     virtual void dequeue(RuntimeStage *stage) = 0;
-    virtual bool takeSingleJob() = 0;
+    // virtual bool takeSingleJob() = 0;
     virtual void runUntilDone() = 0;
     virtual ~Executor() = default;
 };
@@ -109,6 +114,7 @@ struct Context {
 };
 
 KUN_API std::shared_ptr<Executor> createSingleThreadExecutor();
+KUN_API std::shared_ptr<Executor> createMultiThreadExecutor(int num_threads);
 namespace ops {
    KUN_API void RankStocksST8s_ST8s(RuntimeStage *stage, size_t __stock_idx,
                          size_t __total_time, size_t __start, size_t __length);

@@ -9,39 +9,11 @@
 
 namespace kun {
 
-struct SingleThreadExecutor : Executor {
-    std::list<RuntimeStage *> q;
-    virtual void enqueue(RuntimeStage *stage) override { q.push_front(stage); }
-
-    virtual void dequeue(RuntimeStage *stage) override {
-        q.erase(std::find(q.begin(), q.end(), stage));
-    }
-
-    bool takeSingleJob() override {
-        if (q.empty()) {
-            return false;
-        }
-        return q.front()->doJob();
-    }
-
-    void runUntilDone() override {
-        while (takeSingleJob()) {
-            /* code */
-        }
-    }
-
-    ~SingleThreadExecutor() = default;
-};
-
-std::shared_ptr<Executor> createSingleThreadExecutor() {
-    return std::make_shared<SingleThreadExecutor>();
-}
-
 static size_t divideAndCeil(size_t x, size_t y) {
     return (x + y - 1) / y;
 }
 
-size_t RuntimeStage::getNumTasks() {
+size_t RuntimeStage::getNumTasks() const {
     return stage->kind == TaskExecKind::SLICE_BY_STOCK
                 ? divideAndCeil(ctx->stock_count, simd_len)
                 : divideAndCeil(ctx->length, time_stride);
