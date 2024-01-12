@@ -24,10 +24,10 @@ namespace kun_simd {
 template<>
 struct vec<int32_t, 8> {
 public:
-    union {
+    alignas(32) union {
         __m256i v;
         int32_t raw[8];
-    } __attribute__((aligned(32)));
+    };
 
     INLINE vec() = default;
     INLINE vec(int32_t f) { v = _mm256_set1_epi32(f); }

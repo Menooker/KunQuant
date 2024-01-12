@@ -28,10 +28,10 @@ namespace kun_simd{
 template<>
 struct vec<float, 8> {
 public:
-    union {
+    alignas(32) union {
         __m256 v;
         float raw[8];
-    } __attribute__((aligned(32)));
+    };
 
     INLINE vec() = default;
     INLINE vec(float f) { v = _mm256_set1_ps(f); }
