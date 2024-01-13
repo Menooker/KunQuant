@@ -66,8 +66,8 @@ def check_alpha101():
     with open("./tests/cpp/generated/Alpha101.cpp", 'w') as f:
         f.write(src)
 
-#check_1()
-#check_rank()
-#check_rank2()
-#check_log()
+check_1()
+check_rank()
+check_rank2()
+check_log()
 check_alpha101()

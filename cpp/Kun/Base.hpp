@@ -8,9 +8,9 @@ namespace kun {
 }
 
 #ifdef _MSC_VER
-#define KUN_EXPORT __declspec(dllexport)
+#define KUN_EXPORT extern "C" __declspec(dllexport)
 #ifdef KUN_CORE_LIB
-#define KUN_API KUN_EXPORT
+#define KUN_API __declspec(dllexport)
 #else
 #define KUN_API __declspec(dllimport)
 #endif

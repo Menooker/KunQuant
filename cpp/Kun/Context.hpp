@@ -9,7 +9,7 @@
 #define kunAlignedAlloc(x, y) _aligned_malloc(y, x)
 #define kunAlignedFree(x) _aligned_free(x)
 #else
-#define kunAlignedAlloc(x, y) aligned_malloc(x, y)
+#define kunAlignedAlloc(x, y) aligned_alloc(x, y)
 #define kunAlignedFree(x) free(x)
 #endif
 
