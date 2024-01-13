@@ -6,10 +6,17 @@ include_directories(${pybind11_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/cpp)
 message(STATUS ${pybind11_INCLUDE_DIRS})
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fvisibility=hidden -fvisibility-inlines-hidden -mavx2 -mfma")
+else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4251")
 endif()
 file(GLOB_RECURSE KunRuntimeSrc ${PROJECT_SOURCE_DIR}/cpp/*.cpp)
 pybind11_add_module(KunRunner SHARED ${KunRuntimeSrc})
-target_link_libraries(KunRunner PRIVATE dl)
+
+target_compile_definitions(KunRunner PRIVATE KUN_CORE_LIB=1)
+
+if (NOT WIN32)
+    target_link_libraries(KunRunner PRIVATE dl)
+endif()
 
 
 file(GLOB_RECURSE KunTestSrc ${PROJECT_SOURCE_DIR}/tests/cpp/*.cpp)
