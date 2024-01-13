@@ -55,7 +55,7 @@ struct KUN_API Executor {
 };
 
 struct Buffer {
-    float *ptr;
+    float* __restrict ptr;
     std::atomic<int> refcount;
 
     KUN_API void alloc(size_t count, size_t use_count);

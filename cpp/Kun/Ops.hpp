@@ -23,7 +23,7 @@ inline f32x8 Select(f32x8 cond, f32x8 vtrue, f32x8 vfalse) {
 
 struct InputST8s : DataSource<true> {
     constexpr static size_t stride = 8;
-    float *buf;
+    float * __restrict buf;
     InputST8s(float *base, size_t stock_idx, size_t total_time, size_t start)
         : buf{base + stock_idx * total_time * stride + start * stride} {}
     f32x8 step(size_t index) { return _mm256_loadu_ps(&buf[index * stride]); }
@@ -42,7 +42,7 @@ struct InputST8s : DataSource<true> {
 
 struct OutputST8s : DataSource<true> {
     constexpr static size_t stride = 8;
-    float *buf;
+    float * __restrict buf;
     OutputST8s(float *base, size_t stock_idx, size_t num_stock, size_t length,
                size_t start)
         : buf{base + stock_idx * length * stride} {}
@@ -63,7 +63,7 @@ struct OutputST8s : DataSource<true> {
 
 struct OutputTS : DataSource<true> {
     constexpr static size_t stride = 8;
-    float *buf;
+    float * __restrict buf;
     size_t stock_idx;
     size_t num_stock;
     OutputTS(float *base, size_t stock_idx, size_t num_stock, size_t length,
