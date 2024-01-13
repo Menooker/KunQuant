@@ -4,6 +4,14 @@
 #include <atomic>
 #include <memory>
 #include <stdlib.h>
+#ifdef _WIN32
+#include <malloc.h>
+#define kunAlignedAlloc(x, y) _aligned_malloc(y, x)
+#define kunAlignedFree(x) _aligned_free(x)
+#else
+#define kunAlignedAlloc(x, y) aligned_malloc(x, y)
+#define kunAlignedFree(x) free(x)
+#endif
 
 namespace kun {
 
@@ -60,7 +68,7 @@ struct Buffer {
 
     void alloc(size_t count) {
         if(!ptr) {
-            ptr = (float *)aligned_alloc(32, count * sizeof(float));
+            ptr = (float *)kunAlignedAlloc(32, count * sizeof(float));
             refcount = 0;
         }
     }
@@ -87,7 +95,7 @@ struct Buffer {
     void deref() {
         auto new_cnt = --refcount;
         if (new_cnt == 0) {
-            free(ptr);
+            kunAlignedFree(ptr);
             ptr = nullptr;
         }
     }

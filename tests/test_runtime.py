@@ -2,14 +2,15 @@ import numpy as np
 import pandas as pd
 import sys
 import warnings
+import os
 
-sys.path.append("./build/")
+sys.path.append("./build/Release" if os.name == "nt" else "./build")
 import KunRunner as kr
 
 
 # inp = np.ndarray((3, 100, 8), dtype="float32")
 
-lib = kr.Library.load("./build/libKunTest.so")
+lib = kr.Library.load("./build/Release/KunTest.dll" if os.name == "nt" else "./build/libKunTest.so")
 print(lib)
 
 

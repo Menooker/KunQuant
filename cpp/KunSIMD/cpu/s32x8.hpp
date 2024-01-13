@@ -22,9 +22,9 @@
 
 namespace kun_simd {
 template<>
-struct vec<int32_t, 8> {
+struct alignas(32) vec<int32_t, 8> {
 public:
-    alignas(32) union {
+    union {
         __m256i v;
         int32_t raw[8];
     };

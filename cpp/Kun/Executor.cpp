@@ -6,6 +6,7 @@
 #include <list>
 #include <mutex>
 #include <thread>
+#include <array>
 
 namespace kun {
 

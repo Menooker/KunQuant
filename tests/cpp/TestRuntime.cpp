@@ -85,8 +85,8 @@ Stage *stage1_dep[] = {&stages[1], &stages[2]};
 Stage *stage2_dep[] = {&stages[2]};
 } // namespace
 
-
-KUN_API Module testRuntimeModule{
+extern "C"
+KUN_EXPORT Module testRuntimeModule{
     arraySize(stages),
     stages,
     arraySize(buffers),

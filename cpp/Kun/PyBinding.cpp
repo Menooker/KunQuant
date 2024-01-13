@@ -27,7 +27,7 @@ static void expectContiguousShape(const py::buffer_info &info, const char *name,
     }
     py::ssize_t stride = sizeof(float);
     auto &strides = info.strides;
-    for (int i = info.ndim - 1; i >= 0; i--) {
+    for (int i = (int)info.ndim - 1; i >= 0; i--) {
         if (strides[i] != stride) {
             throw std::runtime_error(std::string("Bad stride at ") + name);
         }
@@ -87,7 +87,7 @@ PYBIND11_MODULE(KunRunner, m) {
                     known_T = T;
                 }
                 expectContiguousShape(info, name.c_str(),
-                                      {known_S, known_T, kun::simd_len});
+                                      {known_S, known_T, (py::ssize_t)kun::simd_len});
                 bufs[name] = (float *)info.ptr;
             }
             py::dict ret{};

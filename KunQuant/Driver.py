@@ -152,7 +152,7 @@ using namespace kun::ops;
 {parti_dep_src2}
 }}
 ''')
-    impl_src.append(f'''KUN_API Module {module_name}{{
+    impl_src.append(f'''extern "C" KUN_EXPORT Module {module_name}{{
     {len(partitions)},
     __stages,
     {len(buffer_names)},
