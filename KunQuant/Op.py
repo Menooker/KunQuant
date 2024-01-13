@@ -152,6 +152,10 @@ class OpBase:
         from KunQuant.ops.ElewiseOp import Add, AddConst
         return self._build_op(other, Add, AddConst, False)
 
+    def __radd__(self, other):
+        from KunQuant.ops.ElewiseOp import Add, AddConst
+        return self._build_op(other, Add, AddConst, False)
+
     def __rmul__(self, other):
         from KunQuant.ops.ElewiseOp import Mul, MulConst
         return self._build_op(other, Mul, MulConst, True)

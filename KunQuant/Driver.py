@@ -27,9 +27,10 @@ class _Buffer:
     idx: int
     name: str
     kind: str
+    num_users: int = 0
 
     def __str__(self) -> str:
-        return f'{{{self.idx}, "{self.name}", BufferKind::{self.kind}}}'
+        return f'{{{self.idx}, "{self.name}", {self.num_users}, BufferKind::{self.kind}}}'
 
 @dataclass
 class _Partition:
@@ -40,6 +41,10 @@ class _Partition:
     outs: List['_Partition'] = None
     num_in_dep = 0
     is_rank = False
+
+    def __post_init__(self):
+        for buf in self.in_buf:
+            buf.num_users += 1
 
 def compileit(f: Function, module_name: str, partition_factor = 3, output_layout = "ST8s", options = {}):
     if output_layout not in ["ST8s", "TS"]:

@@ -45,10 +45,10 @@ template <typename T, std::size_t N>
 constexpr std::size_t arraySize(const T(&)[N]) { return N; }
 
 static BufferInfo buffers[]{
-    {0, "input", BufferKind::INPUT},
-    {1, "t1", BufferKind::TEMP},
-    {2, "t2", BufferKind::TEMP},
-    {3, "output", BufferKind::OUTPUT},
+    {0, "input", 0, BufferKind::INPUT},
+    {1, "t1", 2, BufferKind::TEMP},
+    {2, "t2", 1, BufferKind::TEMP},
+    {3, "output", 0, BufferKind::OUTPUT},
 };
 
 namespace {

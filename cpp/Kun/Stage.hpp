@@ -26,6 +26,7 @@ enum class BufferKind: int32_t {
 struct BufferInfo {
     size_t id;
     const char* name;
+    size_t num_users;
     BufferKind kind;
 };
 

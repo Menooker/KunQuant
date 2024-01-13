@@ -52,6 +52,8 @@ def sign(v: OpBase)-> OpBase:
 def covariance(v: OpBase, v2: OpBase, window: int) -> OpBase:
     return WindowedCovariance(v, window, v2)
 
+delay = BackRef
+
 def alpha001(d: AllData):
     inner = d.close
     cond = LessThanConst(d.returns, 0.0)
@@ -133,6 +135,28 @@ def alpha015(d: AllData):
 def alpha016(d: AllData):
     Output(-1 * rank(covariance(rank(d.high), rank(d.volume), 5)), "alpha016")
 
+def alpha017(d: AllData):
+    adv20 = WindowedAvg(d.volume, 20)
+    Output(-1 * (rank(ts_rank(d.close, 10)) *
+                    rank(delta(delta(d.close, 1), 1)) *
+                    rank(ts_rank((d.volume / adv20), 5))), "alpha017")
+
+def alpha018(d: AllData):
+    df = correlation(d.close, d.open, 10)
+    df = SetInfOrNanToZero(df)
+    Output(-1 * (rank((stddev(Abs((d.close - d.open)), 5) + (d.close - d.open)) +
+                        df)), "alpha018")
+
+def alpha019(d: AllData):
+    Output((-1 * sign((d.close - delay(d.close, 7)) + delta(d.close, 7))) *
+            (1 + rank(1 + ts_sum(d.returns, 250))), "alpha019")
+
+# Alpha#20	 (((-1 * rank((open - delay(high, 1)))) * rank((open - delay(close, 1)))) * rank((open -delay(low, 1))))
+def alpha020(d: AllData):
+    Output(-1 * (rank(d.open - delay(d.high, 1)) *
+                    rank(d.open - delay(d.close, 1)) *
+                    rank(d.open - delay(d.low, 1))), "alpha020")
+
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
-    alpha011, alpha012, alpha013, alpha014, alpha015, alpha016
+    alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020
     ]

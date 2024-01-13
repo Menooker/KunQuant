@@ -1,22 +1,49 @@
 #include "Context.hpp"
 #include "Module.hpp"
 #include <algorithm>
+#include <cstdio>
 #include <list>
-#include <unordered_map>
 #include <stdexcept>
 #include <string>
-#include <cstdio>
+#include <unordered_map>
+#ifdef _WIN32
+#include <malloc.h>
+#define kunAlignedAlloc(x, y) _aligned_malloc(y, x)
+#define kunAlignedFree(x) _aligned_free(x)
+#else
+#define kunAlignedAlloc(x, y) aligned_alloc(x, y)
+#define kunAlignedFree(x) free(x)
+#endif
 
 namespace kun {
 
-static size_t divideAndCeil(size_t x, size_t y) {
-    return (x + y - 1) / y;
+void Buffer::alloc(size_t count, size_t use_count) {
+    if (!ptr) {
+        ptr = (float *)kunAlignedAlloc(32, count * sizeof(float));
+        refcount = use_count;
+    }
 }
+
+void Buffer::deref() {
+    auto new_cnt = --refcount;
+    if (new_cnt == 0) {
+        kunAlignedFree(ptr);
+        ptr = nullptr;
+    }
+}
+
+Buffer::~Buffer() {
+    if (ptr && refcount.load() >= 0) {
+        free(ptr);
+    }
+}
+
+static size_t divideAndCeil(size_t x, size_t y) { return (x + y - 1) / y; }
 
 size_t RuntimeStage::getNumTasks() const {
     return stage->kind == TaskExecKind::SLICE_BY_STOCK
-                ? divideAndCeil(ctx->stock_count, simd_len)
-                : divideAndCeil(ctx->length, time_stride);
+               ? divideAndCeil(ctx->stock_count, simd_len)
+               : divideAndCeil(ctx->length, time_stride);
 }
 
 bool RuntimeStage::doJob() {
@@ -24,10 +51,12 @@ bool RuntimeStage::doJob() {
     auto num_tasks = getNumTasks();
     while (cur_idx < num_tasks) {
         if (doing_index.compare_exchange_strong(cur_idx, cur_idx + 1)) {
-            if(stage->kind == TaskExecKind::SLICE_BY_STOCK) {
-                stage->f.f(ctx, cur_idx, ctx->total_time, ctx->start, ctx->length);
+            if (stage->kind == TaskExecKind::SLICE_BY_STOCK) {
+                stage->f.f(ctx, cur_idx, ctx->total_time, ctx->start,
+                           ctx->length);
             } else {
-                stage->f.rankf(this, cur_idx, ctx->total_time, ctx->start, ctx->length);
+                stage->f.rankf(this, cur_idx, ctx->total_time, ctx->start,
+                               ctx->length);
             }
             onDone(1);
             return true;
@@ -37,13 +66,10 @@ bool RuntimeStage::doJob() {
 }
 
 void RuntimeStage::enqueue() {
-    for (size_t i = 0; i < stage->num_in_buffers; i++) {
-        auto buf_id = stage->in_buffers[i];
-        ctx->buffers[buf_id->id].ref();
-    }
     for (size_t i = 0; i < stage->num_out_buffers; i++) {
         auto buf_id = stage->out_buffers[i];
-        ctx->buffers[buf_id->id].alloc(ctx->buffer_len);
+        ctx->buffers[buf_id->id].alloc(ctx->buffer_len,
+                                       stage->out_buffers[i]->num_users);
     }
     ctx->executor->enqueue(this);
 }
