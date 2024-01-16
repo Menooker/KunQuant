@@ -7,14 +7,16 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from KunQuant.passes import Util as PassUtil
 
-def optimize(f: Function, options: dict)->None:
+def optimize(f: Function, options: dict)->Dict[str, int]:
     if PassUtil.debug_mode:
         print("Before optimize: ", f)
+    ret = infer_window(f, options)
     decompose(f, options)
     expr_fold(f, options)
     special_optimize(f, options)
     decompose_rank(f, options)
     temp_window_elim(f, options)
+    return ret
 
 def post_optimize(impl: List[Function], options: dict)->None:
     if PassUtil.debug_mode:
@@ -80,7 +82,8 @@ def compileit(f: Function, module_name: str, partition_factor = 3, output_layout
         elif isinstance(op, Output):
             insert_name(op, "OUTPUT")
 
-    optimize(f, options)
+    required_windows = optimize(f, options)
+    print(required_windows)
     mainf, impl = do_partition(f, partition_factor, options)
     post_optimize(impl, options)
 
@@ -100,12 +103,12 @@ using namespace kun::ops;
             if isinstance(op, Input):
                 buf = insert_name(op, "TEMP")
                 pins.append(buf)
-                ins.append(op)
+                ins.append((op, buf.kind == "TEMP"))
                 set_buffer_layout(op, buf)
             elif isinstance(op, Output):
                 buf = insert_name(op, "TEMP")
                 pouts.append(buf)
-                outs.append(op)
+                outs.append((op, buf.kind == "TEMP"))
                 set_buffer_layout(op, buf)
         src = codegen_cpp(func, input_name_to_idx, ins, outs, options)
         impl_src.append(src)

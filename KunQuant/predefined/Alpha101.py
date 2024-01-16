@@ -157,6 +157,7 @@ def alpha020(d: AllData):
                     rank(d.open - delay(d.close, 1)) *
                     rank(d.open - delay(d.low, 1))), "alpha020")
 
-all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
-    alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020
+all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005,
+    #           alpha006, alpha007, alpha008, alpha009, alpha010,
+    # alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020
     ]

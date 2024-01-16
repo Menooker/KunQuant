@@ -59,26 +59,29 @@ def _get_buffer_name(op: OpBase, idx: int) -> str:
 
 vector_len = 8
 
-def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Input], outputs: List[Output], options: dict) -> str:
+def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict) -> str:
     if len(f.ops) == 3 and isinstance(f.ops[1], Rank):
         return f'''static auto stage_{f.name} = RankStocks{f.ops[0].attrs["layout"]}_{f.ops[2].attrs["layout"]};'''
     header = f'''void stage_{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
     toplevel = _CppScope(None)
     buffer_type: Dict[OpBase, str] = dict()
-    for inp in inputs:
+    for inp, is_tmp in inputs:
         name = inp.attrs["name"]
         layout = inp.attrs["layout"]
         idx_in_ctx = input_name_to_idx[name]
         buffer_type[inp] = f"Input{layout}"
-        code = f"Input{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __total_time, __start}};"
+        start_str = "0" if is_tmp else "__start"
+        total_str = "__length" if is_tmp else "__total_time"
+        code = f"Input{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, {total_str}, {start_str}}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
 
-    for idx, outp in enumerate(outputs):
+    for idx, (outp, is_tmp) in enumerate(outputs):
         name = outp.attrs["name"]
         layout = outp.attrs["layout"]
         idx_in_ctx = input_name_to_idx[name]
         buffer_type[outp] = f"Output{layout}"
-        code = f"Output{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, __length, __start}};"
+        start_str = "0" if is_tmp else "__start"
+        code = f"Output{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, __length, 0}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
     for op in f.ops:
         if op.get_parent() is None and isinstance(op, WindowedTempOutput):

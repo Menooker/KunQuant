@@ -4,3 +4,4 @@ from .TempWindowElim import temp_window_elim
 from .SpecialOpt import special_optimize
 from .Partitioner import do_partition
 from .CodegenCpp import codegen_cpp
+from .InferWindow import infer_window

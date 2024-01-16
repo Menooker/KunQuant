@@ -90,13 +90,16 @@ PYBIND11_MODULE(KunRunner, m) {
                                       {known_S, known_T, (py::ssize_t)kun::simd_len});
                 bufs[name] = (float *)info.ptr;
             }
+            if((py::ssize_t)length > known_T) {
+                    throw std::runtime_error("Bad parameter: length");
+            }
             py::dict ret{};
             py::array::ShapeContainer expected_out_shape;
             if (mod->layout == kun::OutputLayout::ST8s) {
-                expected_out_shape = {known_S, known_T,
+                expected_out_shape = {known_S, (py::ssize_t)length,
                                       (py::ssize_t)kun::simd_len};
             } else {
-                expected_out_shape = {known_T,
+                expected_out_shape = {(py::ssize_t)length,
                                       known_S * (py::ssize_t)kun::simd_len};
             }
             for (size_t i = 0; i < mod->num_buffers; i++) {

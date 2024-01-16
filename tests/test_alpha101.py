@@ -74,19 +74,14 @@ def ST8t_ST(data: np.ndarray) -> np.ndarray:
 def TS_ST(data: np.ndarray) -> np.ndarray:
     return data.transpose()
 
-def test(executor, num_stock, num_time, ischeck):
-    rtol=6e-5
-    atol=1e-5
-    lib = kr.Library.load("./build/Release/KunTest.dll" if os.name == "nt" else "./build/libKunTest.so")
-    print(lib)
-    modu = lib.getModule("alpha_101")
+def make_data_and_ref(num_stock, num_time, ischeck):
     rng = np.random.get_state()
     start = time.time()
     dopen, dclose, dhigh, dlow, dvol, damount = gen_stock_data2(0.5, 100, num_stock, num_time, 0.01 if num_time > 1000 else 0.05)
     end = time.time()
     print(f"DataGen takes: {end-start:.6f} seconds")
     my_input = {"high": ST_ST8t(dhigh), "low": ST_ST8t(dlow), "close": ST_ST8t(dclose), "open": ST_ST8t(dopen), "volume": ST_ST8t(dvol), "amount": ST_ST8t(damount)}
-
+    ref = None
     if ischeck:
         df_dclose = pd.DataFrame(dclose.transpose())
         df_dopen = pd.DataFrame(dopen.transpose())
@@ -98,7 +93,20 @@ def test(executor, num_stock, num_time, ischeck):
         ref = ref_alpha101.get_alpha({"S_DQ_HIGH": df_high, "S_DQ_LOW": df_low, "S_DQ_CLOSE": df_dclose, 'S_DQ_OPEN': df_dopen, "S_DQ_VOLUME": df_vol, "S_DQ_AMOUNT": df_amount})
         end = time.time()
         print(f"Ref takes: {end-start:.6f} seconds")
+    return my_input, ref
 
+start_window = {
+    "alpha001": 25,
+    "alpha002": 8,
+    "alpha003": 10,
+    "alpha004": 9,
+    "alpha005": 10,
+    
+}
+
+def test(modu, executor, num_stock, num_time, my_input, ref, ischeck, start_time):
+    rtol=6e-5
+    atol=1e-5
     # prepare outputs
     outnames = modu.getOutputNames()
     layout = modu.output_layout
@@ -106,7 +114,7 @@ def test(executor, num_stock, num_time, ischeck):
     print(layout)
     if layout == "TS":
         # Factors, Time, Stock
-        sharedbuf = np.empty((len(outnames), num_time, num_stock), dtype="float32")
+        sharedbuf = np.empty((len(outnames), num_time-start_time, num_stock), dtype="float32")
         sharedbuf[:] = np.nan
         for idx, name in enumerate(outnames):
             outbuffers[name] = sharedbuf[idx]
@@ -114,7 +122,7 @@ def test(executor, num_stock, num_time, ischeck):
     # blocked = ST_ST8t(inp)
     
     start = time.time()
-    out = kr.runGraph(executor, modu, my_input, 0, num_time, outbuffers)
+    out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
     end = time.time()
     print(f"Exec takes: {end-start:.6f} seconds")
     if not ischeck:
@@ -140,10 +148,13 @@ def test(executor, num_stock, num_time, ischeck):
             cur_atol = 0.02
         elif k in ["alpha002"]:
             cur_atol = 0.02
-        v = out[k]
-        refv = ref[k].to_numpy().transpose()
+        check_start = 0
+        if start_time:
+            check_start = start_window[k] + start_time
+        v = out[k][:,check_start-start_time:]
+        refv = ref[k][check_start:].to_numpy().transpose()
         if k == "alpha101":
-            print(df_dclose)
+            # print(df_dclose)
             print(v[9, 40:50])
             print(refv[9, 40:50])
         try:
@@ -156,19 +167,23 @@ def test(executor, num_stock, num_time, ischeck):
                     print("Bad stock", i)
                     print("Our output", v[i])
                     print("Ref", refv[i])
-                    for j in range(num_time):
+                    for j in range(num_time-check_start):
                         if not np.allclose(v[i,j], refv[i,j], rtol=cur_rtol, atol=cur_atol, equal_nan=True):
                             print("j",j,v[i,j], refv[i,j])
                     break
 
+def main():
+    lib = kr.Library.load("./build/Release/KunTest.dll" if os.name == "nt" else "./build/libKunTest.so")
+    print(lib)
+    modu = lib.getModule("alpha_101")
+    num_stock = 64
+    num_time = 100
+    is_check = True
+    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check)
+    executor = kr.createSingleThreadExecutor()
+    test(modu, executor, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    test(modu, executor, num_stock, num_time, my_input, pd_ref, is_check, 50)
+    executor = kr.createMultiThreadExecutor(4)
+    test(modu, executor, num_stock, num_time, my_input, pd_ref, is_check, 0)
 
-    # output = ST8t_ST(out["out"])
-    # # print(expected[:,0])
-    # # print(output[:,0])
-    # np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)
-
-# executor = kr.createMultiThreadExecutor(16)
-executor = kr.createSingleThreadExecutor()
-test(executor, 64, 100, True)
-executor = kr.createMultiThreadExecutor(4)
-test(executor, 64, 100, True)
+main()

@@ -108,15 +108,15 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
                 throw std::runtime_error("Buffer name not found: " +
                                          std::string(buf.name));
             }
-            rtlbuffers.emplace_back(itr->second);
+            rtlbuffers.emplace_back(itr->second, total_time);
         } else {
-            rtlbuffers.emplace_back();
+            rtlbuffers.emplace_back(length);
         }
     }
     Context ctx{std::move(rtlbuffers),
                 {},
                 exec,
-                num_stocks * (total_time - cur_time),
+                num_stocks * length,
                 num_stocks,
                 total_time,
                 cur_time,

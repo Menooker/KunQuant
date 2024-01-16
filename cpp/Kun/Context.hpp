@@ -56,24 +56,28 @@ struct KUN_API Executor {
 
 struct Buffer {
     float* __restrict ptr;
+    size_t num_time; // the dimension in time
     std::atomic<int> refcount;
 
     KUN_API void alloc(size_t count, size_t use_count);
 
-    Buffer() {
+    Buffer(size_t num_time) {
         ptr = nullptr;
+        this->num_time = num_time;
         refcount = 0;
     }
 
     Buffer(const Buffer &) = delete;
     Buffer(Buffer &&other) noexcept {
         ptr = other.ptr;
+        num_time = other.num_time;
         refcount = other.refcount.load();
         other.ptr = nullptr;
     }
 
-    Buffer(float *inptr) {
+    Buffer(float *inptr, size_t num_time) {
         ptr = inptr;
+        this->num_time = num_time;
         refcount = -1000;
     }
 
