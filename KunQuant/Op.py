@@ -144,6 +144,13 @@ class OpBase:
             return TBinary(self, other)
         raise RuntimeError("Don't know how to build binary " + str(type(other)))
 
+    def _build_op2(self, other, TBinary):
+        if type(other) in [int, float]:
+            other = ConstantOp(other)
+        if isinstance(other, OpBase):
+            return TBinary(self, other)
+        raise RuntimeError("Don't know how to build binary " + str(type(other)))
+
     def __sub__(self, other):
         from KunQuant.ops.ElewiseOp import SubConst, Sub
         return self._build_op(other, Sub, SubConst, False)
@@ -167,6 +174,14 @@ class OpBase:
     def __truediv__ (self, other):
         from KunQuant.ops.ElewiseOp import Div, DivConst
         return self._build_op(other, Div, DivConst, False)
+
+    def __lt__(self, other):
+        from KunQuant.ops.ElewiseOp import LessThan, LessThanConst
+        return self._build_op(other, LessThan, LessThanConst, False)
+
+    def __ge__(self, other):
+        from KunQuant.ops.ElewiseOp import GreaterEqual
+        return self._build_op2(other, GreaterEqual)
 
 class GraphSourceTrait:
     pass
