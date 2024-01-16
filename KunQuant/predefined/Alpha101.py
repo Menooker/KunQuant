@@ -157,6 +157,17 @@ def alpha020(d: AllData):
                     rank(d.open - delay(d.close, 1)) *
                     rank(d.open - delay(d.low, 1))), "alpha020")
 
+def alpha021(d: AllData):
+    # c = ((sum(close,2) / 2) < ((sum(close, 8) / 8) - stddev(close, 8)))
+    # d = (((1 < (volume / adv20)) || ((volume /adv20) == 1)) ? 1 : (-1 * 1))
+    # b = (c ? 1 : d)
+    # a = (((sum(close, 8) / 8) + stddev(close, 8)) < (sum(close, 2) / 2))
+    # (a ? (-1 * 1) : b)
+
+    Output(-1 * (rank(d.open - delay(d.high, 1)) *
+                    rank(d.open - delay(d.close, 1)) *
+                    rank(d.open - delay(d.low, 1))), "alpha020")
+
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
     alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020
     ]
