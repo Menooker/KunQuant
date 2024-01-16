@@ -55,6 +55,16 @@ PYBIND11_MODULE(KunRunner, m) {
                 }
             }
             return ret;
+        })
+        .def("getOutputUnreliableCount", [](kun::Module& mod) {
+            py::dict ret;
+            for (size_t i = 0; i < mod.num_buffers; i++) {
+                auto &buf = mod.buffers[i];
+                if (buf.kind == kun::BufferKind::OUTPUT) {
+                    ret[buf.name] =  buf.unreliable_count;
+                }
+            }
+            return ret;
         });
     py::class_<kun::Library, std::shared_ptr<kun::Library>>(m, "Library")
         .def_static("load", &kun::Library::load)

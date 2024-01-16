@@ -31,8 +31,9 @@ class _Buffer:
     kind: str
     num_users: int = 0
 
-    def __str__(self) -> str:
-        return f'{{{self.idx}, "{self.name}", {self.num_users}, BufferKind::{self.kind}}}'
+    def to_str(self, unreliables: Dict[str, int]) -> str:
+        unrel = unreliables.get(self.name, 0)
+        return f'{{{self.idx}, "{self.name}", {self.num_users}, BufferKind::{self.kind}, {unrel}}}'
 
 @dataclass
 class _Partition:
@@ -83,7 +84,6 @@ def compileit(f: Function, module_name: str, partition_factor = 3, output_layout
             insert_name(op, "OUTPUT")
 
     required_windows = optimize(f, options)
-    print(required_windows)
     mainf, impl = do_partition(f, partition_factor, options)
     post_optimize(impl, options)
 
@@ -124,7 +124,7 @@ using namespace kun::ops;
     if PassUtil.debug_mode:
         print("Num temp buffers: ", num_temp_buffer)
 
-    buffer_src = ",\n".join(["    "+ str(v) for v in buffer_names])
+    buffer_src = ",\n".join(["    "+ v.to_str(required_windows) for v in buffer_names])
     impl_src.append(f"static BufferInfo __buffers[]{{\n{buffer_src}\n}};")
 
     parti_buffer_src = []

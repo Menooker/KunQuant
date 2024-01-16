@@ -77,7 +77,7 @@ def TS_ST(data: np.ndarray) -> np.ndarray:
 def make_data_and_ref(num_stock, num_time, ischeck):
     rng = np.random.get_state()
     start = time.time()
-    dopen, dclose, dhigh, dlow, dvol, damount = gen_stock_data2(0.5, 100, num_stock, num_time, 0.01 if num_time > 1000 else 0.05)
+    dopen, dclose, dhigh, dlow, dvol, damount = gen_stock_data2(0.5, 100, num_stock, num_time, 0.03 if num_time > 1000 else 0.05)
     end = time.time()
     print(f"DataGen takes: {end-start:.6f} seconds")
     my_input = {"high": ST_ST8t(dhigh), "low": ST_ST8t(dlow), "close": ST_ST8t(dclose), "open": ST_ST8t(dopen), "volume": ST_ST8t(dvol), "amount": ST_ST8t(damount)}
@@ -95,16 +95,7 @@ def make_data_and_ref(num_stock, num_time, ischeck):
         print(f"Ref takes: {end-start:.6f} seconds")
     return my_input, ref
 
-start_window = {
-    "alpha001": 25,
-    "alpha002": 8,
-    "alpha003": 10,
-    "alpha004": 9,
-    "alpha005": 10,
-    
-}
-
-def test(modu, executor, num_stock, num_time, my_input, ref, ischeck, start_time):
+def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ischeck, start_time):
     rtol=6e-5
     atol=1e-5
     # prepare outputs
@@ -141,12 +132,10 @@ def test(modu, executor, num_stock, num_time, my_input, ref, ischeck, start_time
         if k in ["alpha013", "alpha016"]:
             # alpha013 has rank(cov(rank(X), rank(Y))). Output of cov seems to have very similar results
             # like 1e-6 and 0. Thus the rank result will be different
-            cur_atol = 0.49
+            cur_atol = 0.2
         elif k in ["alpha015"]:
-            cur_atol = 2
-        elif k in ["alpha005"]:
-            cur_atol = 0.02
-        elif k in ["alpha002"]:
+            cur_atol = 1
+        elif k in ["alpha005", "alpha002"]:
             cur_atol = 0.02
         check_start = 0
         if start_time:
@@ -176,14 +165,16 @@ def main():
     lib = kr.Library.load("./build/Release/KunTest.dll" if os.name == "nt" else "./build/libKunTest.so")
     print(lib)
     modu = lib.getModule("alpha_101")
+    start_window = modu.getOutputUnreliableCount()
+    print(start_window)
     num_stock = 64
-    num_time = 100
+    num_time = 200
     is_check = True
     my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check)
     executor = kr.createSingleThreadExecutor()
-    test(modu, executor, num_stock, num_time, my_input, pd_ref, is_check, 0)
-    test(modu, executor, num_stock, num_time, my_input, pd_ref, is_check, 50)
+    test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
     executor = kr.createMultiThreadExecutor(4)
-    test(modu, executor, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
 
 main()

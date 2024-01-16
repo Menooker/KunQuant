@@ -28,6 +28,7 @@ struct BufferInfo {
     const char* name;
     size_t num_users;
     BufferKind kind;
+    uint32_t unreliable_count;
 };
 
 enum class TaskExecKind {
