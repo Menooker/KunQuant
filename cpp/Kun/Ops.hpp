@@ -23,7 +23,7 @@ inline f32x8 Select(f32x8 cond, f32x8 vtrue, f32x8 vfalse) {
 
 struct InputST8s : DataSource<true> {
     constexpr static size_t stride = 8;
-    float * __restrict buf;
+    float *__restrict buf;
     InputST8s(float *base, size_t stock_idx, size_t total_time, size_t start)
         : buf{base + stock_idx * total_time * stride + start * stride} {}
     f32x8 step(size_t index) { return _mm256_loadu_ps(&buf[index * stride]); }
@@ -42,7 +42,7 @@ struct InputST8s : DataSource<true> {
 
 struct OutputST8s : DataSource<true> {
     constexpr static size_t stride = 8;
-    float * __restrict buf;
+    float *__restrict buf;
     OutputST8s(float *base, size_t stock_idx, size_t num_stock, size_t length,
                size_t start)
         : buf{base + stock_idx * length * stride} {}
@@ -63,7 +63,7 @@ struct OutputST8s : DataSource<true> {
 
 struct OutputTS : DataSource<true> {
     constexpr static size_t stride = 8;
-    float * __restrict buf;
+    float *__restrict buf;
     size_t stock_idx;
     size_t num_stock;
     OutputTS(float *base, size_t stock_idx, size_t num_stock, size_t length,
@@ -193,6 +193,10 @@ inline f32x8 LessThan(f32x8 a, f32x8 b) {
     return _mm256_cmp_ps(a, b, _CMP_LT_OQ);
 }
 
+inline f32x8 LessEqual(f32x8 a, f32x8 b) {
+    return _mm256_cmp_ps(a, b, _CMP_LE_OQ);
+}
+
 inline f32x8 GreaterThan(f32x8 a, f32x8 b) {
     return _mm256_cmp_ps(a, b, _CMP_GT_OQ);
 }
@@ -267,6 +271,9 @@ inline f32x8 Div(f32x8 a, float b) {
 
 inline f32x8 Or(f32x8 a, f32x8 b) { return _mm256_or_ps(a, b); }
 inline f32x8 And(f32x8 a, f32x8 b) { return _mm256_and_ps(a, b); }
+inline f32x8 Not(f32x8 a) {
+    return _mm256_xor_ps(a, _mm256_castsi256_ps(_mm256_set1_epi32(-1)));
+}
 
 inline f32x8 Sqrt(f32x8 a) { return _mm256_sqrt_ps(a); }
 

@@ -1,7 +1,7 @@
 from KunQuant.ops.MiscOp import BackRef
-from KunQuant.ops.ElewiseOp import AddConst, DivConst, Sqrt, Sub, Log, Div
+from KunQuant.ops.ElewiseOp import AddConst, DivConst, Sqrt, Sub, Log, Div, CmpOp
 from KunQuant.passes.Util import kun_pass
-from KunQuant.Op import Builder, OpBase, ForeachBackWindow, Rank, WindowedTempOutput, Output, IterValue
+from KunQuant.Op import Builder, OpBase, ForeachBackWindow, Rank, WindowedTempOutput, Output, IterValue, ConstantOp
 from KunQuant.ops import ReduceAdd, FastWindowedSum, SubConst, MulConst
 from KunQuant.Stage import Function
 from typing import List, Dict, Tuple
@@ -50,6 +50,26 @@ def _is_mul_1(op: OpBase) -> OpBase:
         return SubConst(op.inputs[0], 0, True)
     return None
 
+def _is_const_1(op: OpBase) -> bool:
+    return isinstance(op, ConstantOp) and op.attrs["value"] == 1
+
+def _is_div_cmp_1(op: OpBase) -> OpBase:
+    if isinstance(op, CmpOp):
+        lhs, rhs = op.inputs
+        if isinstance(lhs, Div):
+            inner_lhs, inner_rhs = lhs.inputs
+            if _is_const_1(rhs):
+                return op.__class__(inner_lhs, inner_rhs)
+            else:
+                return op.__class__(inner_lhs, inner_rhs * rhs)
+        if isinstance(rhs, Div):
+            inner_lhs, inner_rhs = rhs.inputs
+            if _is_const_1(lhs):
+                return op.__class__(inner_rhs, inner_lhs)
+            else:
+                return op.__class__(lhs * inner_rhs, inner_lhs)
+    return None
+
 _monotonic_ops = {Sqrt, Log}
 _monotonic_add = {AddConst, MulConst}
 _monotonic_sub = {SubConst, DivConst}
@@ -95,6 +115,8 @@ def special_impl(ops: List[OpBase], options: dict = {}) -> List[OpBase]:
         if _transform(_is_sub_log, op):
             continue
         if _transform(_is_rank_monotonic_inc, op):
+            continue
+        if _transform(_is_div_cmp_1, op):
             continue
         
         # if it is reduce-sum in non-loop context

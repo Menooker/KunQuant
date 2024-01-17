@@ -182,6 +182,26 @@ class OpBase:
     def __ge__(self, other):
         from KunQuant.ops.ElewiseOp import GreaterEqual
         return self._build_op2(other, GreaterEqual)
+    
+    def __gt__(self, other):
+        from KunQuant.ops.ElewiseOp import GreaterThan
+        return self._build_op2(other, GreaterThan)
+
+    def __le__(self, other):
+        from KunQuant.ops.ElewiseOp import LessEqual
+        return self._build_op2(other, LessEqual)
+    
+    def __or__(self, other):
+        from KunQuant.ops.ElewiseOp import Or
+        return self._build_op2(other, Or)
+
+    def __invert__(self):
+        from KunQuant.ops.ElewiseOp import Not
+        return Not(self)
+
+    def __and__(self, other):
+        from KunQuant.ops.ElewiseOp import And
+        return self._build_op2(other, And) 
 
 class GraphSourceTrait:
     pass

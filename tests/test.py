@@ -245,6 +245,26 @@ v28 = Sqrt@(v27)
 v29 = Output@{name:ou1}(v26)
 v30 = Output@{name:ou2}(v28)''')
 
+def check_div_cmp():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inp2 = Input("b")
+        out1 = inp1/inp2 > 10
+        out1 = Output(out1, "ou1")
+        out2 = ConstantOp(1) < inp1/inp2
+        out2 = Output(out2, "ou1")
+    f = Function(builder.ops)
+    special_optimize(f)
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = Input@{name:b}()
+v2 = ConstantOp@{value:10}()
+v3 = Mul@(v1,v2)
+v4 = GreaterThan@(v0,v3)
+v5 = Output@{name:ou1}(v4)
+v6 = LessThan@(v1,v0)
+v7 = Output@{name:ou1}(v6)''')
+
 if __name__ == "__main__":
     check_window()
     check_simple()
@@ -254,3 +274,4 @@ if __name__ == "__main__":
     check_tempwindow_elim()
     check_opt_sum()
     check_fold_window()
+    check_div_cmp()

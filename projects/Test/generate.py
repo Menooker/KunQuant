@@ -5,7 +5,10 @@ import KunQuant.passes
 from KunQuant.passes import *
 from KunQuant.Driver import *
 from KunQuant.predefined.Alpha101 import *
+import os
+import sys
 
+paths = []
 def build_avg_and_stddev():
     builder = Builder()
     with builder:
@@ -19,7 +22,8 @@ def build_avg_and_stddev():
 def check_1():
     f = build_avg_and_stddev()
     src = compileit(f, "avg_and_stddev")
-    with open("./tests/cpp/generated/AvgAndStddev.cpp", 'w') as f:
+    paths.append(sys.argv[1]+"/AvgAndStddev.cpp")
+    with open(paths[-1], 'w') as f:
         f.write(src)
 
 def check_rank():
@@ -29,7 +33,8 @@ def check_rank():
         out2 = Output(Rank(inp1), "ou2")
     f = Function(builder.ops)
     src = compileit(f, "test_rank")
-    with open("./tests/cpp/generated/TestRank.cpp", 'w') as f:
+    paths.append(sys.argv[1]+"/TestRank.cpp")
+    with open(paths[-1], 'w') as f:
         f.write(src)
 
 def check_rank2():
@@ -42,7 +47,8 @@ def check_rank2():
         Output(v3, "out")
     f = Function(builder.ops)
     src = compileit(f, "test_rank2")
-    with open("./tests/cpp/generated/TestRank2.cpp", 'w') as f:
+    paths.append(sys.argv[1]+"/TestRank2.cpp")
+    with open(paths[-1], 'w') as f:
         f.write(src)
 
 def check_log():
@@ -52,22 +58,17 @@ def check_log():
         Output(Log(inp1), "outlog")
     f = Function(builder.ops)
     src = compileit(f, "test_log")
-    with open("./tests/cpp/generated/TestLog.cpp", 'w') as f:
+    paths.append(sys.argv[1]+"/TestLog.cpp")
+    with open(paths[-1], 'w') as f:
         f.write(src)
 
-def check_alpha101():
-    builder = Builder()
-    with builder:
-        all_data = AllData(low=Input("low"),high=Input("high"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
-        for f in all_alpha:
-            f(all_data)
-    f = Function(builder.ops)
-    src = compileit(f, "alpha_101", output_layout="TS", options={"opt_reduce": True, "fast_log": True})
-    with open("./tests/cpp/generated/Alpha101.cpp", 'w') as f:
-        f.write(src)
-
+os.makedirs(sys.argv[1], exist_ok=True)
 check_1()
 check_rank()
 check_rank2()
 check_log()
-check_alpha101()
+
+# with open(sys.argv[1]+"/generated.txt", 'w') as f:
+#     f.write(";".join(paths))
+# print(";".join(paths))
+# check_alpha101()

@@ -52,6 +52,9 @@ def sign(v: OpBase)-> OpBase:
 def covariance(v: OpBase, v2: OpBase, window: int) -> OpBase:
     return WindowedCovariance(v, window, v2)
 
+def sma(v: OpBase, window: int) -> OpBase:
+    return WindowedAvg(v, window)
+
 delay = BackRef
 
 def alpha001(d: AllData):
@@ -158,15 +161,44 @@ def alpha020(d: AllData):
                     rank(d.open - delay(d.low, 1))), "alpha020")
 
 def alpha021(d: AllData):
+    # d = (((1 < (volume / adv20)) || ((volume /adv20) == 1)) ? 1 : (-1 * 1))
+    # c = ((sum(close,2) / 2) < ((sum(close, 8) / 8) - stddev(close, 8)))
+    # b = (c ? 1 : d)
+    # a = (((sum(close, 8) / 8) + stddev(close, 8)) < (sum(close, 2) / 2))
+    # (a? (-1 * 1) : b)
     c = WindowedAvg(d.close,2) < WindowedAvg(d.close, 8) - stddev(d.close, 8)
     adv20 = WindowedAvg(d.volume, 20)
-    dd = Select(d.volume / adv20>=1, ConstantOp(1), ConstantOp(-1))
-    b = Select(c, ConstantOp(1), dd)
+    dd = d.volume / adv20>=1
     a = WindowedAvg(d.close, 8) + stddev(d.close, 8) < WindowedAvg(d.close,2)
-    out = Select(a, ConstantOp(-1), b)
+    out = Select(~a & (c | dd), ConstantOp(1), ConstantOp(-1))
     Output(out, "alpha021")
-    # (a ? (-1 * 1) : b)
+
+def alpha022(self: AllData):
+    df = correlation(self.high, self.volume, 5)
+    df = SetInfOrNanToZero(df)
+    Output(-1 * delta(df, 5) * rank(stddev(self.close, 20)), "alpha022")
+
+# Alpha#23	 (((sum(high, 20) / 20) < high) ? (-1 * delta(high, 2)) : 0)
+def alpha023(self: AllData):
+    cond = sma(self.high, 20) < self.high
+    alpha = -1 * SetInfOrNanToZero(delta(self.high, 2))
+    Output(Select(cond, alpha, ConstantOp(0)), "alpha023")
+
+def alpha024(self: AllData):
+    cond = delta(sma(self.close, 100), 100) / delay(self.close, 100) <= 0.05
+    alpha = -1 * delta(self.close, 3)
+    Output(Select(cond, -1 * (self.close - ts_min(self.close, 100)), alpha), "alpha024")
+
+def alpha025(self: AllData):
+    adv20 = sma(self.volume, 20)
+    Output(rank(((((-1 * self.returns) * adv20) * self.vwap) * (self.high - self.close))), "alpha025")
+
+def alpha026(self: AllData):
+    df = correlation(ts_rank(self.volume, 5), ts_rank(self.high, 5), 5)
+    df = SetInfOrNanToZero(df)
+    Output(-1 * ts_max(df, 3), "alpha026")
 
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
     alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020, alpha021,
+    alpha022, alpha023, alpha024, alpha025, alpha026
     ]

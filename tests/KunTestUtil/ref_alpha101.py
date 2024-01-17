@@ -208,11 +208,11 @@ def get_alpha(df):
         df['alpha019']=stock.alpha019()
         df['alpha020']=stock.alpha020()
         df['alpha021']=stock.alpha021()
-        # df['alpha022']=stock.alpha022()
-        # df['alpha023']=stock.alpha023()
-        # df['alpha024']=stock.alpha024()
-        # df['alpha025']=stock.alpha025()
-        # df['alpha026']=stock.alpha026()
+        df['alpha022']=stock.alpha022()
+        df['alpha023']=stock.alpha023()
+        df['alpha024']=stock.alpha024()
+        df['alpha025']=stock.alpha025()
+        df['alpha026']=stock.alpha026()
         # df['alpha027']=stock.alpha027()
         # df['alpha028']=stock.alpha028()
         # df['alpha029']=stock.alpha029()
@@ -399,7 +399,7 @@ class Alphas(object):
         x, y, z = sma(self.close, 8), stddev(self.close, 8), sma(self.close, 2)
         a = x + y < z
         c = z < x - y
-        d = sma(self.volume, 20) / self.volume >= 1
+        d = ( self.volume/sma(self.volume, 20)) >= 1
         alpha = pd.DataFrame(-np.ones_like(self.close), index=self.close.index
                              )
 #        alpha = pd.DataFrame(np.ones_like(self.close), index=self.close.index,
@@ -416,8 +416,8 @@ class Alphas(object):
     # Alpha#23	 (((sum(high, 20) / 20) < high) ? (-1 * delta(high, 2)) : 0)
     def alpha023(self):
         cond = sma(self.high, 20) < self.high
-        alpha = pd.DataFrame(np.zeros_like(self.close),index=self.close.index,columns=['close'])
-        alpha.at[cond,'close'] = -1 * delta(self.high, 2).fillna(value=0)
+        alpha = pd.DataFrame(np.zeros_like(self.close),index=self.close.index)
+        alpha[cond] = -1 * delta(self.high, 2).fillna(value=0)
         return alpha
     
     # Alpha#24	 ((((delta((sum(close, 100) / 100), 100) / delay(close, 100)) < 0.05) ||((delta((sum(close, 100) / 100), 100) / delay(close, 100)) == 0.05)) ? (-1 * (close - ts_min(close,100))) : (-1 * delta(close, 3)))

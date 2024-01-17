@@ -49,6 +49,9 @@ class GreaterEqual(CmpOp):
 class LessThan(CmpOp):
     pass
 
+class LessEqual(CmpOp):
+    pass
+
 class GreaterThanConst(BinaryConstOp):
     pass
 
@@ -65,6 +68,9 @@ class Abs(UnaryElementwiseOp):
     pass
 
 class Sign(UnaryElementwiseOp):
+    pass
+
+class Not(UnaryElementwiseOp):
     pass
 
 class SetInfOrNanToZero(UnaryElementwiseOp):

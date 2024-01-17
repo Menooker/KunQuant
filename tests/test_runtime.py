@@ -4,19 +4,22 @@ import sys
 import warnings
 import os
 
-sys.path.append("./build/Release" if os.name == "nt" else "./build")
+base_dir = "./build/Release/projects" if os.name == "nt" else "./build/projects"
+base_dir2 = "./build/Release/" if os.name == "nt" else "./build/"
+sys.path.append(base_dir2)
 import KunRunner as kr
 
 
 # inp = np.ndarray((3, 100, 8), dtype="float32")
 
-lib = kr.Library.load("./build/Release/KunTest.dll" if os.name == "nt" else "./build/libKunTest.so")
+lib = kr.Library.load(base_dir+"/Test.dll" if os.name == "nt" else base_dir+"/libTest.so")
 print(lib)
 
 
 def test_runtime():
+    lib2 = kr.Library.load(base_dir2+"/KunTest.dll" if os.name == "nt" else base_dir2+"/libKunTest.so")
     inp = np.random.rand(3, 10, 8).astype("float32")
-    modu = lib.getModule("testRuntimeModule")
+    modu = lib2.getModule("testRuntimeModule")
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"input": inp}, 0, 10)
 
@@ -34,6 +37,7 @@ def ST8t_ST(data: np.ndarray) -> np.ndarray:
 
 def test_avg_stddev():
     modu = lib.getModule("avg_and_stddev")
+    assert(modu)
     inp = np.random.rand(24, 20).astype("float32")
     df = pd.DataFrame(inp.transpose())
     expected_mean = df.rolling(10).mean().to_numpy().transpose()
@@ -49,6 +53,7 @@ def test_avg_stddev():
 
 def test_rank():
     modu = lib.getModule("test_rank")
+    assert(modu)
     def check(inp, timelen):
         df = pd.DataFrame(inp.transpose())
         # print(df)
@@ -70,6 +75,7 @@ def test_rank():
 
 def test_rank2():
     modu = lib.getModule("test_rank2")
+    assert(modu)
     inp = np.random.rand(24, 20).astype("float32")
     df = pd.DataFrame(inp.transpose())
     # print(df)
