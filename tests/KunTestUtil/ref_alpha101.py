@@ -213,10 +213,10 @@ def get_alpha(df):
         df['alpha024']=stock.alpha024()
         df['alpha025']=stock.alpha025()
         df['alpha026']=stock.alpha026()
-        # df['alpha027']=stock.alpha027()
+        df['alpha027']=stock.alpha027()
         # df['alpha028']=stock.alpha028()
         # df['alpha029']=stock.alpha029()
-        # df['alpha030']=stock.alpha030()
+        df['alpha030']=stock.alpha030()
         # df['alpha031']=stock.alpha031()
         # df['alpha032']=stock.alpha032()
         # df['alpha033']=stock.alpha033()
@@ -443,9 +443,11 @@ class Alphas(object):
     ## Some Error, still fixing!!
     def alpha027(self):
         alpha = rank((sma(correlation(rank(self.volume), rank(self.vwap), 6), 2) / 2.0))
-        alpha[alpha > 0.5] = -1
-        alpha[alpha <= 0.5]=1
-        return alpha  
+        out = pd.DataFrame(np.ones_like(self.close), index=self.close.index
+                             )
+        out[alpha > 0.5] = -1
+        # alpha[alpha <= 0.5]=1
+        return out
     
     # Alpha#28	 scale(((correlation(adv20, low, 5) + ((high + low) / 2)) - close))
     def alpha028(self):

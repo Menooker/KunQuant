@@ -198,7 +198,29 @@ def alpha026(self: AllData):
     df = SetInfOrNanToZero(df)
     Output(-1 * ts_max(df, 3), "alpha026")
 
+def alpha027(self: AllData):
+    alpha = rank((sma(correlation(rank(self.volume), rank(self.vwap), 6), 2) / 2.0))
+    Output(Select(alpha > 0.5, ConstantOp(-1), ConstantOp(1)), "alpha027")
+
+# Alpha#28	 scale(((correlation(adv20, low, 5) + ((high + low) / 2)) - close))
+# def alpha028(self: AllData):
+#     adv20 = sma(self.volume, 20)
+#     df = correlation(adv20, self.low, 5)
+#     df = SetInfOrNanToZero(df)
+#     return scale(((df + ((self.high + self.low) / 2)) - self.close))
+
+# Alpha#29	 (min(product(rank(rank(scale(log(sum(ts_min(rank(rank((-1 * rank(delta((close - 1),5))))), 2), 1))))), 1), 5) + ts_rank(delay((-1 * returns), 6), 5))
+# def alpha029(self: AllData):
+#     return (ts_min(rank(rank(scale(log(ts_sum(rank(rank(-1 * rank(delta((self.close - 1), 5)))), 2))))), 5) +
+#             ts_rank(delay((-1 * self.returns), 6), 5))
+
+# Alpha#30	 (((1.0 - rank(((sign((close - delay(close, 1))) + sign((delay(close, 1) - delay(close, 2)))) +sign((delay(close, 2) - delay(close, 3)))))) * sum(volume, 5)) / sum(volume, 20))
+def alpha030(self: AllData):
+    delta_close = delta(self.close, 1)
+    inner = sign(delta_close) + sign(delay(delta_close, 1)) + sign(delay(delta_close, 2))
+    Output(((1.0 - rank(inner)) * ts_sum(self.volume, 5)) / ts_sum(self.volume, 20), "alpha030")
+
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
     alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020, alpha021,
-    alpha022, alpha023, alpha024, alpha025, alpha026
+    alpha022, alpha023, alpha024, alpha025, alpha026, alpha027, alpha030
     ]
