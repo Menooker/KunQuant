@@ -167,13 +167,13 @@ def decay_linear(df, period=10):
     :return: a pandas DataFrame with the LWMA.
     """
     # Clean data
-    if df.isnull().values.any():
-        df.fillna(method='ffill', inplace=True)
-        df.fillna(method='bfill', inplace=True)
-        df.fillna(value=0, inplace=True)
+    # if df.isnull().values.any():
+    #     df = df.fillna(method='ffill', inplace=False)
+    #     df.fillna(method='bfill', inplace=True)
+    #     df.fillna(value=0, inplace=True)
     na_lwma = np.zeros_like(df)
-    na_lwma[:period, :] = df.iloc[:period, :] 
-    na_series = df.as_matrix()
+    na_lwma[:period, :] = np.nan
+    na_series = df.values
 
     divisor = period * (period + 1) / 2
     y = (np.arange(period) + 1) * 1.0 / divisor
@@ -182,7 +182,7 @@ def decay_linear(df, period=10):
     for row in range(period - 1, df.shape[0]):
         x = na_series[row - period + 1: row + 1, :]
         na_lwma[row, :] = (np.dot(x.T, y))
-    return pd.DataFrame(na_lwma, index=df.index, columns=['CLOSE'])  
+    return pd.DataFrame(na_lwma, index=df.index, columns=df.columns)  
 # endregion
 
 def get_alpha(df):
@@ -219,11 +219,11 @@ def get_alpha(df):
         df['alpha030']=stock.alpha030()
         # df['alpha031']=stock.alpha031()
         # df['alpha032']=stock.alpha032()
-        # df['alpha033']=stock.alpha033()
-        # df['alpha034']=stock.alpha034()
-        # df['alpha035']=stock.alpha035()
-        # df['alpha036']=stock.alpha036()
-        # df['alpha037']=stock.alpha037()
+        df['alpha033']=stock.alpha033()
+        df['alpha034']=stock.alpha034()
+        df['alpha035']=stock.alpha035()
+        df['alpha036']=stock.alpha036()
+        df['alpha037']=stock.alpha037()
         # df['alpha038']=stock.alpha038()
         # df['alpha039']=stock.alpha039()
         # df['alpha040']=stock.alpha040()
@@ -241,7 +241,7 @@ def get_alpha(df):
         # df['alpha053']=stock.alpha053()
         # df['alpha054']=stock.alpha054()
         # df['alpha055']=stock.alpha055()
-        # df['alpha057']=stock.alpha057()
+        df['alpha057']=stock.alpha057()
         # df['alpha060']=stock.alpha060()
         # df['alpha061']=stock.alpha061()
         # df['alpha062']=stock.alpha062()
@@ -424,7 +424,7 @@ class Alphas(object):
     def alpha024(self):
         cond = delta(sma(self.close, 100), 100) / delay(self.close, 100) <= 0.05
         alpha = -1 * delta(self.close, 3)
-        alpha[cond] = -1 * (self.close - ts_min(self.close, 100))
+        alpha[cond] = -1 * (self.close - ts_min(self.close, 100)).astype("float32")
         return alpha
     
     # Alpha#25	 rank(((((-1 * returns) * adv20) * vwap) * (high - close)))
@@ -471,11 +471,12 @@ class Alphas(object):
     def alpha031(self):
         adv20 = sma(self.volume, 20)
         df = correlation(adv20, self.low, 12).replace([-np.inf, np.inf], 0).fillna(value=0)         
-        p1=rank(rank(rank(decay_linear((-1 * rank(rank(delta(self.close, 10)))).to_frame(), 10)))) 
+        p1=rank(rank(rank(decay_linear((-1 * rank(rank(delta(self.close, 10)))), 10)))) 
         p2=rank((-1 * delta(self.close, 3)))
         p3=sign(scale(df))
         
-        return p1.CLOSE+p2+p3
+        return p1+p2+p3
+        
 
     # Alpha#32	 (scale(((sum(close, 7) / 7) - close)) + (20 * scale(correlation(vwap, delay(close, 5),230))))
     def alpha032(self):
@@ -611,7 +612,7 @@ class Alphas(object):
     
     # Alpha#57	 (0 - (1 * ((close - vwap) / decay_linear(rank(ts_argmax(close, 30)), 2))))
     def alpha057(self):
-        return (0 - (1 * ((self.close - self.vwap) / decay_linear(rank(ts_argmax(self.close, 30)).to_frame(), 2).CLOSE)))
+        return (0 - (1 * ((self.close - self.vwap) / decay_linear(rank(ts_argmax(self.close, 30)), 2))))
     
     # Alpha#58	 (-1 * Ts_Rank(decay_linear(correlation(IndNeutralize(vwap, IndClass.sector), volume,3.92795), 7.89291), 5.50322))
      

@@ -180,6 +180,20 @@ struct ReduceMax {
     operator f32x8() { return v; }
 };
 
+template <int window>
+struct ReduceDecayLinear {
+    static constexpr float stepSize() {
+        return 1.0f / ((1 + window) * window / 2);
+    }
+    f32x8 weight = _mm256_set1_ps(window * stepSize());
+    f32x8 v = _mm256_setzero_ps();
+    void step(f32x8 input, size_t index) {
+        v = _mm256_fmadd_ps(input, weight, v);
+        weight = _mm256_sub_ps(weight, _mm256_set1_ps(stepSize()));
+    }
+    operator f32x8() { return v; }
+};
+
 template <int window, typename TInput>
 f32x8 windowedRef(TInput &input, size_t index) {
     RequireWindow<TInput>{};
@@ -263,6 +277,9 @@ inline f32x8 Sub(f32x8 a, float b) {
 inline f32x8 Mul(f32x8 a, f32x8 b) { return _mm256_mul_ps(a, b); }
 inline f32x8 Mul(f32x8 a, float b) {
     return _mm256_mul_ps(a, _mm256_set1_ps(b));
+}
+inline f32x8 Mul(float a, f32x8 b) {
+    return _mm256_mul_ps(_mm256_set1_ps(a), b);
 }
 inline f32x8 Div(f32x8 a, f32x8 b) { return _mm256_div_ps(a, b); }
 inline f32x8 Div(f32x8 a, float b) {

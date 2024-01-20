@@ -11,5 +11,9 @@ class ReduceMax(ReductionOp):
 
 class ReduceArgMax(ReductionOp):
     pass
+
 class ReduceRank(ReductionOp):
+    pass
+
+class ReduceDecayLinear(ReductionOp):
     pass

@@ -1,6 +1,6 @@
-from .ReduceOp import ReduceAdd, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax
+from .ReduceOp import ReduceAdd, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax, ReduceDecayLinear
 from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
-from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, Sub, Mul, Sqrt, SubConst, Div, CmpOp
+from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToZero, Sub, Mul, Sqrt, SubConst, Div, CmpOp
 from collections import OrderedDict
 from typing import Union, List, Tuple
 
@@ -138,4 +138,14 @@ class ClipZero(CompositiveOp):
             v0 = LessThan(inp, ConstantOp(eps))
             v1 = GreaterThan(inp, ConstantOp(-eps))
             out = Select(And(v0, v1), ConstantOp(0), inp)
+        return b.ops
+
+class DecayLinear(WindowedCompositiveOp):
+    def decompose(self) -> List[OpBase]:
+        b = Builder(self.get_parent())
+        window = self.attrs["window"]
+        with b:
+            v0 = WindowedTempOutput(self.inputs[0], window)
+            v1 = ForeachBackWindow(v0, window)
+            v2 = ReduceDecayLinear(IterValue(v1, v0), None, [("window", window)])
         return b.ops

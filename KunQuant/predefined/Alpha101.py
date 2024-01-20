@@ -220,7 +220,36 @@ def alpha030(self: AllData):
     inner = sign(delta_close) + sign(delay(delta_close, 1)) + sign(delay(delta_close, 2))
     Output(((1.0 - rank(inner)) * ts_sum(self.volume, 5)) / ts_sum(self.volume, 20), "alpha030")
 
+def alpha033(self: AllData):
+    Output(rank((self.open / self.close) - 1), "alpha033")
+
+def alpha034(self: AllData):
+    inner = stddev(self.returns, 2) / stddev(self.returns, 5)
+    inner = SetInfOrNanToZero(inner)
+    Output(rank(2 - rank(inner) - rank(delta(self.close, 1))), "alpha034")
+
+def alpha035(self: AllData):
+    ret = ((ts_rank(self.volume, 32) *
+                (1 - ts_rank(self.close + self.high - self.low, 16))) *
+            (1 - ts_rank(self.returns, 32)))
+    Output(ret, "alpha035")
+
+def alpha036(self: AllData):
+    adv20 = sma(self.volume, 20)
+    ret = (((((2.21 * rank(correlation((self.close - self.open), delay(self.volume, 1), 15))) + (0.7 * rank((self.open- self.close)))) + (0.73 * rank(ts_rank(delay((-1 * self.returns), 6), 5)))) + rank(Abs(correlation(self.vwap,adv20, 6)))) + (0.6 * rank((((sma(self.close, 200) / 200) - self.open) * (self.close - self.open)))))
+    Output(ret, "alpha036")
+
+def alpha037(self: AllData):
+    ret = rank(correlation(delay(self.open - self.close, 1), self.close, 200)) + rank(self.open - self.close)
+    Output(ret, "alpha037")
+
+def alpha057(self):
+    ret = (0 - (1 * ((self.close - self.vwap) / DecayLinear(rank(ts_argmax(self.close, 30)), 2))))
+    Output(ret, "alpha057")
+
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
     alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020, alpha021,
-    alpha022, alpha023, alpha024, alpha025, alpha026, alpha027, alpha030
+    alpha022, alpha023, alpha024, alpha025, alpha026, alpha027, alpha030, alpha033, alpha034, alpha035, alpha036,
+    alpha037,
+    alpha057
     ]

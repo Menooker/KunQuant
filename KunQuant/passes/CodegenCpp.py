@@ -140,6 +140,8 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {buf_name}.getWindow(i, idx_{f.get_op_idx(loop)});"))
         elif isinstance(op, ReductionOp):
             thename = op.__class__.__name__
+            if isinstance(op, ReduceDecayLinear):
+                thename = f'{thename}<{op.attrs["window"]}>'
             loop_op = op.inputs[0] if isinstance(op.inputs[0], ForeachBackWindow) else op.inputs[0].get_parent()
             loop_body = loop_to_cpp_loop[loop_op]
             loop_var_idx = f.get_op_idx(loop_op)

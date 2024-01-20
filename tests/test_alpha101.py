@@ -169,10 +169,11 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
             check_start = start_window[k] + start_time
         v = out[k][:,check_start-start_time:]
         refv = ref[k][check_start:].to_numpy().transpose()
-        if k == "alpha101":
-            # print(df_dclose)
-            print(v[9, 40:50])
-            print(refv[9, 40:50])
+        if k == "alpha031":
+            pass
+            # print(refv[0])
+            # print(v[9, 40:50])
+            # print(refv[9, 40:50])
         bad_count, result = count_unmatched_elements(v, refv, rtol=cur_rtol, atol=cur_atol, equal_nan=True)
         bad_rate = bad_count/ (result.size if result.size else 1)
         if bad_count:

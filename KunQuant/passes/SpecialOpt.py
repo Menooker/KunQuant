@@ -1,5 +1,5 @@
 from KunQuant.ops.MiscOp import BackRef
-from KunQuant.ops.ElewiseOp import AddConst, DivConst, Sqrt, Sub, Log, Div, CmpOp
+from KunQuant.ops.ElewiseOp import AddConst, DivConst, Sqrt, Sub, Log, Div, CmpOp, Mul
 from KunQuant.passes.Util import kun_pass
 from KunQuant.Op import Builder, OpBase, ForeachBackWindow, Rank, WindowedTempOutput, Output, IterValue, ConstantOp
 from KunQuant.ops import ReduceAdd, FastWindowedSum, SubConst, MulConst
@@ -45,13 +45,18 @@ def _is_sub_log(op: OpBase) -> OpBase:
         return ret
     return None
 
+def _is_const_1(op: OpBase) -> bool:
+    return isinstance(op, ConstantOp) and op.attrs["value"] == 1
+
 def _is_mul_1(op: OpBase) -> OpBase:
     if isinstance(op, MulConst) and op.attrs["value"] == -1:
         return SubConst(op.inputs[0], 0, True)
+    if isinstance(op, Mul):
+        if _is_const_1(op.inputs[0]):
+            return op.inputs[1]
+        if _is_const_1(op.inputs[1]):
+            return op.inputs[0]
     return None
-
-def _is_const_1(op: OpBase) -> bool:
-    return isinstance(op, ConstantOp) and op.attrs["value"] == 1
 
 def _is_div_cmp_1(op: OpBase) -> OpBase:
     if isinstance(op, CmpOp):
