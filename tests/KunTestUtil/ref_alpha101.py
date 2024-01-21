@@ -139,7 +139,7 @@ def scale(df, k=1):
     :param k: scaling factor.
     :return: a pandas DataFrame rescaled df such that sum(abs(df)) = k
     """
-    return df.mul(k).div(np.abs(df).sum())
+    return df.div(df.abs().sum(axis=1), axis=0)
 
 def ts_argmax(df, window=10):
     """
