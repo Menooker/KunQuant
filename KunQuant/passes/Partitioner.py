@@ -1,4 +1,4 @@
-from KunQuant.Op import OpBase, Output, Input, Rank, GraphSourceTrait, ConstantOp, ReductionOp
+from KunQuant.Op import OpBase, Output, Input, CrossSectionalOp, GraphSourceTrait, ConstantOp, ReductionOp
 from KunQuant.Stage import Function, OpInfo
 from KunQuant.ops import GenericPartition
 from typing import List, Dict, Set, Tuple
@@ -72,7 +72,7 @@ def del_from_ready_op(ready_ops: List[Tuple[OpBase, int]], op: OpBase):
 def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _PartitionOpInfo], partiton: _Partition, f: Function) -> OpBase:
     '''
     Select the next op to put into the partition.
-    1. If there is Rank Op, always select it first
+    1. If there is CrossSectionalOp, always select it first
     2. If the op is directly linked to the current partiton, it is more likely to be selected
     3. The larger index in read_ops, the more likely to be selected (Try Depth-first-search-like)
     4. The less depender, the more likely to be selected
@@ -81,7 +81,7 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
     cur_best_op: OpBase = None
     edge_ops = partiton.get_edge_ops(f)
     for op, idx in ready_ops:
-        if isinstance(op, Rank):
+        if isinstance(op, CrossSectionalOp):
             return op
         # correctness check, if the partition has another path to the op and the path itself is not
         # in the partition, the op cannot be in the partition. Otherwise there will be a loop in the
@@ -145,10 +145,10 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
             if isinstance(selected, GraphSourceTrait):
                 # don't put input in partition yet
                 pass
-            elif isinstance(selected, Rank):
+            elif isinstance(selected, CrossSectionalOp):
                 single_partition = _Partition(OrderedDict(), set())
                 single_partition.add(opinfo, selected)
-                # if an output op is directly connected with Rank, merge it in the partition
+                # if an output op is directly connected with CrossSectionalOp, merge it in the partition
                 for user in f.op_to_id[selected].uses:
                     if isinstance(user, Output):
                         del_from_ready_op(ready_ops, user)

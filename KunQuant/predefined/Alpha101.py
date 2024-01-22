@@ -55,6 +55,8 @@ def covariance(v: OpBase, v2: OpBase, window: int) -> OpBase:
 def sma(v: OpBase, window: int) -> OpBase:
     return WindowedAvg(v, window)
 
+scale = Scale
+
 delay = BackRef
 
 def alpha001(d: AllData):
@@ -203,22 +205,38 @@ def alpha027(self: AllData):
     Output(Select(alpha > 0.5, ConstantOp(-1), ConstantOp(1)), "alpha027")
 
 # Alpha#28	 scale(((correlation(adv20, low, 5) + ((high + low) / 2)) - close))
-# def alpha028(self: AllData):
-#     adv20 = sma(self.volume, 20)
-#     df = correlation(adv20, self.low, 5)
-#     df = SetInfOrNanToZero(df)
-#     return scale(((df + ((self.high + self.low) / 2)) - self.close))
+def alpha028(self: AllData):
+    adv20 = sma(self.volume, 20)
+    df = correlation(adv20, self.low, 5)
+    df = SetInfOrNanToZero(df)
+    Output(scale(((df + ((self.high + self.low) / 2)) - self.close)), "alpha028")
 
 # Alpha#29	 (min(product(rank(rank(scale(log(sum(ts_min(rank(rank((-1 * rank(delta((close - 1),5))))), 2), 1))))), 1), 5) + ts_rank(delay((-1 * returns), 6), 5))
-# def alpha029(self: AllData):
-#     return (ts_min(rank(rank(scale(log(ts_sum(rank(rank(-1 * rank(delta((self.close - 1), 5)))), 2))))), 5) +
-#             ts_rank(delay((-1 * self.returns), 6), 5))
+def alpha029(self: AllData):
+    ret = (ts_min(rank(rank(scale(Log(ts_sum(rank(rank(-1 * rank(delta((self.close - 1), 5)))), 2))))), 5) +
+            ts_rank(delay((-1 * self.returns), 6), 5))
+    Output(ret, "alpha029")
 
 # Alpha#30	 (((1.0 - rank(((sign((close - delay(close, 1))) + sign((delay(close, 1) - delay(close, 2)))) +sign((delay(close, 2) - delay(close, 3)))))) * sum(volume, 5)) / sum(volume, 20))
 def alpha030(self: AllData):
     delta_close = delta(self.close, 1)
     inner = sign(delta_close) + sign(delay(delta_close, 1)) + sign(delay(delta_close, 2))
     Output(((1.0 - rank(inner)) * ts_sum(self.volume, 5)) / ts_sum(self.volume, 20), "alpha030")
+
+# Alpha#31	 ((rank(rank(rank(decay_linear((-1 * rank(rank(delta(close, 10)))), 10)))) + rank((-1 *delta(close, 3)))) + sign(scale(correlation(adv20, low, 12))))
+def alpha031(self: AllData):
+    adv20 = sma(self.volume, 20)
+    df = correlation(adv20, self.low, 12)
+    df = SetInfOrNanToZero(df)   
+    p1=rank(rank(rank(DecayLinear((-1 * rank(rank(delta(self.close, 10)))), 10)))) 
+    p2=rank((-1 * delta(self.close, 3)))
+    p3=sign(scale(df))
+    Output(p1+p2+p3, "alpha031")
+    
+# Alpha#32	 (scale(((sum(close, 7) / 7) - close)) + (20 * scale(correlation(vwap, delay(close, 5),230))))
+def alpha032(self):
+    ret = scale(((sma(self.close, 7) / 7) - self.close)) + (20 * scale(correlation(self.vwap, delay(self.close, 5),230)))
+    Output(ret, "alpha032")
 
 def alpha033(self: AllData):
     Output(rank((self.open / self.close) - 1), "alpha033")
@@ -243,13 +261,14 @@ def alpha037(self: AllData):
     ret = rank(correlation(delay(self.open - self.close, 1), self.close, 200)) + rank(self.open - self.close)
     Output(ret, "alpha037")
 
+
 def alpha057(self):
     ret = (0 - (1 * ((self.close - self.vwap) / DecayLinear(rank(ts_argmax(self.close, 30)), 2))))
     Output(ret, "alpha057")
 
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
     alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020, alpha021,
-    alpha022, alpha023, alpha024, alpha025, alpha026, alpha027, alpha030, alpha033, alpha034, alpha035, alpha036,
-    alpha037,
+    alpha022, alpha023, alpha024, alpha025, alpha026, alpha027, alpha028, alpha029, alpha030, alpha031, alpha032,
+    alpha033, alpha034, alpha035, alpha036, alpha037,
     alpha057
     ]

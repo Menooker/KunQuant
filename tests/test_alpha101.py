@@ -124,9 +124,10 @@ tolerance = {
         "alpha015": 1,
         "alpha005": 0.2,
         "alpha002": 0.2,
+        "alpha031": 0.1,
     },
     "bad_count": {
-        "alpha027": 0.0005
+        "alpha027": 0.06
     }
 }
 

@@ -1,6 +1,6 @@
 from KunQuant.passes import *
 from KunQuant.Stage import Function
-from KunQuant.Op import Input, Output, OpBase, Rank
+from KunQuant.Op import Input, Output, OpBase, CrossSectionalOp
 from typing import Dict, List
 import typing
 from collections import OrderedDict
@@ -43,7 +43,7 @@ class _Partition:
     out_buf: List[_Buffer]
     outs: List['_Partition'] = None
     num_in_dep = 0
-    is_rank = False
+    is_cross_sectional = False
 
     def __post_init__(self):
         for buf in self.in_buf:
@@ -113,8 +113,8 @@ using namespace kun::ops;
         src = codegen_cpp(func, input_name_to_idx, ins, outs, options)
         impl_src.append(src)
         newparti = _Partition(func.name, len(partitions), pins, pouts)
-        if len(func.ops) == 3 and isinstance(func.ops[1], Rank):
-            newparti.is_rank = True
+        if len(func.ops) == 3 and isinstance(func.ops[1], CrossSectionalOp):
+            newparti.is_cross_sectional = True
         partitions[func.name] = newparti
     for p in mainf.ops:
         cur = partitions[p.attrs["name"]]
@@ -145,7 +145,7 @@ using namespace kun::ops;
     parti_info_src = ",\n".join([f'''    {{/*f*/ stage_{parti.name}, /*dependers*/ stage_{parti.name}_dep, /*num_dependers*/ {len(parti.outs)},
      /*in_buffers*/ stage_{parti.name}_in_buf, /*num_in_buffers*/ {len(parti.in_buf)},
      /*out_buffers*/ stage_{parti.name}_out_buf, /*num_out_buffers*/ {len(parti.out_buf)}, /*pending_out*/ {parti.num_in_dep},
-     /*num_tasks*/ TaskExecKind::{"SLICE_BY_TIME" if parti.is_rank else "SLICE_BY_STOCK"}, /*id*/ {parti.idx}}}''' for parti in partitions.values()])
+     /*num_tasks*/ TaskExecKind::{"SLICE_BY_TIME" if parti.is_cross_sectional else "SLICE_BY_STOCK"}, /*id*/ {parti.idx}}}''' for parti in partitions.values()])
     impl_src.append(f'''static Stage __stages[] = {{
 {parti_info_src}
 }};''')

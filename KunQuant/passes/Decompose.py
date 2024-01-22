@@ -1,4 +1,4 @@
-from KunQuant.Op import OpBase, Output, CompositiveOp, WindowedTrait, WindowedTempOutput, WindowedDataSourceOp, Rank, Input
+from KunQuant.Op import OpBase, Output, CompositiveOp, WindowedTrait, WindowedTempOutput, WindowedDataSourceOp, CrossSectionalOp, Input
 from KunQuant.Stage import Function
 from typing import List
 from .Util import kun_pass
@@ -40,7 +40,7 @@ def decompose_rank_impl(ops: List[OpBase]) -> List[OpBase]:
     changed = False
     for op in ops:
         op.replace_inputs(replace_map)
-        if isinstance(op, Rank):
+        if isinstance(op, CrossSectionalOp):
             inp = op.inputs[0]
             if not isinstance(inp, Input):
                 changed = True

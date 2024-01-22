@@ -1,7 +1,7 @@
 from KunQuant.ops.MiscOp import BackRef
-from KunQuant.ops.ElewiseOp import AddConst, DivConst, Sqrt, Sub, Log, Div, CmpOp, Mul
+from KunQuant.ops.ElewiseOp import AddConst, DivConst, Sqrt, Sub, Log, Div, CmpOp, Mul, Sign
 from KunQuant.passes.Util import kun_pass
-from KunQuant.Op import Builder, OpBase, ForeachBackWindow, Rank, WindowedTempOutput, Output, IterValue, ConstantOp
+from KunQuant.Op import Builder, OpBase, ForeachBackWindow, Rank, WindowedTempOutput, Output, IterValue, ConstantOp, Scale
 from KunQuant.ops import ReduceAdd, FastWindowedSum, SubConst, MulConst
 from KunQuant.Stage import Function
 from typing import List, Dict, Tuple
@@ -75,7 +75,7 @@ def _is_div_cmp_1(op: OpBase) -> OpBase:
                 return op.__class__(lhs * inner_rhs, inner_lhs)
     return None
 
-_monotonic_ops = {Sqrt, Log}
+_monotonic_ops = {Sqrt, Log, Scale, Rank}
 _monotonic_add = {AddConst, MulConst}
 _monotonic_sub = {SubConst, DivConst}
 def _is_rank_monotonic_inc(op: OpBase) -> OpBase:
@@ -91,6 +91,21 @@ def _is_rank_monotonic_inc(op: OpBase) -> OpBase:
         return Rank(internal.inputs[0])
     if internal.__class__ in _monotonic_add and internal.attrs["value"] > 0:
         return Rank(internal.inputs[0])
+    return None
+
+def _is_sign_scale(op: OpBase) -> OpBase:
+    '''
+    check if is Sign(T(x)) where T does not change the signness of x
+    '''
+    if not isinstance(op, Sign):
+        return None
+    internal = op.inputs[0]
+    if isinstance(internal, Scale):
+        return Sign(internal.inputs[0])
+    if isinstance(internal, MulConst) and internal.attrs["value"] > 0:
+        return Sign(internal.inputs[0])
+    if isinstance(internal, DivConst) and internal.attrs["value"] > 0 and not internal.attrs.get("swap"):
+        return Sign(internal.inputs[0])
     return None
 
 def special_impl(ops: List[OpBase], options: dict = {}) -> List[OpBase]:
@@ -122,6 +137,8 @@ def special_impl(ops: List[OpBase], options: dict = {}) -> List[OpBase]:
         if _transform(_is_rank_monotonic_inc, op):
             continue
         if _transform(_is_div_cmp_1, op):
+            continue
+        if _transform(_is_sign_scale, op):
             continue
         
         # if it is reduce-sum in non-loop context

@@ -113,5 +113,14 @@ namespace ops {
                          size_t __total_time, size_t __start, size_t __length);
    KUN_API void RankStocksTS_TS(RuntimeStage *stage, size_t __stock_idx,
                          size_t __total_time, size_t __start, size_t __length);
+
+   KUN_API void ScaleStocksST8s_ST8s(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
+   KUN_API void ScaleStocksST8s_TS(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
+   KUN_API void ScaleStocksTS_ST8s(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
+   KUN_API void ScaleStocksTS_TS(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
 }
 } // namespace kun

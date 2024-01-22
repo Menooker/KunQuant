@@ -333,13 +333,18 @@ class ReductionOp(OpBase, StatefulOpTrait):
             raise RuntimeError(
                 f"verify() failed: ReductionOp not in parent of input: {self}\nself._parent_loop = {self._parent_loop}\nloop.get_parent() = {loop.get_parent()}")
 
-# the rank among different stocks. Between [0, 1]
 
-
-class Rank(OpBase):
+class CrossSectionalOp(OpBase):
     def __init__(self, v: OpBase) -> None:
         super().__init__([v], None)
 
+# the cross sectional rank among different stocks. Between [0, 1]
+class Rank(CrossSectionalOp):
+    pass
+
+# the cross sectionally scale different stocks, to make sum([abs(stock[i]) for i in stock]) == 1
+class Scale(CrossSectionalOp):
+    pass
 
 # if __name__ == "__main__":
 #     inp1 = Input("a")
