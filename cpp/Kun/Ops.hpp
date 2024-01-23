@@ -315,9 +315,9 @@ inline f32x8 Log(f32x8 a) {
     return _mm256_load_ps(v);
 }
 
-inline f32x8 SetInfOrNanToZero(f32x8 a) {
+inline f32x8 SetInfOrNanToValue(f32x8 a, float v) {
     auto mask = isNAN(_mm256_sub_ps(a, a));
-    return Select(mask, _mm256_setzero_ps(), a);
+    return Select(mask, _mm256_set1_ps(v), a);
 }
 
 } // namespace ops

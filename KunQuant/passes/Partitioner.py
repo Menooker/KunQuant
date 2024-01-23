@@ -190,13 +190,14 @@ def _search_output_use(op: OpBase, info: OpInfo) -> OpBase:
     return None
 
 def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Function, List[Function]]:
-    naming_table = set()
+    naming_table = dict()
     for op in f.ops:
         if isinstance(op, Input) or isinstance(op, Output):
             name = op.attrs["name"]
             if name == "" or name in naming_table:
-                raise RuntimeError("Duplicated or bad name of op: " + str(op))
-            naming_table.add(name)
+                old_op = naming_table.get(name, None)
+                raise RuntimeError(f"Duplicated or bad name of op: {id(op)} {op}\nold op is: {id(old_op)} {old_op}")
+            naming_table[name] = op
     def add_to_naming_table(v: str) -> str:
         nonlocal naming_table
         cur_name = v
@@ -204,7 +205,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
         while cur_name in naming_table:
             cur_name = f"{v}_{idx}"
             idx += 1
-        naming_table.add(cur_name)
+        naming_table[cur_name] = None
         return cur_name
     # now partitions are built. We should build the dependencies between partitions
     op_lookup_table: Dict[OpBase, _Partition] = dict()

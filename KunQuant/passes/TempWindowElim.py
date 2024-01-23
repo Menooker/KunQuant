@@ -3,10 +3,11 @@ from KunQuant.Op import OpBase, WindowedTempOutput, Input, Output, traverse_repl
 from KunQuant.Stage import Function
 from typing import List, Dict, Tuple
 
-def is_temp_out_with_window(op: OpBase, window: int):
+def _get_temp_out_with_window(op: OpBase, window: int):
     if not isinstance(op, WindowedTempOutput):
-        return False
-    return op.attrs["window"] >= window
+        return False, 0
+    w = op.attrs["window"]
+    return w >= window, w
 
 def for_each_op(op: OpBase, f: Function, replace_map: dict) -> Tuple[OpBase, OpBase]:
     if not isinstance(op, WindowedTempOutput):
@@ -15,15 +16,25 @@ def for_each_op(op: OpBase, f: Function, replace_map: dict) -> Tuple[OpBase, OpB
     # temp window on input, simply eliminate it
     if isinstance(inp, Input):
         return (None, inp)
-    # if the input of WindowedTempOutput is used in Output or other WindowedTempOutput
+    # check if the input of WindowedTempOutput is used in Output or other WindowedTempOutput
     inp_info = f.op_to_id[inp]
     window = op.attrs["window"]
+    max_window = 0
+    max_window_op = None
     for user, _ in inp_info.uses.items():
         if user == op:
             continue
-        if isinstance(user, Output) or is_temp_out_with_window(user, window):
-            # fix-me: user may be visited and replaced later?
+        # if the user is used by Output, return the output
+        if isinstance(user, Output):
             return (None, traverse_replace_map(user, replace_map))
+        # select the max window op with the larger id
+        checked, w = _get_temp_out_with_window(user, window)
+        if checked:
+            if w > max_window or (w == max_window and id(user) > id(max_window_op)):
+                max_window = w
+                max_window_op = user
+    if max_window_op is not None:
+        return (None, traverse_replace_map(max_window_op, replace_map))
     return (op, None)
 
 def temp_window_elim_impl(ops: List[OpBase], f: Function) -> List[OpBase]:
@@ -31,6 +42,8 @@ def temp_window_elim_impl(ops: List[OpBase], f: Function) -> List[OpBase]:
     out = []
     changed = False
     for idx, op in enumerate(ops):
+        if op in replace_map:
+            continue
         op.replace_inputs(replace_map)
         normal, replacer = for_each_op(op, f, replace_map)
         if normal is not None:

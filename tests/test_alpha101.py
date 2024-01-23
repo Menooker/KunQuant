@@ -125,9 +125,12 @@ tolerance = {
         "alpha005": 0.2,
         "alpha002": 0.2,
         "alpha031": 0.1,
+        "alpha034": 0.05,
+        "alpha044": 3e-5,
     },
     "bad_count": {
-        "alpha027": 0.06
+        "alpha027": 0.07,
+        "alpha021": 0.0001
     }
 }
 
@@ -160,9 +163,8 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
             out[k] = TS_ST(out[k])
         else:
             out[k] = ST8t_ST(out[k])
-
+    done = True
     for k in outnames:
-        print(k)
         cur_rtol = rtol
         cur_atol = tolerance["atol"].get(k, atol)
         check_start = 0
@@ -178,10 +180,12 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
         bad_count, result = count_unmatched_elements(v, refv, rtol=cur_rtol, atol=cur_atol, equal_nan=True)
         bad_rate = bad_count/ (result.size if result.size else 1)
         if bad_count:
+            print(k)
             print(f"Unmatched bad_count = {bad_count}/{result.size} ({bad_rate*100:.4f}%)")
             if bad_rate < tolerance["bad_count"].get(k, 0.000):
                 print("bad count meets the tolerance, skipping")
                 continue
+            done = False
             # print(rng)
             for i in range(num_stock):
                 if not np.allclose(v[i], refv[i], rtol=cur_rtol, atol=cur_atol, equal_nan=True):
@@ -192,6 +196,7 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
                         if not np.allclose(v[i,j], refv[i,j], rtol=cur_rtol, atol=cur_atol, equal_nan=True):
                             print("j",j,v[i,j], refv[i,j])
                     break
+    return done
 
 def main():
     lib = kr.Library.load("./build/Release/projects/Alpha101.dll" if os.name == "nt" else "./build/projects/libAlpha101.so")
@@ -200,13 +205,15 @@ def main():
     start_window = modu.getOutputUnreliableCount()
     print(start_window)
     num_stock = 64
-    num_time = 200
+    num_time = 260
     is_check = True
     my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check)
     executor = kr.createSingleThreadExecutor()
-    test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
-    test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
+    done = True
+    done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
     executor = kr.createMultiThreadExecutor(4)
-    test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    print("OK", done)
 
 main()

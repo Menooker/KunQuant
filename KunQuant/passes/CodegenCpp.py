@@ -123,6 +123,9 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
                 scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]}, {rhs});"))
             else:
                 scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}({rhs}, v{inp[0]});"))
+        elif isinstance(op, SetInfOrNanToValue):
+            thename = op.__class__.__name__
+            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]}, {op.attrs['value']});"))
         elif isinstance(op, BinaryElementwiseOp):
             thename = op.__class__.__name__
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]}, v{inp[1]});"))

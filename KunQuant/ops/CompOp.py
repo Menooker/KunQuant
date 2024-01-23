@@ -1,6 +1,6 @@
 from .ReduceOp import ReduceAdd, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax, ReduceDecayLinear
 from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
-from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToZero, Sub, Mul, Sqrt, SubConst, Div, CmpOp
+from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp
 from collections import OrderedDict
 from typing import Union, List, Tuple
 

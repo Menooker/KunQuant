@@ -13,7 +13,10 @@ def check_alpha101():
     with builder:
         all_data = AllData(low=Input("low"),high=Input("high"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
         for f in all_alpha:
-            f(all_data)
+            # if f.__name__ != "alpha043" and f.__name__ != "alpha039":
+            #     continue
+            out = f(all_data)
+            Output(out, f.__name__)
     f = Function(builder.ops)
     src = compileit(f, "alpha_101", output_layout="TS", options={"opt_reduce": True, "fast_log": True})
     os.makedirs(sys.argv[1], exist_ok=True)

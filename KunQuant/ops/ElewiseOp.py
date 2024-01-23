@@ -73,8 +73,9 @@ class Sign(UnaryElementwiseOp):
 class Not(UnaryElementwiseOp):
     pass
 
-class SetInfOrNanToZero(UnaryElementwiseOp):
-    pass
+class SetInfOrNanToValue(UnaryElementwiseOp):
+    def __init__(self, lhs: OpBase, value: float = 0.0) -> None:
+        super().__init__(lhs, [("value", value)])
 
 class Select(OpBase):
     def __init__(self, cond: OpBase, true_v: OpBase, false_v: OpBase) -> None:

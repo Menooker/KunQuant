@@ -14,6 +14,7 @@ def optimize(f: Function, options: dict)->Dict[str, int]:
     decompose(f, options)
     expr_fold(f, options)
     special_optimize(f, options)
+    expr_fold(f, options)
     decompose_rank(f, options)
     temp_window_elim(f, options)
     return ret

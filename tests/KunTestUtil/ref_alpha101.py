@@ -224,13 +224,13 @@ def get_alpha(df):
         df['alpha035']=stock.alpha035()
         df['alpha036']=stock.alpha036()
         df['alpha037']=stock.alpha037()
-        # df['alpha038']=stock.alpha038()
-        # df['alpha039']=stock.alpha039()
-        # df['alpha040']=stock.alpha040()
-        # df['alpha041']=stock.alpha041()
-        # df['alpha042']=stock.alpha042()
-        # df['alpha043']=stock.alpha043()
-        # df['alpha044']=stock.alpha044()
+        df['alpha038']=stock.alpha038()
+        df['alpha039']=stock.alpha039()
+        df['alpha040']=stock.alpha040()
+        df['alpha041']=stock.alpha041()
+        df['alpha042']=stock.alpha042()
+        df['alpha043']=stock.alpha043()
+        df['alpha044']=stock.alpha044()
         # df['alpha045']=stock.alpha045()
         # df['alpha046']=stock.alpha046()
         # df['alpha047']=stock.alpha047()
@@ -516,7 +516,7 @@ class Alphas(object):
     # Alpha#39	 ((-1 * rank((delta(close, 7) * (1 - rank(decay_linear((volume / adv20), 9)))))) * (1 +rank(sum(returns, 250))))
     def alpha039(self):
         adv20 = sma(self.volume, 20)
-        return ((-1 * rank(delta(self.close, 7) * (1 - rank(decay_linear((self.volume / adv20).to_frame(), 9).CLOSE)))) *
+        return ((-1 * rank(delta(self.close, 7) * (1 - rank(decay_linear((self.volume / adv20), 9))))) *
                 (1 + rank(sma(self.returns, 250))))
     
     # Alpha#40	 ((-1 * rank(stddev(high, 10))) * correlation(high, volume, 10))
