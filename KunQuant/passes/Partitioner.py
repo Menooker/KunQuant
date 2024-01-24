@@ -74,10 +74,10 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
     Select the next op to put into the partition.
     1. If there is CrossSectionalOp, always select it first
     2. If the op is directly linked to the current partiton, it is more likely to be selected
-    3. The larger index in read_ops, the more likely to be selected (Try Depth-first-search-like)
+    3. The larger index in ready_ops, the more likely to be selected (Try Depth-first-search-like)
     4. The less depender, the more likely to be selected
     '''
-    cur_best = 999999999999999999
+    cur_best = (-1, -1, -1) # (is_loop, critical, score)
     cur_best_op: OpBase = None
     edge_ops = partiton.get_edge_ops(f)
     for op, idx in ready_ops:
@@ -96,29 +96,32 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
                     has_bad_input = True
         if has_bad_input:
             continue
-        cur_cost = 0
         op_info = info[op]
         # check for critical op
         critical = 0
+        cur_score = 0
         for edge_op, is_in_loop in edge_ops.items():
             if edge_op in op_info.depender:
                 if is_in_loop:
                     critical = 3
                     break
                 else:
-                    critical = 1
-        # if critical = 1, it means an op in the partition is blocked, because this ready op has not been executed
-        # if critical = 3, it means besides critical = 1, the blocked op in the partition is an op in loop
-        cur_cost -= 50000 * critical
-        if connected_to_parti:
-            cur_cost -= 100000
+                    cur_score += 50000
+        # If an op in the partition is blocked, because this ready op has not been executed, add scores to cur_score
+        # if critical = 3, it means besides the condition above, the blocked op in the partition is an op in loop
+
+        loop_score = 0
         # need to run the ops in the loop as soon as possible
         if op.get_parent() is not None or isinstance(op, ReductionOp):
-            cur_cost -= 10000
-        cur_cost += idx * -10
-        cur_cost += len(op_info.depender)
-        if cur_cost <= cur_best:
-            cur_best = cur_cost
+            loop_score = 1
+
+        if connected_to_parti:
+            cur_score += 100000
+        cur_score += idx * 10
+        cur_score -= len(op_info.depender)
+        score_tuple = (loop_score, critical, cur_score)
+        if score_tuple >= cur_best:
+            cur_best = score_tuple
             cur_best_op = op
     return cur_best_op
         
