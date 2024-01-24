@@ -13,5 +13,8 @@ inline f32x8 LogFast(f32x8 v) {
     return kun_simd::log<float, 8>(v);
 }
 
+inline f32x8 Exp(f32x8 v) {
+    return kun_simd::exp<float, 8>(v);
+}
 }
 }

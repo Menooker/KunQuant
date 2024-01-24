@@ -40,7 +40,7 @@ def ts_max(v: OpBase, window: int) -> OpBase:
 def correlation(v1: OpBase, v2: OpBase, window: int) -> OpBase:
     return WindowedCorrelation(v1, window, v2)
 
-def delta(v1: OpBase, window: int) -> OpBase:
+def delta(v1: OpBase, window: int = 1) -> OpBase:
     return Sub(v1, BackRef(v1, window))
 
 def rank(v: OpBase)-> OpBase:
@@ -274,7 +274,7 @@ def alpha040(self: AllData):
 
 # Alpha#41	 (((high * low)^0.5) - vwap)
 def alpha041(self: AllData):
-    return pow((self.high * self.low),0.5) - self.vwap
+    return Pow((self.high * self.low), ConstantOp(0.5)) - self.vwap
 
 # Alpha#42	 (rank((vwap - close)) / rank((vwap + close)))
 def alpha042(self: AllData):
@@ -286,10 +286,70 @@ def alpha043(self: AllData):
     return ts_rank(self.volume / adv20, 20) * ts_rank((-1 * delta(self.close, 7)), 8)
 
 # Alpha#44	 (-1 * correlation(high, rank(volume), 5))
-def alpha044(self):
+def alpha044(self: AllData):
     df = correlation(self.high, rank(self.volume), 5)
     df = SetInfOrNanToValue(df)
     return -1 * df
+
+# Alpha#45	 (-1 * ((rank((sum(delay(close, 5), 20) / 20)) * correlation(close, volume, 2)) *rank(correlation(sum(close, 5), sum(close, 20), 2))))
+def alpha045(self: AllData):
+    df = correlation(self.close, self.volume, 2)
+    df = SetInfOrNanToValue(df)
+    return -1 * (rank(sma(delay(self.close, 5), 20)) * df *
+                    rank(correlation(ts_sum(self.close, 5), ts_sum(self.close, 20), 2)))
+
+# Alpha#46	 ((0.25 < (((delay(close, 20) - delay(close, 10)) / 10) - ((delay(close, 10) - close) / 10))) ?(-1 * 1) : (((((delay(close, 20) - delay(close, 10)) / 10) - ((delay(close, 10) - close) / 10)) < 0) ? 1 :((-1 * 1) * (close - delay(close, 1)))))
+def alpha046(self: AllData):
+    inner = ((delay(self.close, 20) - delay(self.close, 10)) / 10) - ((delay(self.close, 10) - self.close) / 10)
+    alpha = (-1 * delta(self.close, 1))
+    alpha = Select(inner<0, ConstantOp(1), alpha)
+    alpha = Select(inner>0.25, ConstantOp(-1), alpha)
+    # alpha[inner < 0] = 1
+    # alpha[inner > 0.25] = -1
+    return alpha
+
+# Alpha#47	 ((((rank((1 / close)) * volume) / adv20) * ((high * rank((high - close))) / (sum(high, 5) /5))) - rank((vwap - delay(vwap, 5))))
+def alpha047(self: AllData):
+    adv20 = sma(self.volume, 20)
+    return ((((rank((1 / self.close)) * self.volume) / adv20) * ((self.high * rank((self.high - self.close))) / (sma(self.high, 5) /5))) - rank((self.vwap - delay(self.vwap, 5))))
+
+# Alpha#49	 (((((delay(close, 20) - delay(close, 10)) / 10) - ((delay(close, 10) - close) / 10)) < (-1 *0.1)) ? 1 : ((-1 * 1) * (close - delay(close, 1))))
+def alpha049(self: AllData):
+    inner = (((delay(self.close, 20) - delay(self.close, 10)) / 10) - ((delay(self.close, 10) - self.close) / 10))
+    alpha = (-1 * delta(self.close))
+    # alpha[inner < -0.1] = 1
+    alpha = Select(inner < -0.1, ConstantOp(1), alpha)
+    return alpha
+
+# Alpha#50	 (-1 * ts_max(rank(correlation(rank(volume), rank(vwap), 5)), 5))
+def alpha050(self: AllData):
+    df = SetInfOrNanToValue(correlation(rank(self.volume), rank(self.vwap), 5))
+    return (-1 * ts_max(rank(df), 5))
+    # return (-1 * ts_max(rank(correlation(rank(self.volume), rank(self.vwap), 5)), 5))
+
+# Alpha#51	 (((((delay(close, 20) - delay(close, 10)) / 10) - ((delay(close, 10) - close) / 10)) < (-1 *0.05)) ? 1 : ((-1 * 1) * (close - delay(close, 1))))
+def alpha051(self: AllData):
+    inner = (((delay(self.close, 20) - delay(self.close, 10)) / 10) - ((delay(self.close, 10) - self.close) / 10))
+    alpha = (-1 * delta(self.close))
+    alpha = Select(inner < -0.05, ConstantOp(1), alpha)
+    return alpha
+
+# Alpha#52	 ((((-1 * ts_min(low, 5)) + delay(ts_min(low, 5), 5)) * rank(((sum(returns, 240) -sum(returns, 20)) / 220))) * ts_rank(volume, 5))
+def alpha052(self: AllData):
+    return (((-1 * delta(ts_min(self.low, 5), 5)) *
+                rank(((ts_sum(self.returns, 240) - ts_sum(self.returns, 20)) / 220))) * ts_rank(self.volume, 5))
+    
+# Alpha#53	 (-1 * delta((((close - low) - (high - close)) / (close - low)), 9))
+def alpha053(self: AllData):
+    inner = (self.close - self.low)
+    inner = Select(Equals(inner, ConstantOp(0)), ConstantOp(0.0001), inner)
+    return -1 * delta((((self.close - self.low) - (self.high - self.close)) / inner), 9)
+
+# Alpha#54	 ((-1 * ((low - close) * (open^5))) / ((low - high) * (close^5)))
+def alpha054(self: AllData):
+    inner = (self.low - self.high)
+    inner = Select(Equals(inner, ConstantOp(0)), ConstantOp(0.0001), inner)
+    return -1 * (self.low - self.close) * (Pow(self.open, ConstantOp(5))) / (inner * Pow(self.close, ConstantOp(5)))
 
 
 def alpha057(self: AllData):
@@ -298,7 +358,7 @@ def alpha057(self: AllData):
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
     alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020, alpha021,
     alpha022, alpha023, alpha024, alpha025, alpha026, alpha027, alpha028, alpha029, alpha030, alpha031, alpha032,
-    alpha033, alpha034, alpha035, alpha036, alpha037, alpha038, alpha039, alpha040,  alpha042, alpha043,
-    alpha044,
+    alpha033, alpha034, alpha035, alpha036, alpha037, alpha038, alpha039, alpha040, alpha041, alpha042, alpha043,
+    alpha044, alpha046, alpha047, alpha049, alpha050, alpha051, alpha052, alpha053, #alpha054,
     alpha057
     ]

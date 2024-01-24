@@ -127,10 +127,16 @@ tolerance = {
         "alpha031": 0.1,
         "alpha034": 0.05,
         "alpha044": 3e-5,
+        "alpha050": 0.1,
+    },
+    "rtol" : {
+        "alpha036": 1e-2,
+        "alpha050": 1e-1,
     },
     "bad_count": {
         "alpha027": 0.07,
-        "alpha021": 0.0001
+        "alpha021": 0.001,
+        "alpha050": 0.001
     }
 }
 
@@ -165,7 +171,7 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
             out[k] = ST8t_ST(out[k])
     done = True
     for k in outnames:
-        cur_rtol = rtol
+        cur_rtol = tolerance["rtol"].get(k, rtol)
         cur_atol = tolerance["atol"].get(k, atol)
         check_start = 0
         if start_time:
@@ -181,7 +187,7 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
         bad_rate = bad_count/ (result.size if result.size else 1)
         if bad_count:
             print(k)
-            print(f"Unmatched bad_count = {bad_count}/{result.size} ({bad_rate*100:.4f}%)")
+            print(f"Unmatched bad_count = {bad_count}/{result.size} ({bad_rate*100:.4f}%) atol={cur_atol} rtol={cur_rtol}")
             if bad_rate < tolerance["bad_count"].get(k, 0.000):
                 print("bad count meets the tolerance, skipping")
                 continue

@@ -62,11 +62,29 @@ def check_log():
     with open(paths[-1], 'w') as f:
         f.write(src)
 
+def check_pow():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inp2 = Input("b")
+        Output(Pow(inp1, ConstantOp(0.5)), "sqr")
+        Output(Pow(inp1, ConstantOp(2)), "pow2")
+        Output(Pow(inp1, ConstantOp(5)), "pow5")
+        Output(Pow(inp1, ConstantOp(1.2)), "pow1_2")
+        Output(Pow(inp1, inp2), "powa_b")
+        Output(Pow(ConstantOp(1.2), inp2), "pow12_b")
+    f = Function(builder.ops)
+    src = compileit(f, "test_pow")
+    paths.append(sys.argv[1]+"/TestPow.cpp")
+    with open(paths[-1], 'w') as f:
+        f.write(src)
+
 os.makedirs(sys.argv[1], exist_ok=True)
 check_1()
 check_rank()
 check_rank2()
 check_log()
+check_pow()
 
 # with open(sys.argv[1]+"/generated.txt", 'w') as f:
 #     f.write(";".join(paths))

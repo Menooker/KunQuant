@@ -141,6 +141,8 @@ class OpBase:
                 return TConst(self, other, [("swap", True)])
             return TConst(self, other)
         if isinstance(other, OpBase):
+            if isreverse:
+                return TBinary(other, self)
             return TBinary(self, other)
         raise RuntimeError("Don't know how to build binary " + str(type(other)))
 
@@ -178,6 +180,10 @@ class OpBase:
     def __truediv__ (self, other):
         from KunQuant.ops.ElewiseOp import Div, DivConst
         return self._build_op(other, Div, DivConst, False)
+    
+    def __rtruediv__ (self, other):
+        from KunQuant.ops.ElewiseOp import Div, DivConst
+        return self._build_op(other, Div, DivConst, True)
 
     def __lt__(self, other):
         from KunQuant.ops.ElewiseOp import LessThan, LessThanConst

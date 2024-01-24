@@ -110,6 +110,16 @@ INLINE vec_f32x8 sc_fmadd(
     return _mm256_fmadd_ps(a.v, b.v, c.v);
 }
 
+INLINE vec_f32x8 sc_fmsub(
+        vec_f32x8 const &a, vec_f32x8 const &b, vec_f32x8 const &c) {
+    return _mm256_fmsub_ps(a.v, b.v, c.v);
+}
+
+INLINE vec_f32x8 sc_fnmadd(
+        vec_f32x8 const &a, vec_f32x8 const &b, vec_f32x8 const &c) {
+    return _mm256_fnmadd_ps(a.v, b.v, c.v);
+}
+
 INLINE vec_f32x8 sc_max(vec_f32x8 const &a, vec_f32x8 const &b) {
     return _mm256_max_ps(a.v, b.v);
 }

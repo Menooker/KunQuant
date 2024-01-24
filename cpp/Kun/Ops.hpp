@@ -286,6 +286,10 @@ inline f32x8 Div(f32x8 a, float b) {
     return _mm256_div_ps(a, _mm256_set1_ps(b));
 }
 
+inline f32x8 Div(float a, f32x8 b) {
+    return _mm256_div_ps(_mm256_set1_ps(a), b);
+}
+
 inline f32x8 Or(f32x8 a, f32x8 b) { return _mm256_or_ps(a, b); }
 inline f32x8 And(f32x8 a, f32x8 b) { return _mm256_and_ps(a, b); }
 inline f32x8 Not(f32x8 a) {

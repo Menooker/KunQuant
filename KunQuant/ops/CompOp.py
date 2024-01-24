@@ -1,8 +1,9 @@
 from .ReduceOp import ReduceAdd, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax, ReduceDecayLinear
 from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
-from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp
+from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp, Exp, Log
 from collections import OrderedDict
 from typing import Union, List, Tuple
+import math
 
 class WindowedCompositiveOp(CompositiveOp, WindowedTrait):
     def __init__(self, v: OpBase, window: int, v2 = None) -> None:
@@ -149,3 +150,61 @@ class DecayLinear(WindowedCompositiveOp):
             v1 = ForeachBackWindow(v0, window)
             v2 = ReduceDecayLinear(IterValue(v1, v0), None, [("window", window)])
         return b.ops
+    
+class Pow(CompositiveOp):
+    def __init__(self, base: OpBase, expo: OpBase) -> None:
+        inputs = [base, expo]
+        super().__init__(inputs, None)
+
+    def decompose(self) -> List[OpBase]:
+        # pow(x,y) = exp(log(x)*y)
+        b = Builder(self.get_parent())
+        (base, expo) = self.inputs
+        if isinstance(base, ConstantOp):
+            basev = base.attrs["value"]
+            ln_base = math.log(basev)
+            if abs(ln_base-0) < 1e-5:
+                with b:
+                    ConstantOp(1)
+                return b.ops
+            elif abs(ln_base-1) < 1e-5:
+                with b:
+                    Exp(expo)
+                return b.ops
+            else:
+                with b:
+                    Exp(expo * ln_base)
+                    return b.ops
+        if isinstance(expo, ConstantOp):
+            expov = expo.attrs["value"]
+            if expov == 0.5:
+                with b:
+                    Sqrt(base)
+                    return b.ops
+            elif int(expov) == expov and expov <= 1024 and expov >= 0:
+                # pow(x, 5) >>>>  x1=x*x x2=x1*x2 out=x2*x
+                with b:
+                    cur_mul = base
+                    cur_exp = 1
+                    remain = int(expov)
+                    is_set = remain & cur_exp
+                    if is_set:
+                        curv = base
+                    else:
+                        curv = 1
+                    remain = remain & ~cur_exp
+                    while remain:
+                        cur_exp *= 2
+                        cur_mul = cur_mul * cur_mul
+                        is_set = remain & cur_exp
+                        if is_set:
+                            curv = curv * cur_mul
+                        remain = remain & ~cur_exp
+                return b.ops
+            else:
+                with b:
+                    Exp(Log(base) * expov)
+                    return b.ops
+        with b:
+            Exp(expo * Log(base))
+            return b.ops

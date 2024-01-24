@@ -108,8 +108,37 @@ def test_log():
         warnings.filterwarnings('ignore', r'(divide by zero encountered)|(invalid value encountered)')
         np.testing.assert_allclose(output, np.log(inp), rtol=1e-5, atol=1e-5, equal_nan=True)
 
+def test_pow():
+    modu = lib.getModule("test_pow")
+    base = np.zeros(shape=(16, 20), dtype="float32")
+    for i in range(16):
+        base[i,:] = pow(10, i-8)
+    base[-1,:] = 0
+    base[1,:] = np.nan
+    
+    expo = np.zeros(shape=(16, 20), dtype="float32")
+    for i in range(16):
+        expo[i,:] = pow(10, i/8-1)
+    expo[-1,:] = 0
+    expo[1,:] = np.nan
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": ST_ST8t(base), "b": ST_ST8t(expo)}, 0, 20)
+    print(out.keys())
+    # print(expected[:,0])
+    # print(output[:,0])
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', r'(divide by zero encountered)|(invalid value encountered)')
+        np.testing.assert_allclose(ST8t_ST(out["sqr"]), np.power(base, 0.5), rtol=1e-5, atol=1e-5, equal_nan=True)
+        np.testing.assert_allclose(ST8t_ST(out["pow2"]), np.power(base, 2), rtol=1e-5, atol=1e-5, equal_nan=True)
+        np.testing.assert_allclose(ST8t_ST(out["pow5"]), np.power(base, 5), rtol=1e-5, atol=1e-5, equal_nan=True)
+        # np.testing.assert_allclose(ST8t_ST(out["pow1_2"]), np.power(base, 1.2), rtol=1e-5, atol=1e-5, equal_nan=True)
+        # np.testing.assert_allclose(ST8t_ST(out["powa_b"]), np.power(base, expo), rtol=1e-5, atol=1e-5, equal_nan=True)
+        np.testing.assert_allclose(ST8t_ST(out["pow12_b"]), np.power(1.2, expo), rtol=1e-5, atol=1e-5, equal_nan=True)
+
 test_runtime()
 test_avg_stddev()
 test_rank()
 test_rank2()
 test_log()
+test_pow()
+print("done")
