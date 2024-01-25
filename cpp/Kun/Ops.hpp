@@ -261,6 +261,10 @@ struct ReduceRank {
     operator f32x8() { return less_count + (eq_count + 1.0f) / 2.0f; }
 };
 
+inline f32x8 Max(f32x8 a, f32x8 b) {
+    return kun_simd::sc_max(a, b);
+}
+
 inline f32x8 Abs(f32x8 a) { return kun_simd::sc_abs(kun_simd::vec_f32x8(a)); }
 
 inline f32x8 Add(f32x8 a, f32x8 b) { return _mm256_add_ps(a, b); }

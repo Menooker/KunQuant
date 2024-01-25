@@ -240,17 +240,17 @@ def get_alpha(df):
         df['alpha052']=stock.alpha052()
         df['alpha053']=stock.alpha053()
         df['alpha054']=stock.alpha054()
-        # df['alpha055']=stock.alpha055()
+        df['alpha055']=stock.alpha055()
         df['alpha057']=stock.alpha057()
-        # df['alpha060']=stock.alpha060()
-        # df['alpha061']=stock.alpha061()
-        # df['alpha062']=stock.alpha062()
-        # df['alpha064']=stock.alpha064()
-        # df['alpha065']=stock.alpha065()
-        # df['alpha066']=stock.alpha066()
-        # df['alpha068']=stock.alpha068()
-        # df['alpha071']=stock.alpha071()
-        # df['alpha072']=stock.alpha072()
+        df['alpha060']=stock.alpha060()
+        df['alpha061']=stock.alpha061()
+        df['alpha062']=stock.alpha062()
+        df['alpha064']=stock.alpha064()
+        df['alpha065']=stock.alpha065()
+        df['alpha066']=stock.alpha066()
+        df['alpha068']=stock.alpha068()
+        df['alpha071']=stock.alpha071()
+        df['alpha072']=stock.alpha072()
         # df['alpha073']=stock.alpha073()
         # df['alpha074']=stock.alpha074()
         # df['alpha075']=stock.alpha075()
@@ -644,7 +644,7 @@ class Alphas(object):
     # Alpha#64	 ((rank(correlation(sum(((open * 0.178404) + (low * (1 - 0.178404))), 12.7054),sum(adv120, 12.7054), 16.6208)) < rank(delta(((((high + low) / 2) * 0.178404) + (vwap * (1 -0.178404))), 3.69741))) * -1)
     def alpha064(self):
         adv120 = sma(self.volume, 120)
-        return ((rank(correlation(sma(((self.open * 0.178404) + (self.low * (1 - 0.178404))), 13),sma(adv120, 13), 17)) < rank(delta(((((self.high + self.low) / 2) * 0.178404) + (self.vwap * (1 -0.178404))), 3.69741))) * -1)
+        return ((rank(correlation(sma(((self.open * 0.178404) + (self.low * (1 - 0.178404))), 13),sma(adv120, 13), 17)) < rank(delta(((((self.high + self.low) / 2) * 0.178404) + (self.vwap * (1 -0.178404))), 4))) * -1)
     
     # Alpha#65	 ((rank(correlation(((open * 0.00817205) + (vwap * (1 - 0.00817205))), sum(adv60,8.6911), 6.40374)) < rank((open - ts_min(open, 13.635)))) * -1)
     def alpha065(self):
@@ -653,7 +653,7 @@ class Alphas(object):
       
     # Alpha#66	 ((rank(decay_linear(delta(vwap, 3.51013), 7.23052)) + Ts_Rank(decay_linear(((((low* 0.96633) + (low * (1 - 0.96633))) - vwap) / (open - ((high + low) / 2))), 11.4157), 6.72611)) * -1)
     def alpha066(self):
-        return ((rank(decay_linear(delta(self.vwap, 4).to_frame(), 7).CLOSE) + ts_rank(decay_linear(((((self.low* 0.96633) + (self.low * (1 - 0.96633))) - self.vwap) / (self.open - ((self.high + self.low) / 2))).to_frame(), 11).CLOSE, 7)) * -1)
+        return ((rank(decay_linear(delta(self.vwap, 4), 7)) + ts_rank(decay_linear(((((self.low* 0.96633) + (self.low * (1 - 0.96633))) - self.vwap) / (self.open - ((self.high + self.low) / 2))), 11), 7)) * -1)
     
     # Alpha#67	 ((rank((high - ts_min(high, 2.14593)))^rank(correlation(IndNeutralize(vwap,IndClass.sector), IndNeutralize(adv20, IndClass.subindustry), 6.02936))) * -1)
      
@@ -661,7 +661,7 @@ class Alphas(object):
     # Alpha#68	 ((Ts_Rank(correlation(rank(high), rank(adv15), 8.91644), 13.9333) <rank(delta(((close * 0.518371) + (low * (1 - 0.518371))), 1.06157))) * -1)
     def alpha068(self):
         adv15 = sma(self.volume, 15)
-        return ((ts_rank(correlation(rank(self.high), rank(adv15), 9), 14) <rank(delta(((self.close * 0.518371) + (self.low * (1 - 0.518371))), 1.06157))) * -1)
+        return ((ts_rank(correlation(rank(self.high), rank(adv15), 9), 14) <rank(delta(((self.close * 0.518371) + (self.low * (1 - 0.518371))), 1))) * -1)
     
     # Alpha#69	 ((rank(ts_max(delta(IndNeutralize(vwap, IndClass.industry), 2.72412),4.79344))^Ts_Rank(correlation(((close * 0.490655) + (vwap * (1 - 0.490655))), adv20, 4.92416),9.0615)) * -1)
          
@@ -671,18 +671,19 @@ class Alphas(object):
     # Alpha#71	 max(Ts_Rank(decay_linear(correlation(Ts_Rank(close, 3.43976), Ts_Rank(adv180,12.0647), 18.0175), 4.20501), 15.6948), Ts_Rank(decay_linear((rank(((low + open) - (vwap +vwap)))^2), 16.4662), 4.4388))
     def alpha071(self):
         adv180 = sma(self.volume, 180)
-        p1=ts_rank(decay_linear(correlation(ts_rank(self.close, 3), ts_rank(adv180,12), 18).to_frame(), 4).CLOSE, 16)
-        p2=ts_rank(decay_linear((rank(((self.low + self.open) - (self.vwap +self.vwap))).pow(2)).to_frame(), 16).CLOSE, 4)
-        df=pd.DataFrame({'p1':p1,'p2':p2})
-        df.at[df['p1']>=df['p2'],'max']=df['p1']
-        df.at[df['p2']>=df['p1'],'max']=df['p2']
-        return df['max']
+        p1=ts_rank(decay_linear(correlation(ts_rank(self.close, 3), ts_rank(adv180,12), 18), 4), 16)
+        p2=ts_rank(decay_linear((rank(((self.low + self.open) - (self.vwap +self.vwap))).pow(2)), 16), 4)
+        # df=pd.DataFrame({'p1':p1,'p2':p2})
+        # df.at[df['p1']>=df['p2'],'max']=df['p1']
+        # df.at[df['p2']>=df['p1'],'max']=df['p2']
+        # return df['max']
+        return p1.where(p1.values > p2.values, p2.values)
         #return max(ts_rank(decay_linear(correlation(ts_rank(self.close, 3), ts_rank(adv180,12), 18).to_frame(), 4).CLOSE, 16), ts_rank(decay_linear((rank(((self.low + self.open) - (self.vwap +self.vwap))).pow(2)).to_frame(), 16).CLOSE, 4))
     
     # Alpha#72	 (rank(decay_linear(correlation(((high + low) / 2), adv40, 8.93345), 10.1519)) /rank(decay_linear(correlation(Ts_Rank(vwap, 3.72469), Ts_Rank(volume, 18.5188), 6.86671),2.95011)))
     def alpha072(self):
         adv40 = sma(self.volume, 40)
-        return (rank(decay_linear(correlation(((self.high + self.low) / 2), adv40, 9).to_frame(), 10).CLOSE) /rank(decay_linear(correlation(ts_rank(self.vwap, 4), ts_rank(self.volume, 19), 7).to_frame(),3).CLOSE))
+        return (rank(decay_linear(correlation(((self.high + self.low) / 2), adv40, 9), 10)) /rank(decay_linear(correlation(ts_rank(self.vwap, 4), ts_rank(self.volume, 19), 7),3)))
     
     # Alpha#73	 (max(rank(decay_linear(delta(vwap, 4.72775), 2.91864)),Ts_Rank(decay_linear(((delta(((open * 0.147155) + (low * (1 - 0.147155))), 2.03608) / ((open *0.147155) + (low * (1 - 0.147155)))) * -1), 3.33829), 16.7411)) * -1)
     def alpha073(self):

@@ -51,6 +51,8 @@ def _is_const_1(op: OpBase) -> bool:
 def _is_mul_1(op: OpBase) -> OpBase:
     if isinstance(op, MulConst) and op.attrs["value"] == -1:
         return SubConst(op.inputs[0], 0, True)
+    if isinstance(op, MulConst) and op.attrs["value"] == 1:
+        return op.inputs[0]
     if isinstance(op, Mul):
         if _is_const_1(op.inputs[0]):
             return op.inputs[1]

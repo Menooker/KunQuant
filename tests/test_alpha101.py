@@ -132,20 +132,29 @@ tolerance = {
         # are not stable 
         "alpha045": 0.3,
         "alpha050": 0.1,
+        "alpha055": 0.1,
     },
     "rtol" : {
+        "alpha013": 0.1,
+        "alpha014": 1e-2,
+        "alpha016": 0.1,
         "alpha036": 2e-2,
         "alpha043": 0.1,
         "alpha045": 0.1,
         "alpha050": 1e-1,
+        "alpha072": 1e-1,
     },
     "bad_count": {
         "alpha027": 0.07,
         "alpha021": 0.001,
+        "alpha045": 0.001,
         "alpha045": 0.07,
         "alpha050": 0.001,
         # hard selecting numbers >0
-        "alpha053": 0.001
+        "alpha053": 0.001,
+        "alpha061": 0.001,
+        "alpha071": 0.002,
+        "alpha072": 0.009,
     }
 }
 

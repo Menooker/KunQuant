@@ -136,15 +136,20 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
         # print("============\nnew partition:", partition)
         selected = _select_next(ready_ops, opinfo, partition, f)
         while selected:
-            num_batch += 1
-            # maintain the ready queue for topology sort
-            for user in f.op_to_id[selected].uses:
-                pendingset = opinfo[user].pending_dep
-                del pendingset[selected]
-                if len(pendingset) == 0:
-                    ready_ops.append((user, num_batch))
-            del to_visit[selected]
-            del_from_ready_op(ready_ops, selected)
+            # remove the pending dependency. If an op is ready, put into ready queue
+            def maintain_ready_queue(s_op: OpBase):
+                nonlocal num_batch
+                num_batch += 1
+                # maintain the ready queue for topology sort
+                for user in f.op_to_id[s_op].uses:
+                    pendingset = opinfo[user].pending_dep
+                    del pendingset[s_op]
+                    if len(pendingset) == 0:
+                        ready_ops.append((user, num_batch))
+                del to_visit[s_op]
+                del_from_ready_op(ready_ops, s_op)
+            # end of maintain_ready_queue()
+            maintain_ready_queue(selected)
             if isinstance(selected, GraphSourceTrait):
                 # don't put input in partition yet
                 pass
@@ -154,9 +159,8 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
                 # if an output op is directly connected with CrossSectionalOp, merge it in the partition
                 for user in f.op_to_id[selected].uses:
                     if isinstance(user, Output):
-                        del_from_ready_op(ready_ops, user)
+                        maintain_ready_queue(user)
                         single_partition.add(opinfo, user)
-                        del to_visit[user]
                 partitions.append(single_partition)
             else:
                 # add op to partition
@@ -181,7 +185,8 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
             selected = _select_next(ready_ops, opinfo, partition, f)
         if partition.ops.__len__():
             partitions.append(partition)
-    assert(to_visit.__len__()==0)
+    if to_visit.__len__() != 0:
+        raise RuntimeError("Some ops are not visited") #"Some ops not visited: "+ "\n".join([str(eop) for eop in to_visit]))
     return partitions
 
 def _search_output_use(op: OpBase, info: OpInfo) -> OpBase:
