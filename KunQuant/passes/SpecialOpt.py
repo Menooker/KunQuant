@@ -57,6 +57,17 @@ def _is_ok_for_reduce_opt(op: OpBase, enabled: bool) -> Tuple[OpBase, int]:
     window = loop.attrs["window"]
     return window_data, window
 
+def _is_abs_positive(ranges: _ValueRangeManager, op: OpBase) -> OpBase:
+    '''
+    if the op matches abs(X), where X>=0
+    '''
+    if not isinstance(op, Abs):
+        return None
+    inner = op.inputs[0]
+    if ranges.infer_range(inner).start >= 0:
+        return inner
+    return None
+
 def _is_sub_log(ranges: _ValueRangeManager, op: OpBase) -> OpBase:
     '''
     if the op matches sub(log(X), log(Y)) or sub(log(X), backref(log(Y)))
@@ -182,6 +193,8 @@ def special_impl(ops: List[OpBase], options: dict = {}) -> List[OpBase]:
         if _transform(_is_div_cmp_1, op):
             continue
         if _transform(_is_sign_scale, op):
+            continue
+        if _transform(_is_abs_positive, op):
             continue
         
         # if it is reduce-sum in non-loop context

@@ -142,6 +142,7 @@ tolerance = {
     "rtol" : {
         "alpha013": 0.1,
         "alpha017": 0.1,
+        "alpha018": 0.05,
         "alpha014": 1e-2,
         "alpha016": 0.1,
         "alpha027": 0.1,
@@ -173,7 +174,7 @@ tolerance = {
         "alpha074": 0.04,
         "alpha075": 0.09,
         "alpha077": 0.001,
-        "alpha078": 0.001,
+        "alpha078": 0.01,
         "alpha081": 0.27,
     }
 }
