@@ -470,6 +470,23 @@ def alpha081(self: AllData):
 # Alpha#83	 ((rank(delay(((high - low) / (sum(close, 5) / 5)), 2)) * rank(rank(volume))) / (((high -low) / (sum(close, 5) / 5)) / (vwap - close)))
 def alpha083(self: AllData):
     return ((rank(delay(((self.high - self.low) / (ts_sum(self.close, 5) / 5)), 2)) * rank(rank(self.volume))) / (((self.high -self.low) / (ts_sum(self.close, 5) / 5)) / (self.vwap - self.close)))
+
+# Alpha#84	 SignedPower(Ts_Rank((vwap - ts_max(vwap, 15.3217)), 20.7127), delta(close,4.96796))
+def alpha084(self: AllData):
+    return Pow(ts_rank((self.vwap - ts_max(self.vwap, 15)), 21), delta(self.close,5))
+
+# Alpha#85	 (rank(correlation(((high * 0.876703) + (close * (1 - 0.876703))), adv30,9.61331))^rank(correlation(Ts_Rank(((high + low) / 2), 3.70596), Ts_Rank(volume, 10.1595),7.11408)))
+def alpha085(self: AllData):
+    adv30 = sma(self.volume, 30)
+    base = rank(correlation(((self.high * 0.876703) + (self.close * (1 - 0.876703))), adv30,10))
+    expo = rank(correlation(ts_rank(((self.high + self.low) / 2), 4), ts_rank(self.volume, 10),7))
+    return Pow(base, expo)
+
+def alpha086(self):
+    adv20 = sma(self.volume, 20)
+    a = ts_rank(correlation(self.close, sma(adv20, 15), 6), 20)
+    b = rank(((self.open+ self.close) - (self.vwap +self.open)))
+    return (bool_to_10(a < b) * -1)
  
 
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
@@ -478,5 +495,5 @@ all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha00
     alpha033, alpha034, alpha035, alpha036, alpha037, alpha038, alpha039, alpha040, alpha041, alpha042, alpha043,
     alpha044, alpha045, alpha046, alpha047, alpha049, alpha050, alpha051, alpha052, alpha053, alpha054, alpha055,
     alpha057, alpha060, alpha061, alpha062, alpha064, alpha065, alpha066, alpha068, alpha071, alpha072, alpha073,
-    alpha074, alpha075, alpha077, alpha078, alpha081, alpha083
+    alpha074, alpha075, alpha077, alpha078, alpha081, alpha083, alpha084, alpha085, alpha086
     ]
