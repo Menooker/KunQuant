@@ -11,6 +11,8 @@ def optimize(f: Function, options: dict)->Dict[str, int]:
     if PassUtil.debug_mode:
         print("Before optimize: ", f)
     ret = infer_window(f, options)
+    # optimize before decompose to let value ranges work
+    special_optimize(f, options)
     decompose(f, options)
     expr_fold(f, options)
     special_optimize(f, options)

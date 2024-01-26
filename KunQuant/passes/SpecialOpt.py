@@ -1,10 +1,44 @@
-from KunQuant.ops.MiscOp import BackRef
-from KunQuant.ops.ElewiseOp import AddConst, DivConst, Sqrt, Sub, Log, Div, CmpOp, Mul, Sign
+from KunQuant.ops import *
 from KunQuant.passes.Util import kun_pass
 from KunQuant.Op import Builder, OpBase, ForeachBackWindow, Rank, WindowedTempOutput, Output, IterValue, ConstantOp, Scale
-from KunQuant.ops import ReduceAdd, FastWindowedSum, SubConst, MulConst
 from KunQuant.Stage import Function
 from typing import List, Dict, Tuple
+from dataclasses import dataclass
+import math
+
+@dataclass
+class _ValueRange:
+    start: float
+    end: float
+    include_start: bool
+    include_end: bool
+    # def __lt__(self, other: '_ValueRange') -> bool:
+    #     return 
+
+# todo: more complex analysis
+class _ValueRangeManager:
+    def __init__(self) -> None:
+        self.values: Dict[OpBase, _ValueRange] = dict()
+            
+    def _infer_range(self, op: OpBase) -> _ValueRange:
+        if op in self.values:
+            return self.values[op]
+        if isinstance(op, Rank):
+            return _ValueRange(0.0, 1.0, True, True)
+        if isinstance(op, TsRank):
+            return _ValueRange(0.0, op.attrs["window"]-1, True, True)
+        if isinstance(op, ConstantOp):
+            val = op.attrs["value"]
+            return _ValueRange(val, val, True, True)
+        return _ValueRange(-math.inf, math.inf, False, False)
+    
+    def infer_range(self, op: OpBase) -> _ValueRange:
+        if op in self.values:
+            return self.values[op]
+        ret = self._infer_range(op)
+        self.values[op] = ret
+        return ret
+        
 
 def _is_ok_for_reduce_opt(op: OpBase, enabled: bool) -> Tuple[OpBase, int]:
     if not enabled:
@@ -23,7 +57,7 @@ def _is_ok_for_reduce_opt(op: OpBase, enabled: bool) -> Tuple[OpBase, int]:
     window = loop.attrs["window"]
     return window_data, window
 
-def _is_sub_log(op: OpBase) -> OpBase:
+def _is_sub_log(ranges: _ValueRangeManager, op: OpBase) -> OpBase:
     '''
     if the op matches sub(log(X), log(Y)) or sub(log(X), backref(log(Y)))
     '''
@@ -48,7 +82,7 @@ def _is_sub_log(op: OpBase) -> OpBase:
 def _is_const_1(op: OpBase) -> bool:
     return isinstance(op, ConstantOp) and op.attrs["value"] == 1
 
-def _is_mul_1(op: OpBase) -> OpBase:
+def _is_mul_1(ranges: _ValueRangeManager, op: OpBase) -> OpBase:
     if isinstance(op, MulConst) and op.attrs["value"] == -1:
         return SubConst(op.inputs[0], 0, True)
     if isinstance(op, MulConst) and op.attrs["value"] == 1:
@@ -60,7 +94,7 @@ def _is_mul_1(op: OpBase) -> OpBase:
             return op.inputs[0]
     return None
 
-def _is_div_cmp_1(op: OpBase) -> OpBase:
+def _is_div_cmp_1(ranges: _ValueRangeManager, op: OpBase) -> OpBase:
     if isinstance(op, CmpOp):
         lhs, rhs = op.inputs
         if isinstance(lhs, Div):
@@ -80,7 +114,7 @@ def _is_div_cmp_1(op: OpBase) -> OpBase:
 _monotonic_ops = {Sqrt, Log, Scale, Rank}
 _monotonic_add = {AddConst, MulConst}
 _monotonic_sub = {SubConst, DivConst}
-def _is_rank_monotonic_inc(op: OpBase) -> OpBase:
+def _is_rank_monotonic_inc(ranges: _ValueRangeManager, op: OpBase) -> OpBase:
     '''
     check if is Rank(T(x)) where T is monotonicly increasing
     '''
@@ -93,9 +127,15 @@ def _is_rank_monotonic_inc(op: OpBase) -> OpBase:
         return Rank(internal.inputs[0])
     if internal.__class__ in _monotonic_add and internal.attrs["value"] > 0:
         return Rank(internal.inputs[0])
+    if isinstance(internal, Pow) and isinstance(internal.inputs[1], ConstantOp) and internal.inputs[1].attrs["value"] > 0:
+        # x^C, where C > 0. It is monotonic_inc when x > 0
+        base = internal.inputs[0]
+        ran = ranges.infer_range(base)
+        if ran.start >= 0:
+            return Rank(internal.inputs[0])
     return None
 
-def _is_sign_scale(op: OpBase) -> OpBase:
+def _is_sign_scale(ranges: _ValueRangeManager, op: OpBase) -> OpBase:
     '''
     check if is Sign(T(x)) where T does not change the signness of x
     '''
@@ -114,11 +154,12 @@ def special_impl(ops: List[OpBase], options: dict = {}) -> List[OpBase]:
     replace_map = dict()
     out = []
     changed = False
+    ranges = _ValueRangeManager()
     def _transform(f, op) -> bool:
         nonlocal changed, replace_map, out
         b = Builder(op.get_parent())
         with b:
-            newop = f(op)
+            newop = f(ranges, op)
         if newop is not None:
             if b.ops:
                 out.extend(b.ops)

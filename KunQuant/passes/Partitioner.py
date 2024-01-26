@@ -2,6 +2,7 @@ from KunQuant.Op import OpBase, Output, Input, CrossSectionalOp, GraphSourceTrai
 from KunQuant.Stage import Function, OpInfo
 from KunQuant.ops import GenericPartition
 from typing import List, Dict, Set, Tuple
+from .Util import debug_mode
 import typing
 from dataclasses import dataclass
 from collections import OrderedDict
@@ -58,7 +59,7 @@ def _collect_op_info(f: Function)-> Dict[OpBase, _PartitionOpInfo]:
         depender = set()
         for user in finfo.uses:
             depender.add(user)
-            depender.update(f.op_to_id[user].uses)
+            depender.update(ret[user].depender)
         ret[op] = _PartitionOpInfo(depender, dict([(inp, None) for inp in op.inputs]))
     return ret
 
@@ -197,6 +198,32 @@ def _search_output_use(op: OpBase, info: OpInfo) -> OpBase:
             return use
     return None
 
+def _print_partition_info(stages: List[GenericPartition], impl: List[Function]):
+    if debug_mode < 2:
+        return
+    name_to_impl = dict([(f.name, f) for f in impl])
+    for s in stages:
+        print(f'''===========================
+partition: {s.attrs["name"]}
+inputs: {[f.attrs["name"] for f in s.inputs]}
+Impl:
+{name_to_impl[s.attrs["name"]]}''')
+    if debug_mode < 3:
+        return
+    # loop check
+    for s in stages:
+        stck = []
+        def recurive(x: GenericPartition):
+            stck.append(x)
+            if x == s and len(stck) > 1:
+                raise RuntimeError("Loop in partitions: " + str([val.attrs["name"] for val in stck]))
+            for p in x.inputs:
+                recurive(p)
+            stck.pop()
+        recurive(s)
+
+    
+
 def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Function, List[Function]]:
     naming_table = dict()
     for op in f.ops:
@@ -286,6 +313,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
         out_impl.append(p.impl_func)
         for dep in p.depending:
             p.stage_op.inputs.append(dep.stage_op)
+    _print_partition_info(out_stages, out_impl)
     out_stages = Function.topo_sort_ops(out_stages)
     return Function(out_stages), out_impl
 

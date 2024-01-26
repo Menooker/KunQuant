@@ -55,6 +55,9 @@ def covariance(v: OpBase, v2: OpBase, window: int) -> OpBase:
 def sma(v: OpBase, window: int) -> OpBase:
     return WindowedAvg(v, window)
 
+def bool_to_10(v: OpBase) -> OpBase:
+    return Select(v, ConstantOp(1), ConstantOp(0))
+
 scale = Scale
 
 delay = BackRef
@@ -371,7 +374,7 @@ def alpha060(self: AllData):
 # Alpha#61	 (rank((vwap - ts_min(vwap, 16.1219))) < rank(correlation(vwap, adv180, 17.9282)))
 def alpha061(self: AllData):
     adv180 = sma(self.volume, 180)
-    return Select(rank((self.vwap - ts_min(self.vwap, 16))) < rank(correlation(self.vwap, adv180, 18)), ConstantOp(1), ConstantOp(0))
+    return bool_to_10(rank((self.vwap - ts_min(self.vwap, 16))) < rank(correlation(self.vwap, adv180, 18)))
 
 # Alpha#62	 ((rank(correlation(vwap, sum(adv20, 22.4101), 9.91009)) < rank(((rank(open) +rank(open)) < (rank(((high + low) / 2)) + rank(high))))) * -1)
 def alpha062(self: AllData):
@@ -379,8 +382,8 @@ def alpha062(self: AllData):
     v1 = rank(correlation(self.vwap, sma(adv20, 22), 10))
     v2 = (rank(self.open) +rank(self.open))
     v3 = (rank(((self.high + self.low) / 2)) + rank(self.high))
-    v4 = Select(v2 < v3, ConstantOp(1), ConstantOp(0))
-    v5 = Select(v1 < rank(v4), ConstantOp(1), ConstantOp(0))
+    v4 = bool_to_10(v2 < v3)
+    v5 = bool_to_10(v1 < rank(v4))
     return (v5 * -1)
 
 # Alpha#64	 ((rank(correlation(sum(((open * 0.178404) + (low * (1 - 0.178404))), 12.7054),sum(adv120, 12.7054), 16.6208)) < rank(delta(((((high + low) / 2) * 0.178404) + (vwap * (1 -0.178404))), 3.69741))) * -1)
@@ -388,7 +391,7 @@ def alpha064(self: AllData):
     adv120 = sma(self.volume, 120)
     a = rank(correlation(sma(((self.open * 0.178404) + (self.low * (1 - 0.178404))), 13),sma(adv120, 13), 17))
     b = rank(delta(((((self.high + self.low) / 2) * 0.178404) + (self.vwap * (1 -0.178404))), 4))
-    c = Select(a < b, ConstantOp(1), ConstantOp(0))
+    c = bool_to_10(a < b)
     return (c * -1)
 
 # Alpha#65	 ((rank(correlation(((open * 0.00817205) + (vwap * (1 - 0.00817205))), sum(adv60,8.6911), 6.40374)) < rank((open - ts_min(open, 13.635)))) * -1)
@@ -396,21 +399,21 @@ def alpha065(self: AllData):
     adv60 = sma(self.volume, 60)
     a = rank(correlation(((self.open * 0.00817205) + (self.vwap * (1 - 0.00817205))), sma(adv60,9), 6))
     b = rank((self.open - ts_min(self.open, 14)))
-    return (Select(a < b, ConstantOp(1), ConstantOp(0)) * -1)
+    return (bool_to_10(a < b) * -1)
     
 # Alpha#66	 ((rank(decay_linear(delta(vwap, 3.51013), 7.23052)) + Ts_Rank(decay_linear(((((low* 0.96633) + (low * (1 - 0.96633))) - vwap) / (open - ((high + low) / 2))), 11.4157), 6.72611)) * -1)
 def alpha066(self: AllData):
     return ((rank(decay_linear(delta(self.vwap, 4), 7)) + ts_rank(decay_linear(((((self.low* 0.96633) + (self.low * (1 - 0.96633))) - self.vwap) / (self.open - ((self.high + self.low) / 2))), 11), 7)) * -1)
 
 # Alpha#68	 ((Ts_Rank(correlation(rank(high), rank(adv15), 8.91644), 13.9333) <rank(delta(((close * 0.518371) + (low * (1 - 0.518371))), 1.06157))) * -1)
-def alpha068(self):
+def alpha068(self: AllData):
     adv15 = sma(self.volume, 15)
     a = ts_rank(correlation(rank(self.high), rank(adv15), 9), 14)
     b = rank(delta(((self.close * 0.518371) + (self.low * (1 - 0.518371))), 1))
-    return (Select(a < b, ConstantOp(1), ConstantOp(0)) * -1)
+    return (bool_to_10(a < b) * -1)
 
 # Alpha#71	 max(Ts_Rank(decay_linear(correlation(Ts_Rank(close, 3.43976), Ts_Rank(adv180,12.0647), 18.0175), 4.20501), 15.6948), Ts_Rank(decay_linear((rank(((low + open) - (vwap +vwap)))^2), 16.4662), 4.4388))
-def alpha071(self):
+def alpha071(self: AllData):
     adv180 = sma(self.volume, 180)
     p1=ts_rank(decay_linear(correlation(ts_rank(self.close, 3), ts_rank(adv180,12), 18), 4), 16)
     inner = Pow(rank(((self.low + self.open) - (self.vwap +self.vwap))), ConstantOp(2))
@@ -419,16 +422,61 @@ def alpha071(self):
     #return max(ts_rank(decay_linear(correlation(ts_rank(self.close, 3), ts_rank(adv180,12), 18).to_frame(), 4).CLOSE, 16), ts_rank(decay_linear((rank(((self.low + self.open) - (self.vwap +self.vwap))).pow(2)).to_frame(), 16).CLOSE, 4))
 
 # Alpha#72	 (rank(decay_linear(correlation(((high + low) / 2), adv40, 8.93345), 10.1519)) /rank(decay_linear(correlation(Ts_Rank(vwap, 3.72469), Ts_Rank(volume, 18.5188), 6.86671),2.95011)))
-def alpha072(self):
+def alpha072(self: AllData):
     adv40 = sma(self.volume, 40)
     a = rank(decay_linear(correlation(((self.high + self.low) / 2), adv40, 9), 10)) + 0.0001
     b = rank(decay_linear(correlation(ts_rank(self.vwap, 4), ts_rank(self.volume, 19), 7),3)) + 0.0001
     return (a / b)    
+
+# Alpha#73	 (max(rank(decay_linear(delta(vwap, 4.72775), 2.91864)),Ts_Rank(decay_linear(((delta(((open * 0.147155) + (low * (1 - 0.147155))), 2.03608) / ((open *0.147155) + (low * (1 - 0.147155)))) * -1), 3.33829), 16.7411)) * -1)
+def alpha073(self: AllData):
+    p1=rank(decay_linear(delta(self.vwap, 5), 3))
+    p2=ts_rank(decay_linear(((delta(((self.open * 0.147155) + (self.low * (1 - 0.147155))), 2) / ((self.open *0.147155) + (self.low * (1 - 0.147155)))) * -1), 3), 17)
+    return -1* Max(p1, p2)
+
+# Alpha#74	 ((rank(correlation(close, sum(adv30, 37.4843), 15.1365)) <rank(correlation(rank(((high * 0.0261661) + (vwap * (1 - 0.0261661)))), rank(volume), 11.4791)))* -1)
+def alpha074(self: AllData):
+    adv30 = sma(self.volume, 30)
+    a = rank(correlation(self.close, sma(adv30, 37), 15))
+    b = rank(correlation(rank(((self.high * 0.0261661) + (self.vwap * (1 - 0.0261661)))), rank(self.volume), 11))
+    return (bool_to_10(a < b)* -1)
+
+# Alpha#75	 (rank(correlation(vwap, volume, 4.24304)) < rank(correlation(rank(low), rank(adv50),12.4413)))
+def alpha075(self: AllData):
+    adv50 = sma(self.volume, 50)
+    return bool_to_10(rank(correlation(self.vwap, self.volume, 4)) < rank(correlation(rank(self.low), rank(adv50),12)))
+
+def alpha077(self: AllData):
+    adv40 = sma(self.volume, 40)
+    p1=rank(decay_linear(((((self.high + self.low) / 2) + self.high) - (self.vwap + self.high)), 20))
+    p2=rank(decay_linear(correlation(((self.high + self.low) / 2), adv40, 3), 6))
+    return Min(p1, p2)
+
+# Alpha#78	 (rank(correlation(sum(((low * 0.352233) + (vwap * (1 - 0.352233))), 19.7428),sum(adv40, 19.7428), 6.83313))^rank(correlation(rank(vwap), rank(volume), 5.77492)))
+def alpha078(self: AllData):
+    adv40 = sma(self.volume, 40)
+    a = rank(correlation(ts_sum(((self.low * 0.352233) + (self.vwap * (1 - 0.352233))), 20),ts_sum(adv40,20), 7))
+    b = rank(SetInfOrNanToValue(correlation(rank(self.vwap), rank(self.volume), 6)))
+    return Pow(a, b)
+
+# Alpha#81	 ((rank(Log(product(rank((rank(correlation(vwap, sum(adv10, 49.6054),8.47743))^4)), 14.9655))) < rank(correlation(rank(vwap), rank(volume), 5.07914))) * -1)
+def alpha081(self: AllData):
+    adv10 = sma(self.volume, 10)
+    inner = Pow(rank(correlation(self.vwap, ts_sum(adv10, 50),8)), ConstantOp(4))
+    a = rank(Log(WindowedProduct(rank(inner), 15)))
+    b = rank(correlation(rank(self.vwap), rank(self.volume), 5))
+    return (bool_to_10(a < b) * -1)
+
+# Alpha#83	 ((rank(delay(((high - low) / (sum(close, 5) / 5)), 2)) * rank(rank(volume))) / (((high -low) / (sum(close, 5) / 5)) / (vwap - close)))
+def alpha083(self: AllData):
+    return ((rank(delay(((self.high - self.low) / (ts_sum(self.close, 5) / 5)), 2)) * rank(rank(self.volume))) / (((self.high -self.low) / (ts_sum(self.close, 5) / 5)) / (self.vwap - self.close)))
+ 
 
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
     alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020, alpha021,
     alpha022, alpha023, alpha024, alpha025, alpha026, alpha027, alpha028, alpha029, alpha030, alpha031, alpha032,
     alpha033, alpha034, alpha035, alpha036, alpha037, alpha038, alpha039, alpha040, alpha041, alpha042, alpha043,
     alpha044, alpha045, alpha046, alpha047, alpha049, alpha050, alpha051, alpha052, alpha053, alpha054, alpha055,
-    alpha057, alpha060, alpha061, alpha062, alpha064, alpha065, alpha066, alpha068, alpha071, alpha072
+    alpha057, alpha060, alpha061, alpha062, alpha064, alpha065, alpha066, alpha068, alpha071, alpha072, alpha073,
+    alpha074, alpha075, alpha077, alpha078, alpha081, alpha083
     ]

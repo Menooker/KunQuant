@@ -168,6 +168,12 @@ struct ReduceAdd {
     operator f32x8() { return v; }
 };
 
+struct ReduceMul {
+    f32x8 v = _mm256_setzero_ps();
+    void step(f32x8 input, size_t index) { v = _mm256_mul_ps(v, input); }
+    operator f32x8() { return v; }
+};
+
 struct ReduceMin {
     f32x8 v = _mm256_set1_ps(std::numeric_limits<float>::infinity());
     void step(f32x8 input, size_t index) { v = _mm256_min_ps(v, input); }
@@ -262,7 +268,11 @@ struct ReduceRank {
 };
 
 inline f32x8 Max(f32x8 a, f32x8 b) {
-    return kun_simd::sc_max(a, b);
+    return _mm256_max_ps(a, b);
+}
+
+inline f32x8 Min(f32x8 a, f32x8 b) {
+    return _mm256_min_ps(a, b);
 }
 
 inline f32x8 Abs(f32x8 a) { return kun_simd::sc_abs(kun_simd::vec_f32x8(a)); }

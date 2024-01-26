@@ -37,6 +37,9 @@ class And(BinaryElementwiseOp):
 class Max(BinaryElementwiseOp):
     pass
 
+class Min(BinaryElementwiseOp):
+    pass
+
 class Div(BinaryElementwiseOp):
     pass
 

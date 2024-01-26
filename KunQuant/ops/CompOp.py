@@ -1,4 +1,4 @@
-from .ReduceOp import ReduceAdd, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax, ReduceDecayLinear
+from .ReduceOp import ReduceAdd, ReduceMul, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax, ReduceDecayLinear
 from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
 from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp, Exp, Log
 from collections import OrderedDict
@@ -28,7 +28,11 @@ class WindowedReduce(WindowedCompositiveOp):
 class WindowedSum(WindowedReduce):
     def make_reduce(self, v: OpBase) -> OpBase:
         return ReduceAdd(v)
-    
+
+class WindowedProduct(WindowedReduce):
+    def make_reduce(self, v: OpBase) -> OpBase:
+        return ReduceMul(v)
+
 class WindowedMin(WindowedReduce):
     def make_reduce(self, v: OpBase) -> OpBase:
         return ReduceMin(v)

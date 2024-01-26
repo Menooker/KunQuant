@@ -3,6 +3,9 @@ from KunQuant.Op import ReductionOp
 class ReduceAdd(ReductionOp):
     pass
 
+class ReduceMul(ReductionOp):
+    pass
+
 class ReduceMin(ReductionOp):
     pass
 
