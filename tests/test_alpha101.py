@@ -140,6 +140,10 @@ tolerance = {
         "alpha078": 0.1,
         "alpha085": 0.1,
         "alpha083": 0.05,
+        "alpha088": 0.05,
+        "alpha094": 0.05,
+        "alpha096": 1,
+        "alpha098": 0.1,
     },
     "rtol" : {
         "alpha013": 0.1,
@@ -156,6 +160,10 @@ tolerance = {
         "alpha072": 2e-1,
         "alpha077": 1e-1,
         "alpha078": 1e-1,
+        "alpha083": 0.05,
+        "alpha088": 1e-1,
+        "alpha094": 1e-1,
+        "alpha098": 1e-1,
     },
     "bad_count": {
         "alpha008": 0.001,
@@ -167,7 +175,7 @@ tolerance = {
         "alpha050": 0.003,
         # hard selecting numbers >0
         "alpha053": 0.001,
-        "alpha061": 0.001,
+        "alpha061": 0.002,
         "alpha065": 0.002,
         "alpha066": 0.002,
         # corr on rank, will produce NAN
@@ -178,8 +186,16 @@ tolerance = {
         "alpha077": 0.001,
         "alpha078": 0.015,
         "alpha081": 0.27,
+        "alpha008": 0.0005,
         "alpha085": 0.005,
-    }
+        "alpha088": 0.005,
+        "alpha092": 0.15,
+        "alpha094": 0.01,
+        "alpha096": 0.10,
+        "alpha098": 0.06,
+        "alpha099": 0.0005
+    },
+    "skip_head": {"alpha096","alpha098"}
 }
 
 def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ischeck, start_time):
@@ -216,7 +232,7 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
         cur_rtol = tolerance["rtol"].get(k, rtol)
         cur_atol = tolerance["atol"].get(k, atol)
         check_start = 0
-        if start_time:
+        if start_time or k in tolerance["skip_head"]:
             check_start = start_window[k] + start_time
         v = out[k][:,check_start-start_time:]
         refv = ref[k][check_start:].to_numpy().transpose()

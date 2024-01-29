@@ -250,6 +250,20 @@ struct ReduceArgMax {
     operator f32x8() { return idx; }
 };
 
+struct ReduceArgMin {
+    f32x8 v = _mm256_set1_ps(std::numeric_limits<float>::infinity());
+    f32x8 idx = _mm256_setzero_ps();
+    void step(f32x8 input, size_t index) {
+        auto is_nan = isNAN(v, input);
+        auto cmp = GreaterThan(v, input);
+        v = Select(cmp, input, v);
+        v = Select(is_nan, _mm256_set1_ps(NAN), v);
+        idx = Select(cmp, _mm256_set1_ps(float(index)), idx);
+        idx = Select(is_nan, _mm256_set1_ps(NAN), idx);
+    }
+    operator f32x8() { return idx; }
+};
+
 struct ReduceRank {
     kun_simd::vec_f32x8 v;
     kun_simd::vec_f32x8 less_count = 0;

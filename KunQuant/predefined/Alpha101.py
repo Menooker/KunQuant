@@ -25,6 +25,9 @@ def returns(v: OpBase) -> OpBase:
 def ts_argmax(v: OpBase, window: int) -> OpBase:
     return TsArgMax(v, window)
 
+def ts_argmin(v: OpBase, window: int) -> OpBase:
+    return TsArgMin(v, window)
+
 def ts_rank(v: OpBase, window: int) -> OpBase:
     return TsRank(v, window)
 
@@ -482,12 +485,52 @@ def alpha085(self: AllData):
     expo = rank(correlation(ts_rank(((self.high + self.low) / 2), 4), ts_rank(self.volume, 10),7))
     return Pow(base, expo)
 
-def alpha086(self):
+def alpha086(self: AllData):
     adv20 = sma(self.volume, 20)
     a = ts_rank(correlation(self.close, sma(adv20, 15), 6), 20)
     b = rank(((self.open+ self.close) - (self.vwap +self.open)))
     return (bool_to_10(a < b) * -1)
- 
+
+def alpha088(self: AllData):
+    adv60 = sma(self.volume, 60)
+    p1=rank(decay_linear(((rank(self.open) + rank(self.low)) - (rank(self.high) + rank(self.close))),8))
+    p2=ts_rank(decay_linear(SetInfOrNanToValue(correlation(ts_rank(self.close, 8), ts_rank(adv60,21), 8)), 7), 3)
+    return Min(p2, p1)
+
+def alpha092(self: AllData):
+    adv30 = sma(self.volume, 30)
+    p1=ts_rank(decay_linear(bool_to_10((((self.high + self.low) / 2) + self.close) < (self.low + self.open)), 15),19)
+    p2=ts_rank(decay_linear(SetInfOrNanToValue(correlation(rank(self.low), rank(adv30), 8)), 7),7)
+    return Min(p2, p1)
+
+def alpha094(self: AllData):
+    adv60 = sma(self.volume, 60)
+    base = rank((self.vwap - ts_min(self.vwap, 12)))
+    expo = ts_rank(SetInfOrNanToValue(correlation(ts_rank(self.vwap,20), ts_rank(adv60, 4), 18)), 3)
+    return ((Pow(base, expo) * -1))
+
+# Alpha#95	 (rank((open - ts_min(open, 12.4105))) < Ts_Rank((rank(correlation(sum(((high + low)/ 2), 19.1351), sum(adv40, 19.1351), 12.8742))^5), 11.7584))
+def alpha095(self: AllData):
+    adv40 = sma(self.volume, 40)
+    return bool_to_10(rank((self.open - ts_min(self.open, 12))) < ts_rank(Pow(rank(correlation(sma(((self.high + self.low)/ 2), 19), sma(adv40, 19), 13)), ConstantOp(5)), 12))
+
+def alpha096(self: AllData):
+    adv60 = sma(self.volume, 60)
+    p1=ts_rank(decay_linear(SetInfOrNanToValue(correlation(rank(self.vwap), rank(self.volume), 4)),4), 8)
+    p2=ts_rank(decay_linear(ts_argmax(SetInfOrNanToValue(correlation(ts_rank(self.close, 7),ts_rank(adv60, 4), 4)), 13), 14), 13)
+    return -1* Max(p1, p2)
+
+def alpha098(self: AllData):
+    adv5 = sma(self.volume, 5)
+    adv15 = sma(self.volume, 15)
+    return (rank(decay_linear(correlation(self.vwap, sma(adv5, 26), 5), 7)) -rank(decay_linear(ts_rank(ts_argmin(SetInfOrNanToValue(correlation(rank(self.open), rank(adv15), 21)), 9),7), 8)))
+    
+def alpha099(self: AllData):
+    adv60 = sma(self.volume, 60)
+    return (bool_to_10(rank(correlation(ts_sum(((self.high + self.low) / 2), 20), ts_sum(adv60, 20), 9)) <rank(correlation(self.low, self.volume, 6))) * -1)
+
+def alpha101(self: AllData):
+    return (self.close - self.open) /((self.high - self.low) + 0.001)
 
 all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha007, alpha008, alpha009, alpha010,
     alpha011, alpha012, alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha019, alpha020, alpha021,
@@ -495,5 +538,6 @@ all_alpha = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha00
     alpha033, alpha034, alpha035, alpha036, alpha037, alpha038, alpha039, alpha040, alpha041, alpha042, alpha043,
     alpha044, alpha045, alpha046, alpha047, alpha049, alpha050, alpha051, alpha052, alpha053, alpha054, alpha055,
     alpha057, alpha060, alpha061, alpha062, alpha064, alpha065, alpha066, alpha068, alpha071, alpha072, alpha073,
-    alpha074, alpha075, alpha077, alpha078, alpha081, alpha083, alpha084, alpha085, alpha086
+    alpha074, alpha075, alpha077, alpha078, alpha081, alpha083, alpha084, alpha085, alpha086, alpha088, alpha092,
+    alpha094, alpha095, alpha096, alpha098, alpha099, alpha101
     ]
