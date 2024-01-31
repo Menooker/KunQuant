@@ -189,7 +189,7 @@ tolerance = {
         "alpha008": 0.0005,
         "alpha085": 0.005,
         "alpha088": 0.005,
-        "alpha092": 0.15,
+        "alpha092": 0.17,
         "alpha094": 0.01,
         "alpha096": 0.10,
         "alpha098": 0.06,

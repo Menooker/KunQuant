@@ -1,6 +1,6 @@
 from .ReduceOp import ReduceAdd, ReduceMul, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax, ReduceDecayLinear, ReduceArgMin
 from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
-from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp, Exp, Log
+from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp, Exp, Log, Min, Max
 from collections import OrderedDict
 from typing import Union, List, Tuple
 import math
@@ -140,7 +140,7 @@ class TsRank(WindowedCompositiveOp):
             v2 = ReduceRank(IterValue(v1, v0), self.inputs[0])
         return b.ops
 
-class ClipZero(CompositiveOp):
+class Clip(CompositiveOp):
     def __init__(self, v: OpBase, eps: float) -> None:
         inputs = [v]
         super().__init__(inputs, [("value", eps)])
@@ -150,9 +150,8 @@ class ClipZero(CompositiveOp):
         inp = self.inputs[0]
         b = Builder(self.get_parent())
         with b:
-            v0 = LessThan(inp, ConstantOp(eps))
-            v1 = GreaterThan(inp, ConstantOp(-eps))
-            out = Select(And(v0, v1), ConstantOp(0), inp)
+            v0 = Min(inp, ConstantOp(eps))
+            out = Max(v0, ConstantOp(-eps))
         return b.ops
 
 class DecayLinear(WindowedCompositiveOp):
