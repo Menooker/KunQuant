@@ -10,7 +10,7 @@ class AllData:
         self.volume = volume
         self.amount = amount
         if vwap is None:
-            self.vwap = Div(self.amount, AddConst(self.volume, 1))
+            self.vwap = Div(self.amount, AddConst(self.volume, 0.0000001))
         else:
             self.vwap = vwap
         self.returns = returns(close)
