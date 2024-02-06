@@ -292,7 +292,7 @@ class Alphas(object):
         self.close: pd.DataFrame = df_data['S_DQ_CLOSE']
         self.volume: pd.DataFrame = df_data['S_DQ_VOLUME']
         self.returns = self.close.pct_change() #df_data['S_DQ_PCTCHANGE']
-        self.vwap = (df_data['S_DQ_AMOUNT'])/(self.volume + 1)
+        self.vwap = (df_data['S_DQ_AMOUNT'])/(self.volume + 0.0000001)
 
     # Alpha#1	 (rank(Ts_ArgMax(SignedPower(((returns < 0) ? stddev(returns, 20) : close), 2.), 5)) -0.5)
     def alpha001(self):

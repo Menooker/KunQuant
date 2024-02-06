@@ -106,12 +106,12 @@ using namespace kun::ops;
             if isinstance(op, Input):
                 buf = insert_name(op, "TEMP")
                 pins.append(buf)
-                ins.append((op, buf.kind == "TEMP"))
+                ins.append((op, buf.kind))
                 set_buffer_layout(op, buf)
             elif isinstance(op, Output):
                 buf = insert_name(op, "TEMP")
                 pouts.append(buf)
-                outs.append((op, buf.kind == "TEMP"))
+                outs.append((op, buf.kind))
                 set_buffer_layout(op, buf)
         src = codegen_cpp(func, input_name_to_idx, ins, outs, options)
         impl_src.append(src)

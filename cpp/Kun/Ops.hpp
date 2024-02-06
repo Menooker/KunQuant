@@ -24,7 +24,8 @@ inline f32x8 Select(f32x8 cond, f32x8 vtrue, f32x8 vfalse) {
 struct InputST8s : DataSource<true> {
     constexpr static size_t stride = 8;
     float *__restrict buf;
-    InputST8s(float *base, size_t stock_idx, size_t total_time, size_t start)
+    InputST8s(float *base, size_t stock_idx, size_t num_stock,
+              size_t total_time, size_t start)
         : buf{base + stock_idx * total_time * stride + start * stride} {}
     f32x8 step(size_t index) { return _mm256_loadu_ps(&buf[index * stride]); }
 
@@ -35,6 +36,33 @@ struct InputST8s : DataSource<true> {
         return _mm256_loadu_ps(&buf[(index - offset) * stride]);
     }
 
+    f32x8 getWindowUnordered(size_t index, size_t offset) {
+        return getWindow(index, offset);
+    }
+};
+
+struct InputTS : DataSource<true> {
+    constexpr static size_t stride = 8;
+    float *__restrict buf;
+    size_t stock_idx;
+    size_t num_stock;
+    InputTS(float *base, size_t stock_idx, size_t num_stock, size_t length,
+            size_t start)
+        : buf{base + start * num_stock}, stock_idx{stock_idx},
+          num_stock{num_stock} {}
+
+    float *getPtr(size_t index) {
+        return &buf[index * num_stock + stride * stock_idx];
+    }
+
+    f32x8 step(size_t index) { return _mm256_loadu_ps(getPtr(index)); }
+
+    f32x8 getWindow(size_t index, size_t offset) {
+        if (index < offset) {
+            return _mm256_set1_ps(NAN);
+        }
+        return _mm256_loadu_ps(getPtr(index - offset));
+    }
     f32x8 getWindowUnordered(size_t index, size_t offset) {
         return getWindow(index, offset);
     }
@@ -281,13 +309,9 @@ struct ReduceRank {
     operator f32x8() { return less_count + (eq_count + 1.0f) / 2.0f; }
 };
 
-inline f32x8 Max(f32x8 a, f32x8 b) {
-    return _mm256_max_ps(a, b);
-}
+inline f32x8 Max(f32x8 a, f32x8 b) { return _mm256_max_ps(a, b); }
 
-inline f32x8 Min(f32x8 a, f32x8 b) {
-    return _mm256_min_ps(a, b);
-}
+inline f32x8 Min(f32x8 a, f32x8 b) { return _mm256_min_ps(a, b); }
 
 inline f32x8 Abs(f32x8 a) { return kun_simd::sc_abs(kun_simd::vec_f32x8(a)); }
 

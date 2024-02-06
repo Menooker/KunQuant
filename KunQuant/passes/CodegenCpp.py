@@ -65,14 +65,15 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
     header = f'''void stage_{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
     toplevel = _CppScope(None)
     buffer_type: Dict[OpBase, str] = dict()
-    for inp, is_tmp in inputs:
+    for inp, buf_kind in inputs:
         name = inp.attrs["name"]
         layout = inp.attrs["layout"]
         idx_in_ctx = input_name_to_idx[name]
         buffer_type[inp] = f"Input{layout}"
-        start_str = "0" if is_tmp else "__start"
-        total_str = "__length" if is_tmp else "__total_time"
-        code = f"Input{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, {total_str}, {start_str}}};"
+        not_user_input = buf_kind != "INPUT" # if is user input, the time should start from __start and length of time is __total_time
+        start_str = "0" if not_user_input else "__start"
+        total_str = "__length" if not_user_input else "__total_time"
+        code = f"Input{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, {total_str}, {start_str}}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
 
     for idx, (outp, is_tmp) in enumerate(outputs):
@@ -80,7 +81,6 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         layout = outp.attrs["layout"]
         idx_in_ctx = input_name_to_idx[name]
         buffer_type[outp] = f"Output{layout}"
-        start_str = "0" if is_tmp else "__start"
         code = f"Output{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, __length, 0}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
     for op in f.ops:
