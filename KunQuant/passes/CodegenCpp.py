@@ -57,6 +57,12 @@ def _get_buffer_name(op: OpBase, idx: int) -> str:
         return f"temp_{idx}"
     raise RuntimeError("Bad buffer" + str(op))
 
+def _value_to_float(op: OpBase) -> str:
+    ret = str(op.attrs["value"])
+    if '.' not in ret and 'e' not in ret:
+        return str(ret)+".f"
+    return str(ret)+"f"
+
 vector_len = 8
 
 def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict) -> str:
@@ -111,14 +117,14 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             scope.scope.append(_CppSingleLine(scope, f"temp_{idx}.store(i, v{inp[0]});"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = v{inp[0]};"))
         elif isinstance(op, ConstantOp):
-            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = constVec({op.attrs["value"]});'))
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = constVec({_value_to_float(op)});'))
         elif isinstance(op, Log):
             funcname = "LogFast" if options.get("fast_log", True) else "Log"
             scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}(v{inp[0]});'))
         elif isinstance(op, BinaryConstOp):
             assert(op.__class__.__name__.endswith("Const"))
             thename = op.__class__.__name__.replace("Const", "")
-            rhs = op.attrs["value"]
+            rhs = _value_to_float(op)
             if not op.attrs.get("swap", False):
                 scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]}, {rhs});"))
             else:
