@@ -1,6 +1,6 @@
 # KunQuant
 
-![Kun](https://github.com/Menooker/KunQuant/assets/10137875/330d7aba-fbc2-448c-bc51-ac6b150a4e08)
+![Kun](https://github.com/Menooker/KunQuant/assets/10137875/cb67b6fb-2bd3-41dd-921f-581c4c8d34d6)
 
 KunQuant is a optimizer, code generator and executor for financial expressions and factors, e.g. `(close - open) /((high - low) + 0.001)`. The initial aim of it is to generate efficient implementation code for [Alpha101](https://arxiv.org/pdf/1601.00991) of WorldQuant and [Alpha158](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/README.md) of Qlib. Some existing implementations of Alpha101 is straightforward but too simple. Hence we are developing KunQuant to provide optimizated code on a batch of general customized factors.
 
