@@ -1,0 +1,148 @@
+# Customizing your factors
+
+This document describes how you can build your own factors.
+
+## Generating C++ source code for financial expressions
+
+You can invoke KunQuant as a Python library to generate high performance C++ source code for your own factors. KunQuant also provides predefined factors of Alpha101, at the Python module KunQuant.predefined.Alpha101.
+
+First, you need to make sure the parent directory path is already in PYTHONPATH to let Python correctly find KunQuant package.
+
+on linux
+
+```bash
+export PYTHONPATH=$PYTHONPATH:/PATH/TO/KunQuant/
+```
+
+on windows powershell
+
+```powershell
+$env:PYTHONPATH+=";x:\PATH\TO\KunQuant\"
+```
+
+Then in Python code, import the needed classes and functions.
+
+```python
+from KunQuant.Op import *
+from KunQuant.Stage import *
+from KunQuant.ops import *
+from KunQuant.Driver import compileit
+```
+
+An expression in KunQuant is composed of operators `ops`. An Op means an operation on the data, or a source of the data. Ops can fall into some typical categories, like
+* elementwise (like add, sub, sqrt), where the output of the operation depends only on the newest input
+* windowed (like sum, stddev), where the output of the operation depends on several history values near the current input. These Ops correspond to the operations on `rolling()` in pandas.
+* cross sectional operator (like rank and scale), whose output is the computed for the current stock in all stocks at the same time
+* inputs and ouputs: these Ops reads or writes the user input/output buffers
+
+you need to first make an instance of KunQuant.Ops.Builder. It will automatically record the expressions you made within a “with” block. A program to build simple expressions to compute the mean and average of `close` stock data can be:
+
+```python
+builder = Builder()
+with builder:
+    inp1 = Input("a")
+    v1 = WindowedAvg(inp1, 10)
+    v2 = WindowedStddev(inp1, 10)
+    out1 = Output(v1, "ou1")
+    out2 = Output(v2, "ou2")
+```
+
+
+If you have several different factors, remember to write them all in the same `with` block of the builder to build them in the same function. This can let different expressions potentially share the intermediate results, if possible. You can also call the predefined factors of Alpha101 in the builder block:
+
+```python
+from KunQuant.predefined.Alpha101 import alpha001, Alldata
+builder = Builder()
+with builder:
+    inp1 = Input("close")
+    v1 = WindowedAvg(inp1, 10)
+    v2 = WindowedStddev(inp1, 10)
+    out1 = Output(v1, "avg_close")
+    out2 = Output(v2, "std_close")
+    all_data = AllData(low=Input("low"),high=Input("high"),close=inp1,open=Input("open"), amount=Input("amount"), volume=Input("volume"))
+    Output(alpha001(all_data), "alpha001")
+```
+
+Next step, create a `Function` to hold the expressions:
+
+```python
+builder = Builder()
+with builder:
+    # code omitted
+    ...
+f = Function(builder.ops)
+```
+
+A function can be viewed as a collection of Ops. A single function may contain several factors.
+
+Then generate the C++ source with “compileit” function!
+
+```python
+src = compileit(f, "my_library_name", output_layout="TS", options={"opt_reduce": True, "fast_log": True})
+print(src) # c++ source code will be printed
+```
+
+You can see the C++ source code as a Python string. You may want to write it to a file to let the C++ compiler to turn it into executable code. We will next discuss how we can add a Factor library to `cmake` system and let it help you to compile your factors (like above) to executable binary code.
+
+## Adding and building a factor library
+
+Let's continue from the above example of a factor library of three factors: average close, stddev of close and alpha001. We have already compiled it into C++ source code string `src`. Now we write the string into a file. The path of the file is provided by the arguments of the Python script. The full script will be
+
+```python
+import sys
+import os
+from KunQuant.Op import *
+from KunQuant.Stage import *
+from KunQuant.ops import *
+from KunQuant.Driver import compileit
+from KunQuant.predefined.Alpha101 import alpha001, Alldata
+
+builder = Builder()
+with builder:
+    inp1 = Input("close")
+    v1 = WindowedAvg(inp1, 10)
+    v2 = WindowedStddev(inp1, 10)
+    out1 = Output(v1, "avg_close")
+    out2 = Output(v2, "std_close")
+    all_data = AllData(low=Input("low"),high=Input("high"),close=inp1,open=Input("open"), amount=Input("amount"), volume=Input("volume"))
+    Output(alpha001(all_data), "alpha001")
+f = Function(builder.ops)
+src = compileit(f, "my_library_name", output_layout="TS", options={"opt_reduce": True, "fast_log": True})
+with open(sys.argv[1]+"/MyFactors.cpp", 'w') as f:
+    f.write(src)
+```
+
+Create an directory `MyLib` at `projects/` of `KunQuant` directory. Save the above Python script at `projects/MyLib/generate.py`. 
+
+Create a text file at `projects/MyLib/list.txt`. The file should list the `.cpp` files to be generated by `generate.py`. In our example, only one file will be generated. So in `list.txt` there should only be one line:
+
+```
+MyFactors.cpp
+```
+
+Now let cmake re-scan the project files and register our factor library. Change the current directory to the cmake build directory and run:
+
+```bash
+cd /PATH/TO/build/
+cmake ..
+```
+
+Compile the factor library:
+
+```bash
+cmake --build . --target MyLib
+```
+
+There should be `libMyLib.so` or `MyLib.dll` in `projects/` directory in **build** directory of cmake (in our example, `KunQuant/build/`).
+
+You can load the absolute path of the library via `KunRunner` like we did in [Readme](./Readme.md):
+
+```python
+import KunRunner as kr
+lib = kr.Library.load("./projects/libMyLib.so")
+modu = lib.getModule("my_library_name")
+```
+
+Note that `MyLib` corresponds to the directory name in `projects/`, and `"my_library_name"` corresponds to `src = compileit(f, "my_library_name", ...)` in our Python script.
+
+You can check the script in `projects/` for more examples using KunQuant to convert expressions to C++ source code file.
