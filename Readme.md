@@ -75,7 +75,7 @@ If the build is successful, you should be able to see in the terminal:
 [100%] Built target Alpha101
 ```
 
-You can find `KunRunner.cpython-??-x86_64-linux-gnu.so` and `projects/Alpha101/{libAlpha101.so, Alpha101.dll}` in your build directory.
+You can find `KunRunner.cpython-??-{x86_64-linux-gnu.so,amd64.pyd}` and `projects/Alpha101/{libAlpha101.so, Alpha101.dll}` in your build directory.
 
 `libAlpha101.so` or `Alpha101.dll` is the compiled code for Alpha101 factors on Linux or Windows. KunRunner is a Cpp extension for Python with helps to load the generated factor libraries. It also contains some supportive functions for the loaded libraries.
 
@@ -90,10 +90,10 @@ export PYTHONPATH=$PYTHONPATH:/PATH/TO/KunQuant/build
 On windows powershell
 
 ```powershell
-$env:PYTHONPATH+=";x:\PATH\TO\KunQuant\build"
+$env:PYTHONPATH+=";x:\PATH\TO\KunQuant\build\Release"
 ```
 
-Note that `/PATH/TO/KunQuant/build` or `x:\PATH\TO\KunQuant\build` should be the directory containing `KunRunner.cpython-??-x86_64-linux-gnu.so`
+Note that `/PATH/TO/KunQuant/build` or `x:\PATH\TO\KunQuant\build` should be the directory containing `KunRunner.cpython-...{pyd,so}`
 
 Then in Python, import KunRunner and load the Alpha101 library:
 
