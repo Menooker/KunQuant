@@ -13,13 +13,21 @@ A typical workload of designing and running financial factors with KunQuant will
 3. Use `cmake` to compile the generated code
 4. Load the genereted binary via `KunRunner` in Python code
 
-Experiments show that KunQuant-generated code can be more than 100x faster than naive implementation based on Pandas. We ran Alpha001~Alpha020 with [Pandas-based code](https://github.com/yli188/WorldQuant_alpha101_code/blob/master/101Alpha_code_1.py) and our optimized code. See results below:
+Experiments show that KunQuant-generated code can be more than 170x faster than naive implementation based on Pandas. We ran Alpha001~Alpha101 with [Pandas-based code](https://github.com/yli188/WorldQuant_alpha101_code/blob/master/101Alpha_code_1.py) and our optimized code. See results below:
 
-| Pandas-based  |  KunQuant 1-core  |  KunQuant  4-cores |
+| Pandas-based  |  KunQuant 1-thread  |  KunQuant  4-threads |
 |---|---|---|
-| 3.26s |  0.10s  |  0.029s  |
+| 6.138s |  0.115s  |  0.035s  |
 
-The data was collected on 4-core i7-7700HQ, running synthetic data of 64 stocks with 1000 rows of data.
+The data was collected on 4-core Intel i7-7700HQ CPU, running synthetic data of 64 stocks with 260 rows of data. Environment:
+
+```
+OS=Ubuntu 22.04.3 on WSL2 on Windows 10
+python=3.10.2
+pandas=2.1.4
+numpy=1.26.3
+g++=11.4.0
+```
 
 ## Why KunQuant is fast
 
