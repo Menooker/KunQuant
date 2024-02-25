@@ -1,0 +1,14 @@
+name: C/C++ CI
+
+on: [push,pull_request]
+
+jobs:
+  build:
+
+    runs-on: macos-14
+    
+    steps:
+    - uses: actions/checkout@v1
+    - name: make
+      working-directory: ./
+      run: mkdir build && cd  build && cmake .. && cmake . --build Alpha101 -j
