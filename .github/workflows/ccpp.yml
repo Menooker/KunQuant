@@ -10,7 +10,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
       with:
-      submodules: recursive
+        submodules: recursive
     - name: make
       working-directory: ./
       run: mkdir build && cd  build && cmake .. && cmake . --build Alpha101 -j
