@@ -252,4 +252,6 @@ The input data are randomly genereted data and the results are checked against a
 
 The implementation and testing code for Alpha101 is based on https://github.com/yli188/WorldQuant_alpha101_code
 
-The implementation code for Alpha158 is based on https://github.com/microsoft/qlib/blob/main/qlib/contrib/data/handler.py
+The implementation code for Alpha158 is based on https://github.com/microsoft/qlib/blob/main/qlib/contrib/data/handler.py. Licensed under the MIT License.
+
+The AVX vector operators at `cpp/KunSIMD/cpu` was developed based on [x86simd](https://github.com/oneapi-src/oneDNN/tree/main/src/graph/backend/graph_compiler/core/src/runtime/kernel_include/x86simd) as a component of GraphCompiler, a backend of oneDNN Graph API. Licensed under the Apache License, Version 2.0 (the "License").
