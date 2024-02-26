@@ -13,4 +13,4 @@ jobs:
         submodules: recursive
     - name: make
       working-directory: ./
-      run: mkdir build && cd  build && cmake .. && cmake --build . --target Alpha101 --config Release -j -- VERBOSE=1
+      run: mkdir build && cd  build && cmake .. && cmake --build . --target Alpha101 --config Release -j
