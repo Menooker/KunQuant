@@ -9,8 +9,8 @@
 
 namespace kun_simd {
 
-KUN_API alignas(64) extern const uint32_t log_const_table1[32];
-KUN_API alignas(64) extern const uint32_t log_const_table2[32];
+KUN_API extern const uint32_t log_const_table1[32];
+KUN_API extern const uint32_t log_const_table2[32];
 
 template <typename T, int lanes>
 inline vec<T, lanes> log(vec<T, lanes> inval) {

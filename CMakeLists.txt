@@ -22,4 +22,10 @@ endif()
 file(GLOB_RECURSE KunTestSrc ${PROJECT_SOURCE_DIR}/tests/cpp/*.cpp)
 add_library(KunTest SHARED EXCLUDE_FROM_ALL ${KunTestSrc})
 target_link_libraries(KunTest KunRunner)
+if(NOT DEFINED PYTHON_EXECUTABLE)
+    set(PYTHON_EXECUTABLE ${Python_EXECUTABLE})
+endif()
+
+message(STATUS "PYTHON_EXECUTABLE = ${PYTHON_EXECUTABLE}")
+
 add_subdirectory(projects)

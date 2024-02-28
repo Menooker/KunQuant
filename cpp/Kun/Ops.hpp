@@ -299,9 +299,10 @@ struct ReduceRank {
     ReduceRank(f32x8 cur) : v{cur} {}
     void step(f32x8 input, size_t index) {
         using namespace kun_simd;
-        auto is_nan = sc_isnan(v, input);
-        auto cmpless = input < v;
-        auto cmpeq = input == v;
+        vec_f32x8 input2 = input;
+        auto is_nan = sc_isnan(v, input2);
+        auto cmpless = input2 < v;
+        auto cmpeq = input2 == v;
         less_count = sc_select(is_nan, NAN, less_count);
         less_count = sc_select(cmpless, less_count + 1.0f, less_count);
         eq_count = sc_select(cmpeq, eq_count + 1.0f, eq_count);

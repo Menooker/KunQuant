@@ -1,0 +1,16 @@
+name: C/C++ CI
+
+on: [push,pull_request]
+
+jobs:
+  build:
+
+    runs-on: macos-13
+    
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - name: make
+      working-directory: ./
+      run: mkdir build && cd  build && cmake .. && cmake --build . --target Alpha101 --config Release -j

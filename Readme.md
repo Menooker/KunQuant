@@ -41,7 +41,7 @@ g++=11.4.0
 * Python (3.7+ with f-string and dataclass support)
 * cmake
 * A working C++ compiler with C++11 support (e.g. clang, g++, msvc)
-* x64 CPU with at least AVX2-FMA instruction set
+* x86-64 CPU with at least AVX2-FMA instruction set
 
 **Important node**: Currently KunQuant only supports a multiple of 8 as the number of stocks as inputs. That is, you can only input 8, 16, 24, ..., etc. stocks in a batch.
 
@@ -83,9 +83,9 @@ If the build is successful, you should be able to see in the terminal:
 [100%] Built target Alpha101
 ```
 
-You can find `KunRunner.cpython-??-{x86_64-linux-gnu.so,amd64.pyd}` and `projects/Alpha101/{libAlpha101.so, Alpha101.dll}` in your build directory.
+You can find `KunRunner.cpython-??-{x86_64-linux-gnu.so, amd64.pyd, darwin.so}` and `projects/{libAlpha101.so, libAlpha101.dylib}` (on Linux/macOS) or `projects/Release/Alpha101.dll` (on Windows) in your build directory.
 
-`libAlpha101.so` or `Alpha101.dll` is the compiled code for Alpha101 factors on Linux or Windows. KunRunner is a Cpp extension for Python with helps to load the generated factor libraries. It also contains some supportive functions for the loaded libraries.
+`libAlpha101.so`, `Alpha101.dll` or `libAlpha101.dylib` is the compiled code for Alpha101 factors on Linux, Windows or macOS. KunRunner is a Cpp extension for Python with helps to load the generated factor libraries. It also contains some supportive functions for the loaded libraries.
 
 Before running Python, set the environment variable of `PYTHONPATH`:
 
@@ -101,7 +101,7 @@ On windows powershell
 $env:PYTHONPATH+=";x:\PATH\TO\KunQuant\build\Release"
 ```
 
-Note that `/PATH/TO/KunQuant/build` or `x:\PATH\TO\KunQuant\build` should be the directory containing `KunRunner.cpython-...{pyd,so}`
+Note that `/PATH/TO/KunQuant/build` or `x:\PATH\TO\KunQuant\build\Release` should be the directory containing `KunRunner.cpython-...{pyd,so}`
 
 Then in Python, import KunRunner and load the Alpha101 library:
 
@@ -111,7 +111,7 @@ lib = kr.Library.load("./projects/libAlpha101.so")
 modu = lib.getModule("alpha_101")
 ```
 
-Note that you need to give KunRunner a relative or absolute path of the factor library.
+Note that you need to give KunRunner a relative or absolute path of the factor library by replacing "./projects/libAlpha101.so" above.
 
 Load your stock data. In this example, load from local pandas files. We assume the open, close, high, low, volumn and amount data for different stocks are stored in different files.
 
@@ -179,7 +179,7 @@ transposed = np.ascontiguousarray(transposed)
 
 Now fill the input data in a dict
 
-```
+```python
 input_dict = dict()
 for colname, colidx in col2idx.items():
     input_dict[colname] = transposed[colidx]
