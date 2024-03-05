@@ -32,4 +32,4 @@ jobs:
       run: mkdir build && cd build && cmake .. && cmake --build . --target TestingTargets --config Release -- -j
     - name: test
       working-directory: ./
-      run: bash ./tests/tests.sh
+      run: PYTHONPATH=./build bash ./tests/tests.sh
