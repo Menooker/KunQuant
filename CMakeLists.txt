@@ -5,23 +5,37 @@ add_subdirectory(3rdparty/pybind11)
 include_directories(${pybind11_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/cpp)
 message(STATUS ${pybind11_INCLUDE_DIRS})
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fvisibility=hidden -fvisibility-inlines-hidden -mavx2 -mfma")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fvisibility=hidden -fvisibility-inlines-hidden -mavx2 -mfma -pthread")
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4251")
 endif()
-file(GLOB_RECURSE KunRuntimeSrc ${PROJECT_SOURCE_DIR}/cpp/*.cpp)
-pybind11_add_module(KunRunner SHARED ${KunRuntimeSrc})
 
-target_compile_definitions(KunRunner PRIVATE KUN_CORE_LIB=1)
 
+file(GLOB_RECURSE KunRuntimeSrc ${PROJECT_SOURCE_DIR}/cpp/Kun/*.cpp
+    ${PROJECT_SOURCE_DIR}/cpp/KunSIMD/*.cpp)
+add_library(KunRuntime SHARED ${KunRuntimeSrc})
+target_compile_definitions(KunRuntime PRIVATE KUN_CORE_LIB=1)
 if (NOT WIN32)
-    target_link_libraries(KunRunner PRIVATE dl)
+    target_link_libraries(KunRuntime PRIVATE dl)
 endif()
+
+file(GLOB_RECURSE KunPythonSrc ${PROJECT_SOURCE_DIR}/cpp/Python/*.cpp)
+pybind11_add_module(KunRunner SHARED ${KunPythonSrc})
+
+target_link_libraries(KunRunner PUBLIC KunRuntime)
+
 
 
 file(GLOB_RECURSE KunTestSrc ${PROJECT_SOURCE_DIR}/tests/cpp/*.cpp)
 add_library(KunTest SHARED EXCLUDE_FROM_ALL ${KunTestSrc})
 target_link_libraries(KunTest KunRunner)
+
+
+file(GLOB_RECURSE KunCApiTestSrc ${PROJECT_SOURCE_DIR}/tests/capi/*.cpp)
+add_executable(KunCApiTest EXCLUDE_FROM_ALL ${KunCApiTestSrc})
+target_link_libraries(KunCApiTest KunRuntime)
+add_dependencies(KunCApiTest KunTest)
+
 if(NOT DEFINED PYTHON_EXECUTABLE)
     set(PYTHON_EXECUTABLE ${Python_EXECUTABLE})
 endif()
@@ -29,3 +43,5 @@ endif()
 message(STATUS "PYTHON_EXECUTABLE = ${PYTHON_EXECUTABLE}")
 
 add_subdirectory(projects)
+
+add_custom_target(TestingTargets DEPENDS Alpha101 KunCApiTest KunTest KunRunner EXCLUDE_FROM_ALL)

@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include "RunGraph.hpp"
 #ifdef _WIN32
 #include <malloc.h>
 #define kunAlignedAlloc(x, y) _aligned_malloc(y, x)

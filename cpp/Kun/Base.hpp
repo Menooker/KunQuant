@@ -2,10 +2,12 @@
 
 #include <immintrin.h>
 
+#ifdef __cplusplus
 namespace kun {
     struct Context;
     using f32x8 = __m256;
 }
+#endif
 
 #ifdef _MSC_VER
 #define KUN_EXPORT extern "C" __declspec(dllexport)

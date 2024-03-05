@@ -16,7 +16,7 @@ FOREACH(subdir ${PROJECTS})
             DEPENDS ${PROJECT_SOURCE_DIR}/projects/${subdir}/generate.py ${PROJECT_SOURCE_DIR}/projects/${subdir}/list.txt
         )
         add_library(${subdir} SHARED ${MODULE_DEPENDS_${subdir}})
-        target_link_libraries(${subdir} KunRunner)
+        target_link_libraries(${subdir} KunRuntime)
         message(STATUS "Added project: ${subdir}, src: ${tmp_MODULE_DEPENDS_${subdir}}")
     endif()
 ENDFOREACH()

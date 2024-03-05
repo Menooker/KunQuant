@@ -256,6 +256,10 @@ python tests/test_alpha101.py
 
 The input data are randomly genereted data and the results are checked against a modified (corrected) version of [Pandas-based code](https://github.com/yli188/WorldQuant_alpha101_code/blob/master/101Alpha_code_1.py). Note that some of the factors like `alpha013` are very sensitive to numerical changes in the intermeidate results, because `rank` operators are used. The result may be very different after `rank` even if the input is very close. Hence, the tolerance of these factors will be high to avoid false positives.
 
+## Using C-style APIs
+
+KunQuant provides C-style APIs to call the generated factor code in shared libraries. See [CAPI.md](./CAPI.md)
+
 ## Acknowledgement
 
 The implementation and testing code for Alpha101 is based on https://github.com/yli188/WorldQuant_alpha101_code

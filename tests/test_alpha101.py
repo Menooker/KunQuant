@@ -263,7 +263,7 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
     return done
 
 def main():
-    lib = kr.Library.load("./build/Release/projects/Alpha101.dll" if os.name == "nt" else "./build/projects/libAlpha101.so")
+    lib = kr.Library.load("./build/projects/Release/Alpha101.dll" if os.name == "nt" else "./build/projects/libAlpha101.so")
     print(lib)
     modu = lib.getModule("alpha_101")
     start_window = modu.getOutputUnreliableCount()

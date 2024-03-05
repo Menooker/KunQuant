@@ -20,11 +20,11 @@ struct Module {
 
 struct Library {
     void *handle;
-    const Module *getModule(const char *name);
-    static std::shared_ptr<Library> load(const char *filename);
+    KUN_API const Module *getModule(const char *name);
+    KUN_API static std::shared_ptr<Library> load(const char *filename);
     Library(const Library &) = delete;
     Library(void *handle) : handle{handle} {}
-    ~Library();
+    KUN_API ~Library();
 };
 
 } // namespace kun
