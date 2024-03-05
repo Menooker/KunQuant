@@ -44,4 +44,4 @@ message(STATUS "PYTHON_EXECUTABLE = ${PYTHON_EXECUTABLE}")
 
 add_subdirectory(projects)
 
-add_custom_target(TestingTargets DEPENDS Alpha101 KunCApiTest KunTest KunRunner EXCLUDE_FROM_ALL)
+add_custom_target(TestingTargets DEPENDS Alpha101 KunCApiTest KunTest KunRunner)
