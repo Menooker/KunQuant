@@ -1,6 +1,8 @@
 #include "CApi.h"
 #include "Module.hpp"
 #include "RunGraph.hpp"
+#include <string>
+#include <unordered_map>
 
 using namespace kun;
 extern "C" {
