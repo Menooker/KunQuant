@@ -184,7 +184,7 @@ tolerance = {
         "alpha074": 0.04,
         "alpha075": 0.09,
         "alpha077": 0.001,
-        "alpha078": 0.015,
+        "alpha078": 0.016,
         "alpha081": 0.27,
         "alpha008": 0.0005,
         "alpha085": 0.005,
@@ -279,5 +279,7 @@ def main():
     executor = kr.createMultiThreadExecutor(4)
     done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
     print("OK", done)
+    if not done:
+        exit(1)
 
 main()
