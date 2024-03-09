@@ -1,12 +1,14 @@
 name: C/C++ CI
 
-on: [push,pull_request]
+on:
+  push:
+    branches:
+    - master
+  pull_request:
 
 jobs:
-  build:
-
+  build-macos:
     runs-on: macos-13
-    
     steps:
     - uses: actions/checkout@v3
       with:
@@ -14,3 +16,20 @@ jobs:
     - name: make
       working-directory: ./
       run: mkdir build && cd  build && cmake .. && cmake --build . --target Alpha101 --config Release -j
+  test-linux:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+        cache: 'pip' # caching pip dependencies
+    - run: pip install pandas numpy
+    - name: make
+      working-directory: ./
+      run: mkdir build && cd build && cmake .. && cmake --build . --target TestingTargets --config Release -- -j
+    - name: test
+      working-directory: ./
+      run: PYTHONPATH="./build:." bash ./tests/tests.sh
