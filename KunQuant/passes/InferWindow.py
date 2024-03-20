@@ -24,7 +24,7 @@ def infer_window(f: Function, options: dict = {}) -> Dict[str, int]:
 
 def infer_input_window(f: Function, result: Dict[str, int]) -> None:
     for op in f.ops:
-        if isinstance(op, Input):
+        if isinstance(op, Input) or isinstance(op, Output):
             opname = op.attrs["name"]
             result[opname] = result.get(opname, 1)
             for use in f.op_to_id[op].uses:

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Stage.hpp"
+#include "StreamBuffer.hpp"
 #include <atomic>
 #include <memory>
 #include <stdlib.h>
@@ -52,21 +53,6 @@ struct KUN_API Executor {
     // virtual bool takeSingleJob() = 0;
     virtual void runUntilDone() = 0;
     virtual ~Executor() = default;
-};
-
-struct PackedWindowBuffer {
-    size_t pos;
-    alignas(32) float buf[0];
-    static size_t getSizeof(size_t window_size) {
-        return sizeof(PackedWindowBuffer) + window_size * sizeof(float) * simd_len;
-    }
-};
-
-struct StreamBuffer {
-    alignas(32) char buf[0];
-    PackedWindowBuffer* getBuffer(size_t idx, size_t window_size) const {
-        return (PackedWindowBuffer*)(buf + PackedWindowBuffer::getSizeof(window_size) * idx);
-    }
 };
 
 struct Buffer {
