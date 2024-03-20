@@ -143,6 +143,33 @@ struct OutputWindow : DataSource<true> {
     }
 };
 
+struct StreamWindow : DataSource<true> {
+    constexpr static size_t stride = 8;
+    // next writable position
+    size_t &pos;
+    // window size
+    size_t window;
+    // window slots of floatx8
+    float *buf;
+    StreamWindow(StreamBuffer *buf, size_t stock_idx, size_t window)
+        : pos{buf->getBuffer(stock_idx, window)->pos}, window{window},
+          buf{buf->getBuffer(stock_idx, window)->buf} {}
+    void store(size_t index, const f32x8 &in) {
+        _mm256_store_ps(&buf[pos * stride], in);
+        pos += 1;
+        pos = (pos >= window) ? 0 : pos;
+    }
+    f32x8 getWindow(size_t index, size_t offset) {
+        offset += 1;
+        auto idx = pos >= offset ? (pos - offset) : (pos + window - offset);
+        return _mm256_load_ps(&buf[idx * stride]);
+    }
+    f32x8 step(size_t index) { return getWindow(index, 0); }
+    f32x8 getWindowUnordered(size_t index, size_t offset) {
+        return _mm256_load_ps(&buf[offset * stride]);
+    }
+};
+
 static inline __m256i blendvps_si256(__m256i a, __m256i b, __m256i mask) {
     __m256 res =
         _mm256_blendv_ps(_mm256_castsi256_ps(a), _mm256_castsi256_ps(b),

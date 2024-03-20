@@ -54,8 +54,26 @@ struct KUN_API Executor {
     virtual ~Executor() = default;
 };
 
+struct PackedWindowBuffer {
+    size_t pos;
+    alignas(32) float buf[0];
+    static size_t getSizeof(size_t window_size) {
+        return sizeof(PackedWindowBuffer) + window_size * sizeof(float) * simd_len;
+    }
+};
+
+struct StreamBuffer {
+    alignas(32) char buf[0];
+    PackedWindowBuffer* getBuffer(size_t idx, size_t window_size) const {
+        return (PackedWindowBuffer*)(buf + PackedWindowBuffer::getSizeof(window_size) * idx);
+    }
+};
+
 struct Buffer {
-    float* __restrict ptr;
+    union {
+        float* __restrict ptr;
+        StreamBuffer* stream_buf;
+    };
     size_t num_time; // the dimension in time
     std::atomic<int> refcount;
 
@@ -113,6 +131,8 @@ namespace ops {
                          size_t __total_time, size_t __start, size_t __length);
    KUN_API void RankStocksTS_TS(RuntimeStage *stage, size_t __stock_idx,
                          size_t __total_time, size_t __start, size_t __length);
+   KUN_API void RankStocksSTREAM_STREAM(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
 
    KUN_API void ScaleStocksST8s_ST8s(RuntimeStage *stage, size_t __stock_idx,
                          size_t __total_time, size_t __start, size_t __length);
@@ -121,6 +141,8 @@ namespace ops {
    KUN_API void ScaleStocksTS_ST8s(RuntimeStage *stage, size_t __stock_idx,
                          size_t __total_time, size_t __start, size_t __length);
    KUN_API void ScaleStocksTS_TS(RuntimeStage *stage, size_t __stock_idx,
+                         size_t __total_time, size_t __start, size_t __length);
+   KUN_API void ScaleStocksSTREAM_STREAM(RuntimeStage *stage, size_t __stock_idx,
                          size_t __total_time, size_t __start, size_t __length);
 }
 } // namespace kun

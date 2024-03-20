@@ -29,6 +29,8 @@ struct BufferInfo {
     size_t num_users;
     BufferKind kind;
     uint32_t unreliable_count;
+    // the max window size of the ops depending on this buffer
+    uint32_t window;
 };
 
 enum class TaskExecKind {

@@ -7,6 +7,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from KunQuant.passes import Util as PassUtil
 
+required_version = "0x00000001"
+
 def optimize(f: Function, options: dict)->Dict[str, int]:
     if PassUtil.debug_mode:
         print("Before optimize: ", f)
@@ -21,11 +23,14 @@ def optimize(f: Function, options: dict)->Dict[str, int]:
     temp_window_elim(f, options)
     return ret
 
-def post_optimize(impl: List[Function], options: dict)->None:
+def post_optimize(impl: List[Function], options: dict)->Dict[str, int]:
+    window_result: Dict[str, int] = dict()
     if PassUtil.debug_mode:
         print("Post optimize:","=====================")
     for f in impl:
         temp_window_elim(f, options)
+        infer_input_window(f, window_result)
+    return window_result
 
 @dataclass
 class _Buffer:
@@ -34,9 +39,10 @@ class _Buffer:
     kind: str
     num_users: int = 0
 
-    def to_str(self, unreliables: Dict[str, int]) -> str:
+    def to_str(self, unreliables: Dict[str, int], stream_windows: Dict[str, int]) -> str:
         unrel = unreliables.get(self.name, 0)
-        return f'{{{self.idx}, "{self.name}", {self.num_users}, BufferKind::{self.kind}, {unrel}}}'
+        swindow = stream_windows.get(self.name, 1)
+        return f'{{{self.idx}, "{self.name}", {self.num_users}, BufferKind::{self.kind}, {unrel}, {swindow}}}'
 
 @dataclass
 class _Partition:
@@ -53,15 +59,17 @@ class _Partition:
             buf.num_users += 1
 
 def compileit(f: Function, module_name: str, partition_factor = 3, output_layout = "ST8s", options = {}):
-    if output_layout not in ["ST8s", "TS"]:
+    if output_layout not in ["ST8s", "TS", "STREAM"]:
         raise RuntimeError("Bad output_layout name " + output_layout)
+    stream_mode = output_layout == "STREAM"
+    if stream_mode and options.get("opt_reduce", False):
+        raise RuntimeError("Currently opt_reduce in stream mode is not supported.")
     input_name_to_idx: Dict[str, int] = dict()
     buffer_names: List[_Buffer] = []
     partitions: typing.OrderedDict[str, _Partition] = OrderedDict()
     num_temp_buffer = 0
-    def insert_name(op: OpBase, kind: str) -> _Buffer:
+    def insert_name_str(name: str, kind: str) -> _Buffer:
         nonlocal input_name_to_idx, num_temp_buffer
-        name = op.attrs["name"]
         if name not in input_name_to_idx:
             newidx = len(input_name_to_idx)
             newbuf =  _Buffer(newidx, name, kind)
@@ -71,8 +79,12 @@ def compileit(f: Function, module_name: str, partition_factor = 3, output_layout
             buffer_names.append(newbuf)
             return newbuf
         return buffer_names[input_name_to_idx[name]]
-
+    def insert_name(op: OpBase, kind: str) -> _Buffer:
+        return insert_name_str(op.attrs["name"], kind)
     def set_buffer_layout(op: OpBase, buf: _Buffer):
+        if stream_mode:
+            op.attrs["layout"] = "STREAM"
+            return
         if buf.kind == "TEMP":
             op.attrs["layout"] = "ST8s"
         elif buf.kind == "INPUT":
@@ -88,7 +100,7 @@ def compileit(f: Function, module_name: str, partition_factor = 3, output_layout
 
     required_windows = optimize(f, options)
     mainf, impl = do_partition(f, partition_factor, options)
-    post_optimize(impl, options)
+    input_windows = post_optimize(impl, options)
 
     impl_src = ['''#include <Kun/Context.hpp>
 #include <Kun/Module.hpp>
@@ -113,7 +125,9 @@ using namespace kun::ops;
                 pouts.append(buf)
                 outs.append((op, buf.kind))
                 set_buffer_layout(op, buf)
-        src = codegen_cpp(func, input_name_to_idx, ins, outs, options)
+        def query_temp_buf_id(tempname: str) -> int:
+            return insert_name_str(tempname, "TEMP").idx
+        src = codegen_cpp(func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows)
         impl_src.append(src)
         newparti = _Partition(func.name, len(partitions), pins, pouts)
         if len(func.ops) == 3 and isinstance(func.ops[1], CrossSectionalOp):
@@ -127,7 +141,7 @@ using namespace kun::ops;
     if PassUtil.debug_mode:
         print("Num temp buffers: ", num_temp_buffer)
 
-    buffer_src = ",\n".join(["    "+ v.to_str(required_windows) for v in buffer_names])
+    buffer_src = ",\n".join(["    "+ v.to_str(required_windows, input_windows) for v in buffer_names])
     impl_src.append(f"static BufferInfo __buffers[]{{\n{buffer_src}\n}};")
 
     parti_buffer_src = []
@@ -164,6 +178,7 @@ using namespace kun::ops;
 }}
 ''')
     impl_src.append(f'''KUN_EXPORT Module {module_name}{{
+    {required_version},
     {len(partitions)},
     __stages,
     {len(buffer_names)},

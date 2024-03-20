@@ -8,9 +8,11 @@ namespace kun {
 enum class OutputLayout {
     ST8s,
     TS,
+    STREAM,
 };
 
 struct Module {
+    size_t required_version;
     size_t num_stages;
     Stage *stages;
     size_t num_buffers;

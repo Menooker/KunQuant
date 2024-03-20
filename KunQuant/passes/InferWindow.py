@@ -21,3 +21,13 @@ def infer_window(f: Function, options: dict = {}) -> Dict[str, int]:
         if isinstance(op, Output):
             ret[op.attrs["name"]] = _impl(op, result)
     return ret
+
+def infer_input_window(f: Function, result: Dict[str, int]) -> None:
+    for op in f.ops:
+        if isinstance(op, Input):
+            opname = op.attrs["name"]
+            result[opname] = result.get(opname, 1)
+            for use in f.op_to_id[op].uses:
+                if isinstance(use, WindowedTrait):
+                    result[opname] = max(use.required_input_window(), result.get(opname, 0))
+
