@@ -125,7 +125,8 @@ using namespace kun::ops;
                 pouts.append(buf)
                 outs.append((op, buf.kind))
                 set_buffer_layout(op, buf)
-        def query_temp_buf_id(tempname: str) -> int:
+        def query_temp_buf_id(tempname: str, window: int) -> int:
+            input_windows[tempname] = window
             return insert_name_str(tempname, "TEMP").idx
         src = codegen_cpp(func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows)
         impl_src.append(src)

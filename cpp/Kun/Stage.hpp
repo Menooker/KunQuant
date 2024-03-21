@@ -47,8 +47,6 @@ union FuncHolder
 };
 
 
-static constexpr size_t simd_len = 8;
-static constexpr size_t time_stride = 8;
 
 struct Stage {
     FuncHolder f;

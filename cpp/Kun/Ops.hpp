@@ -162,10 +162,13 @@ struct StreamWindow : DataSource<true> {
         pos += 1;
         pos = (pos >= window) ? 0 : pos;
     }
-    f32x8 getWindow(size_t index, size_t offset) {
+    float* getWindowPtr(size_t index, size_t offset) {
         offset += 1;
         auto idx = pos >= offset ? (pos - offset) : (pos + window - offset);
-        return _mm256_load_ps(&buf[idx * num_stock + stock_idx * stride]);
+        return &buf[idx * num_stock + stock_idx * stride];
+    }
+    f32x8 getWindow(size_t index, size_t offset) {
+        return _mm256_load_ps(getWindowPtr(index, offset));
     }
     f32x8 step(size_t index) { return getWindow(index, 0); }
     f32x8 getWindowUnordered(size_t index, size_t offset) {

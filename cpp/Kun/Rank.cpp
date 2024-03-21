@@ -1,7 +1,7 @@
 #include <Kun/Context.hpp>
+#include <Kun/LayoutMappers.hpp>
 #include <Kun/Module.hpp>
 #include <Kun/Ops.hpp>
-#include <Kun/LayoutMappers.hpp>
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -16,8 +16,11 @@ static void RankStocks(RuntimeStage *stage, size_t time_idx,
     auto &inbuf = stage->ctx->buffers[stage->stage->in_buffers[0]->id];
     auto in_num_time = inbuf.num_time;
     auto in_base_time = (in_num_time == __total_time) ? 0 : __start;
-    float *input = inbuf.ptr;
-    float *output = stage->ctx->buffers[stage->stage->out_buffers[0]->id].ptr;
+    const float *input =
+        INPUT::getInput(&inbuf, stage->stage->in_buffers[0], num_stocks);
+    auto outinfo = stage->stage->out_buffers[0];
+    float *output = OUTPUT::getOutput(&stage->ctx->buffers[outinfo->id], outinfo,
+                                      num_stocks);
     auto time_end =
         std::min(__start + (time_idx + 1) * time_stride, __start + __length);
     std::vector<float> data;
@@ -67,6 +70,13 @@ void RankStocksTS_TS(RuntimeStage *stage, size_t time_idx, size_t __total_time,
                      size_t __start, size_t __length) {
     RankStocks<MapperTS, MapperTS>(stage, time_idx, __total_time, __start,
                                    __length);
+}
+
+void RankStocksSTREAM_STREAM(RuntimeStage *stage, size_t time_idx,
+                             size_t __total_time, size_t __start,
+                             size_t __length) {
+    RankStocks<MapperSTREAM, MapperSTREAM>(stage, time_idx, __total_time,
+                                           __start, __length);
 }
 
 void RankStocksTS_ST8s(RuntimeStage *stage, size_t time_idx,

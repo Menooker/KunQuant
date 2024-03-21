@@ -104,6 +104,7 @@ struct Context {
     size_t total_time;
     size_t start;
     size_t length;
+    bool is_stream;
 };
 
 KUN_API std::shared_ptr<Executor> createSingleThreadExecutor();

@@ -107,7 +107,7 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             if stream_mode:
                 buffer_type[op] = f"StreamWindow<{window}>"
                 bufname = f"{f.name}_{idx}"
-                code = f"StreamWindow<{window}> temp_{idx}{{__ctx->buffers[{query_temp_buffer_id(bufname)}].stream_buf, __stock_idx, __ctx->stock_count}};"
+                code = f"StreamWindow<{window}> temp_{idx}{{__ctx->buffers[{query_temp_buffer_id(bufname, window)}].stream_buf, __stock_idx, __ctx->stock_count}};"
             else:
                 buffer_type[op] = f"OutputWindow<{window}>"
                 code = f"OutputWindow<{window}> temp_{idx}{{}};"
