@@ -214,8 +214,7 @@ const float *StreamContext::getCurrentBufferPtr(size_t handle) const {
 void StreamContext::pushData(size_t handle, const float *data) {
     auto buf = (StreamBuffer *)buffers.at(handle).get();
     float* ptr = buf->pushData(ctx.stock_count, m->buffers[handle].window);
-    memcpy(ptr, data, ctx.stock_count);
-    printf("INPUT %f\n", *data);
+    memcpy(ptr, data, ctx.stock_count * sizeof(float));
 }
 
 void StreamContext::run() {

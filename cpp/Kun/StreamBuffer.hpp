@@ -30,10 +30,14 @@ struct StreamBuffer {
         return getBuffer() + idx * stock_count;
     }
     float *pushData(size_t stock_count, size_t window_size) {
-        size_t &pos = *getPos(0, stock_count, window_size);
+        size_t pos = *getPos(0, stock_count, window_size);
         auto ret = getBuffer() + pos * stock_count;
         pos += 1;
         pos = (pos >= window_size) ? 0 : pos;
+        size_t* posbase = getPos(0, stock_count, window_size);
+        for(int i=0;i<stock_count/simd_len;i++) {
+            posbase[i] = pos;
+        }
         return ret;
     }
 };

@@ -293,6 +293,12 @@ f32x8 windowedRef(TInput &input, size_t index) {
     return _mm256_set1_ps(NAN);
 }
 
+template <int window, typename TInput>
+f32x8 windowedRefStream(TInput &input, size_t index) {
+    RequireWindow<TInput>{};
+    return input.getWindow(index, window);
+}
+
 inline f32x8 LessThan(f32x8 a, f32x8 b) {
     return _mm256_cmp_ps(a, b, _CMP_LT_OQ);
 }

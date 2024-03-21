@@ -181,7 +181,8 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         elif isinstance(op, BackRef):
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
-            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = windowedRef<{op.attrs["window"]}>({buf_name}, i);'))
+            funcname = "windowedRefStream" if stream_mode else "windowedRef"
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{op.attrs["window"]}>({buf_name}, i);'))
         elif isinstance(op, FastWindowedSum):
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
