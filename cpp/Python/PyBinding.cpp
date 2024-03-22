@@ -45,9 +45,15 @@ PYBIND11_MODULE(KunRunner, m) {
     py::class_<kun::Module>(m, "Module")
         .def_property_readonly("output_layout",
                                [](kun::Module &mod) {
-                                   return mod.layout == kun::OutputLayout::ST8s
-                                              ? "ST8s"
-                                              : "TS";
+                                   switch (mod.layout) {
+                                   case kun::OutputLayout::ST8s:
+                                       return "ST8s";
+                                   case kun::OutputLayout::TS:
+                                       return "TS";
+                                   case kun::OutputLayout::STREAM:
+                                       return "STREAM";
+                                   }
+                                   return "?";
                                })
         .def("getOutputNames",
              [](kun::Module &mod) {
@@ -152,16 +158,17 @@ PYBIND11_MODULE(KunRunner, m) {
              [](kun::StreamContext &ths, size_t handle) {
                  auto buf = ths.getCurrentBufferPtr(handle);
                  return py::array_t<float, py::array::c_style>{
-                     (py::ssize_t) ths.ctx.stock_count, buf};
+                     (py::ssize_t)ths.ctx.stock_count, buf};
              })
-        .def("pushData", [](kun::StreamContext &ths, size_t handle,
-                            py::array_t<float, py::array::c_style> data) {
-            auto info = data.request();
-            if (info.shape.size() != 1 &&
-                info.shape[0] != ths.ctx.stock_count) {
-                throw std::runtime_error("Bad input data to push");
-            }
-            ths.pushData(handle, (float *)info.ptr);
-        })
+        .def("pushData",
+             [](kun::StreamContext &ths, size_t handle,
+                py::array_t<float, py::array::c_style> data) {
+                 auto info = data.request();
+                 if (info.shape.size() != 1 &&
+                     info.shape[0] != ths.ctx.stock_count) {
+                     throw std::runtime_error("Bad input data to push");
+                 }
+                 ths.pushData(handle, (float *)info.ptr);
+             })
         .def("run", &kun::StreamContext::run);
 }

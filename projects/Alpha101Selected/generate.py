@@ -7,17 +7,6 @@ from KunQuant.predefined.Alpha101 import *
 import sys
 import os
 
-# alphas = [alpha001, alpha002, alpha003, alpha004, alpha005, alpha006, alpha008, alpha009, alpha010, alpha011, alpha012,
-#           alpha013, alpha014, alpha015, alpha016, alpha017, alpha018, alpha020, alpha021, alpha022, alpha023, alpha025,
-#           alpha026, alpha027, alpha028, alpha029, alpha030, alpha031, alpha033, alpha034, alpha035, alpha038, alpha040,
-#           alpha041, alpha042, alpha043, alpha044, alpha045, alpha046, alpha047, alpha049, alpha050, alpha051, alpha053,
-#           alpha054, alpha055, alpha057, alpha060, alpha066, alpha068, alpha073, alpha077, alpha083, alpha084, alpha085,
-#           alpha101
-#           ]
-# '''
-          
-#           '''
-
 
 def check_alpha101():
     builder = Builder()
