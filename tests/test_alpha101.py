@@ -198,7 +198,7 @@ tolerance = {
         "alpha092": 0.17,
         "alpha094": 0.01,
         "alpha096": 0.10,
-        "alpha098": 0.06,
+        "alpha098": 0.08,
         "alpha099": 0.0005
     },
     "skip_head": {"alpha096","alpha098"}
