@@ -1,5 +1,6 @@
 #pragma once
 #include "Stage.hpp"
+#include "Context.hpp"
 #include <stddef.h>
 
 namespace kun {

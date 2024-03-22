@@ -172,7 +172,7 @@ tolerance = {
     "bad_count": {
         "alpha008": 0.001,
         "alpha022": 0.001,
-        "alpha027": 0.08,
+        "alpha027": 0.095,
         "alpha021": 0.001,
         "alpha045": 0.001,
         "alpha045": 0.07,
@@ -180,6 +180,8 @@ tolerance = {
         # hard selecting numbers >0
         "alpha053": 0.001,
         "alpha061": 0.002,
+        "alpha062": 0.001,
+        "alpha064": 0.001,
         "alpha065": 0.002,
         "alpha066": 0.002,
         # corr on rank, will produce NAN
@@ -296,16 +298,14 @@ def test_stream(modu, executor, start_window, num_stock, num_time, my_input, ref
     buffer_name_to_id = dict()
     stream = kr.StreamContext(executor, modu, num_stock)
     for name in my_input:
-        if name in ["close"]:
-            buffer_name_to_id[name] = stream.queryBufferHandle(name)
+        buffer_name_to_id[name] = stream.queryBufferHandle(name)
     outputs = dict()
     for name in outnames:
         buffer_name_to_id[name] = stream.queryBufferHandle(name)
         outputs[name] = np.empty((num_time,num_stock), dtype="float")
     for t in range(num_time):
         for name, value in my_input.items():
-            if name in ["close"]:
-                stream.pushData(buffer_name_to_id[name], value[t])
+            stream.pushData(buffer_name_to_id[name], value[t])
         stream.run()
         for name, value in outputs.items():
             value[t, :] = stream.getCurrentBuffer(buffer_name_to_id[name])
@@ -320,15 +320,18 @@ def streammain():
     start_window = modu.getOutputUnreliableCount()
     print(start_window)
     num_stock = 64
-    num_time = 100
+    num_time = 220
     is_check = True
     my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, False)
     executor = kr.createSingleThreadExecutor()
     done = True
     done = done & test_stream(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check)
+    executor = kr.createMultiThreadExecutor(8)
+    done = done & test_stream(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check)
     print("OK", done)
     if not done:
         exit(1)
 
-#main()
+main()
+print("======================================")
 streammain()

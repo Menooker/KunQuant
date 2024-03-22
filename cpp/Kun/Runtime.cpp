@@ -17,6 +17,59 @@
 #define kunAlignedFree(x) free(x)
 #endif
 
+static size_t divideAndCeil(size_t x, size_t y) { return (x + y - 1) / y; }
+
+#if CHECKED_PTR
+#include <assert.h>
+#include <sys/mman.h>
+static void fill_memory(char *start, char *end) {
+    memset(start, 0xcc, end - start);
+}
+
+void *checkedAlloc(size_t sz, size_t alignment) {
+    size_t page_sz = 4096; // should get OS page size
+    size_t data_size = divideAndCeil(sz, page_sz) * page_sz;
+    size_t real_sz = data_size + page_sz * 2;
+    assert(real_sz > 2 * page_sz && "At least 3 pages should be allocated");
+    auto ret = mmap(nullptr, real_sz, PROT_READ | PROT_WRITE,
+                    MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    assert(ret && "mmap failed");
+    mprotect(ret, page_sz, PROT_NONE);
+    auto protect_page_rhs = (char *)ret + real_sz - page_sz;
+    mprotect(protect_page_rhs, page_sz, PROT_NONE);
+    auto result = protect_page_rhs - divideAndCeil(sz, alignment) * alignment;
+    fill_memory(result + sz, protect_page_rhs);
+    fill_memory((char *)ret + page_sz, result);
+    return result;
+}
+
+static void check(uint8_t *start, uint8_t *end, void *base_buffer,
+                  size_t real_sz) {
+    for (uint8_t *p = start; p < end; p++) {
+        if (*p != 0xcc) {
+            fputs("Buffer overflow detected\n", stderr);
+            munmap(base_buffer, real_sz);
+            std::abort();
+        }
+    }
+}
+void checkedDealloc(void *ptr, size_t sz) {
+    size_t page_sz = 4096; // should get OS page size
+    size_t data_size = divideAndCeil(sz, page_sz) * page_sz;
+    size_t real_sz = data_size + page_sz * 2;
+    auto buffer = (uint8_t *)((size_t)ptr / page_sz * page_sz - page_sz);
+    auto protect_page_rhs = (uint8_t *)buffer + real_sz - page_sz;
+    check((uint8_t *)ptr + sz, protect_page_rhs, buffer, real_sz);
+    check(buffer + page_sz, (uint8_t *)ptr, buffer, real_sz);
+    munmap(buffer, real_sz);
+}
+
+#undef kunAlignedAlloc
+#undef kunAlignedFree
+#define kunAlignedAlloc(x, y) checkedAlloc(y, x)
+#define kunAlignedFree(x) checkedDealloc(x, size)
+#endif
+
 namespace kun {
 static const uint64_t VERSION = 0x00000001;
 
@@ -24,6 +77,9 @@ void Buffer::alloc(size_t count, size_t use_count) {
     if (!ptr) {
         ptr = (float *)kunAlignedAlloc(32, count * sizeof(float));
         refcount = use_count;
+#if CHECKED_PTR
+        size = count * sizeof(float);
+#endif
     }
 }
 
@@ -44,8 +100,6 @@ Buffer::~Buffer() {
     }
 }
 
-static size_t divideAndCeil(size_t x, size_t y) { return (x + y - 1) / y; }
-
 size_t RuntimeStage::getNumTasks() const {
     return stage->kind == TaskExecKind::SLICE_BY_STOCK
                ? divideAndCeil(ctx->stock_count, simd_len)
@@ -64,8 +118,9 @@ bool RuntimeStage::doJob() {
                 stage->f.rankf(this, cur_idx, ctx->total_time, ctx->start,
                                ctx->length);
             }
-            onDone(1);
-            return true;
+            if (!onDone(1)) {
+                return false;
+            }
         }
     }
     return false;
@@ -80,7 +135,7 @@ void RuntimeStage::enqueue() {
     ctx->executor->enqueue(this);
 }
 
-void RuntimeStage::onDone(size_t cnt) {
+bool RuntimeStage::onDone(size_t cnt) {
     auto newdone = --done_count;
     if (newdone == 0) {
         // current stage is done
@@ -97,7 +152,9 @@ void RuntimeStage::onDone(size_t cnt) {
             ctx->buffers[buf_id->id].deref();
         }
         ctx->executor->dequeue(this);
+        return false;
     }
+    return true;
 }
 
 void runGraph(std::shared_ptr<Executor> exec, const Module *m,
@@ -182,8 +239,12 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
     buffers.reserve(m->num_buffers);
     for (size_t i = 0; i < m->num_buffers; i++) {
         auto &buf = m->buffers[i];
-        buffers.emplace_back(StreamBuffer::make(num_stocks, buf.window),
-                             StreamContext::Deleter{});
+        buffers.emplace_back(
+            StreamBuffer::make(num_stocks, buf.window), StreamContext::Deleter {
+#if CHECKED_PTR
+                StreamBuffer::getBufferSize(num_stocks, buf.window)
+#endif
+            });
         rtlbuffers.emplace_back((float *)buffers.back().get(), 1);
     }
     ctx.buffers = std::move(rtlbuffers);
@@ -213,7 +274,7 @@ const float *StreamContext::getCurrentBufferPtr(size_t handle) const {
 
 void StreamContext::pushData(size_t handle, const float *data) {
     auto buf = (StreamBuffer *)buffers.at(handle).get();
-    float* ptr = buf->pushData(ctx.stock_count, m->buffers[handle].window);
+    float *ptr = buf->pushData(ctx.stock_count, m->buffers[handle].window);
     memcpy(ptr, data, ctx.stock_count * sizeof(float));
 }
 

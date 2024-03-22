@@ -13,7 +13,11 @@ KUN_API void runGraph(std::shared_ptr<Executor> exec, const Module *m,
 
 struct KUN_API StreamContext {
     struct Deleter {
-        void operator()(char* b);
+#if CHECKED_PTR
+        size_t size;
+        Deleter(size_t size) : size{size} {}
+#endif
+        void operator()(char *b);
     };
     std::vector<std::unique_ptr<char[], Deleter>> buffers;
     Context ctx;
