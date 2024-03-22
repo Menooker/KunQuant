@@ -19,9 +19,9 @@ def check_alpha101():
             cnt += 1
     print("Total", cnt)
     f = Function(builder.ops)
-    src = compileit(f, "alpha_101_selected", partition_factor=8, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
+    src = compileit(f, "alpha_101_stream", partition_factor=8, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
     os.makedirs(sys.argv[1], exist_ok=True)
-    with open(sys.argv[1]+"/Alpha101Selected.cpp", 'w') as f:
+    with open(sys.argv[1]+"/Alpha101Stream.cpp", 'w') as f:
         f.write(src)
 
 check_alpha101()

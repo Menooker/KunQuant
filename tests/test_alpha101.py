@@ -314,9 +314,9 @@ def test_stream(modu, executor, start_window, num_stock, num_time, my_input, ref
     return check_result(outputs, ref, outnames, start_window, num_stock, 0, num_time)
 
 def streammain():
-    lib = kr.Library.load("./build/projects/Release/Alpha101Selected.dll" if os.name == "nt" else "./build/projects/libAlpha101Selected.so")
+    lib = kr.Library.load("./build/projects/Release/Alpha101Stream.dll" if os.name == "nt" else "./build/projects/libAlpha101Stream.so")
     print(lib)
-    modu = lib.getModule("alpha_101_selected")
+    modu = lib.getModule("alpha_101_stream")
     start_window = modu.getOutputUnreliableCount()
     print(start_window)
     num_stock = 64
