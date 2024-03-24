@@ -73,7 +73,39 @@ KUN_API void kunRunGraph(KunExecutorHandle exec, KunModuleHandle m,
     auto &pexec = *unwrapExecutor(exec);
     auto modu = reinterpret_cast<Module *>(m);
     auto map = unwrapMap(buffers);
-    runGraph(pexec, modu, *map, num_stocks, total_time, cur_time,
-                    length);
+    runGraph(pexec, modu, *map, num_stocks, total_time, cur_time, length);
+}
+
+KUN_API KunStreamContextHandle kunCreateStream(KunExecutorHandle exec,
+                                               KunModuleHandle m,
+                                               size_t num_stocks) {
+    auto &pexec = *unwrapExecutor(exec);
+    auto modu = reinterpret_cast<Module *>(m);
+    return new kun::StreamContext{pexec, modu, num_stocks};
+}
+
+KUN_API size_t kunQueryBufferHandle(KunStreamContextHandle context,
+                                    const char *name) {
+    return reinterpret_cast<kun::StreamContext *>(context)->queryBufferHandle(
+        name);
+}
+
+KUN_API const float *kunStreamGetCurrentBuffer(KunStreamContextHandle context,
+                                               size_t handle) {
+    return reinterpret_cast<kun::StreamContext *>(context)->getCurrentBufferPtr(
+        handle);
+}
+
+KUN_API void kunStreamPushData(KunStreamContextHandle context, size_t handle,
+                               const float *buffer) {
+    reinterpret_cast<kun::StreamContext *>(context)->pushData(handle, buffer);
+}
+
+KUN_API void kunStreamRun(KunStreamContextHandle context) {
+    reinterpret_cast<kun::StreamContext *>(context)->run();
+}
+
+KUN_API void kunDestoryStream(KunStreamContextHandle context) {
+    delete reinterpret_cast<kun::StreamContext *>(context);
 }
 }
