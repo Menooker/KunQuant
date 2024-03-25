@@ -50,16 +50,19 @@ struct MultiThreadExecutor : Executor {
 
     std::condition_variable cv;
     std::mutex cv_lock;
+    std::atomic<size_t> idle_count{0};
     bool closing = false;
 
     void notifyAwaiters() { cv.notify_all(); }
 
     void park(int &count) {
         count++;
-        if (count > 20) {
+        if (count > 20 || num_stages.load() == 0) {
+            ++idle_count;
             count = 0;
             std::unique_lock<std::mutex> lk{cv_lock};
             cv.wait(lk);
+            --idle_count;
         }
     }
 
@@ -169,6 +172,8 @@ struct MultiThreadExecutor : Executor {
                 continue;
             }
             job->doJob();
+        }
+        while (idle_count != threads.size()) {
         }
     }
 
