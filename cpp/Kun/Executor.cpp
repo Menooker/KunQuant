@@ -1,12 +1,13 @@
 #include "Context.hpp"
 #include "Module.hpp"
 #include <algorithm>
+#include <array>
+#include <assert.h>
 #include <condition_variable>
 #include <cstdio>
 #include <list>
 #include <mutex>
 #include <thread>
-#include <array>
 
 namespace kun {
 
@@ -22,7 +23,8 @@ struct SingleThreadExecutor : Executor {
         if (q.empty()) {
             return false;
         }
-        return q.front()->doJob();
+        q.front()->doJob();
+        return true;
     }
 
     void runUntilDone() override {
@@ -48,16 +50,19 @@ struct MultiThreadExecutor : Executor {
 
     std::condition_variable cv;
     std::mutex cv_lock;
+    std::atomic<size_t> idle_count{0};
     bool closing = false;
 
     void notifyAwaiters() { cv.notify_all(); }
 
-    void park(int& count) {
+    void park(int &count) {
         count++;
-        if(count>20) {
-            count=0;
+        if (count > 20 || num_stages.load() == 0) {
+            ++idle_count;
+            count = 0;
             std::unique_lock<std::mutex> lk{cv_lock};
             cv.wait(lk);
+            --idle_count;
         }
     }
 
@@ -66,7 +71,7 @@ struct MultiThreadExecutor : Executor {
             slot.store(nullptr);
         }
         q.reserve(64);
-        threads.reserve(num_stages);
+        threads.reserve(num_threads);
         for (int i = 0; i < num_threads; i++) {
             threads.emplace_back([this, i]() { workerMain(i); });
         }
@@ -91,16 +96,22 @@ struct MultiThreadExecutor : Executor {
     }
 
     virtual void dequeue(RuntimeStage *stage) override {
-        --num_stages;
+        // important! After --num_stages, do not Read RuntimeStage. This also
+        // apply on functions of RuntimeStage after calling dequeue. Otherwise,
+        // we may read the RuntimeStage object of the next iteration
         for (auto &slot : fast_slots) {
             auto curstage = slot.load();
             if (curstage == stage) {
                 slot.store(nullptr);
+                --num_stages;
                 return;
             }
         }
         std::lock_guard<std::mutex> guard{qlock};
-        q.erase(std::find(q.begin(), q.end(), stage));
+        auto itr = std::find(q.begin(), q.end(), stage);
+        assert(itr != q.end());
+        q.erase(itr);
+        --num_stages;
     }
 
     RuntimeStage *takeSingleJob() {
@@ -138,13 +149,11 @@ struct MultiThreadExecutor : Executor {
     }
 
     void workerMain(int tid) {
-        int parkcount=0;
+        int parkcount = 0;
         for (;;) {
             auto job = workerTakeJob();
             while (job) {
-                while (job->doJob()) {
-                    // printf("JOB %d\n", tid);
-                }
+                job->doJob();
                 job = workerTakeJob();
             }
             // printf("PARK %d\n", tid);
@@ -162,8 +171,9 @@ struct MultiThreadExecutor : Executor {
             if (!job) {
                 continue;
             }
-            while (job->doJob()) {
-            }
+            job->doJob();
+        }
+        while (idle_count != threads.size()) {
         }
     }
 

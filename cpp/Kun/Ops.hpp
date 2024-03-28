@@ -2,6 +2,7 @@
 
 #include "Base.hpp"
 #include "Math.hpp"
+#include "StreamBuffer.hpp"
 #include <cmath>
 #include <limits>
 #include <stdint.h>
@@ -143,6 +144,61 @@ struct OutputWindow : DataSource<true> {
     }
 };
 
+template <size_t window>
+struct StreamWindow : DataSource<true> {
+    constexpr static size_t stride = 8;
+    // next writable position
+    size_t &pos;
+    // window size
+    size_t stock_idx;
+    size_t num_stock;
+    // window slots of floatx8
+    float *buf;
+    StreamWindow(StreamBuffer *buf, size_t stock_idx, size_t num_stock)
+        : pos{*buf->getPos(stock_idx, num_stock, window)}, stock_idx{stock_idx},
+          num_stock{num_stock}, buf{buf->getBuffer()} {}
+    void store(size_t index, const f32x8 &in) {
+        _mm256_store_ps(&buf[pos * num_stock + stock_idx * stride], in);
+        pos += 1;
+        pos = (pos >= window) ? 0 : pos;
+    }
+    float* getWindowPtr(size_t index, size_t offset) {
+        offset += 1;
+        auto idx = pos >= offset ? (pos - offset) : (pos + window - offset);
+        return &buf[idx * num_stock + stock_idx * stride];
+    }
+    f32x8 getWindow(size_t index, size_t offset) {
+        return _mm256_load_ps(getWindowPtr(index, offset));
+    }
+    f32x8 step(size_t index) { return getWindow(index, 0); }
+    f32x8 getWindowUnordered(size_t index, size_t offset) {
+        return _mm256_load_ps(&buf[offset * stride]);
+    }
+};
+
+template <>
+struct StreamWindow<1ul> : DataSource<true> {
+    constexpr static size_t stride = 8;
+    // window size
+    size_t stock_idx;
+    // window slots of floatx8
+    float *buf;
+    StreamWindow(StreamBuffer *buf, size_t stock_idx, size_t num_stock)
+        : stock_idx{stock_idx}, buf{buf->getBuffer()} {}
+    void store(size_t index, const f32x8 &in) {
+        _mm256_store_ps(&buf[stock_idx * stride], in);
+    }
+    // f32x8 getWindow(size_t index, size_t offset) {
+    //     return _mm256_load_ps(buf);
+    // }
+    f32x8 step(size_t index) {
+        return _mm256_load_ps(&buf[stock_idx * stride]);
+    }
+    // f32x8 getWindowUnordered(size_t index, size_t offset) {
+    //     return _mm256_load_ps(&buf[offset * stride]);
+    // }
+};
+
 static inline __m256i blendvps_si256(__m256i a, __m256i b, __m256i mask) {
     __m256 res =
         _mm256_blendv_ps(_mm256_castsi256_ps(a), _mm256_castsi256_ps(b),
@@ -235,6 +291,12 @@ f32x8 windowedRef(TInput &input, size_t index) {
         return input.getWindow(index, window);
     }
     return _mm256_set1_ps(NAN);
+}
+
+template <int window, typename TInput>
+f32x8 windowedRefStream(TInput &input, size_t index) {
+    RequireWindow<TInput>{};
+    return input.getWindow(index, window);
 }
 
 inline f32x8 LessThan(f32x8 a, f32x8 b) {

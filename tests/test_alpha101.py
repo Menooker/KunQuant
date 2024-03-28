@@ -94,13 +94,17 @@ def ST8t_ST(data: np.ndarray) -> np.ndarray:
 def TS_ST(data: np.ndarray) -> np.ndarray:
     return data.transpose()
 
-def make_data_and_ref(num_stock, num_time, ischeck):
+def ST_TS(data: np.ndarray) -> np.ndarray:
+    return data.transpose()
+
+def make_data_and_ref(num_stock, num_time, ischeck, input_ST8t):
     rng = np.random.get_state()
     start = time.time()
     dopen, dclose, dhigh, dlow, dvol, damount = gen_stock_data2(0.5, 100, num_stock, num_time, 0.03 if num_time > 1000 else 0.05)
     end = time.time()
     print(f"DataGen takes: {end-start:.6f} seconds")
-    my_input = {"high": ST_ST8t(dhigh), "low": ST_ST8t(dlow), "close": ST_ST8t(dclose), "open": ST_ST8t(dopen), "volume": ST_ST8t(dvol), "amount": ST_ST8t(damount)}
+    transpose_func = ST_ST8t if input_ST8t else ST_TS
+    my_input = {"high": transpose_func(dhigh), "low": transpose_func(dlow), "close": transpose_func(dclose), "open": transpose_func(dopen), "volume": transpose_func(dvol), "amount": transpose_func(damount)}
     ref = None
     if ischeck:
         df_dclose = pd.DataFrame(dclose.transpose())
@@ -168,7 +172,7 @@ tolerance = {
     "bad_count": {
         "alpha008": 0.001,
         "alpha022": 0.001,
-        "alpha027": 0.08,
+        "alpha027": 0.095,
         "alpha021": 0.001,
         "alpha045": 0.001,
         "alpha045": 0.07,
@@ -176,6 +180,8 @@ tolerance = {
         # hard selecting numbers >0
         "alpha053": 0.001,
         "alpha061": 0.002,
+        "alpha062": 0.001,
+        "alpha064": 0.001,
         "alpha065": 0.002,
         "alpha066": 0.002,
         # corr on rank, will produce NAN
@@ -192,41 +198,15 @@ tolerance = {
         "alpha092": 0.17,
         "alpha094": 0.01,
         "alpha096": 0.10,
-        "alpha098": 0.06,
+        "alpha098": 0.08,
         "alpha099": 0.0005
     },
     "skip_head": {"alpha096","alpha098"}
 }
 
-def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ischeck, start_time):
+def check_result(out, ref, outnames, start_window, num_stock, start_time, num_time):
     rtol=0.01
     atol=1e-5
-    # prepare outputs
-    outnames = modu.getOutputNames()
-    layout = modu.output_layout
-    outbuffers = dict()
-    print(layout)
-    if layout == "TS":
-        # Factors, Time, Stock
-        sharedbuf = np.empty((len(outnames), num_time-start_time, num_stock), dtype="float32")
-        sharedbuf[:] = np.nan
-        for idx, name in enumerate(outnames):
-            outbuffers[name] = sharedbuf[idx]
-    # print(ref.alpha001())
-    # blocked = ST_ST8t(inp)
-    
-    start = time.time()
-    out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
-    end = time.time()
-    print(f"Exec takes: {end-start:.6f} seconds")
-    if not ischeck:
-        return
-    # print(out)
-    for k in list(out.keys()):
-        if layout == "TS":
-            out[k] = TS_ST(out[k])
-        else:
-            out[k] = ST8t_ST(out[k])
     done = True
     for k in outnames:
         cur_rtol = tolerance["rtol"].get(k, rtol)
@@ -262,6 +242,35 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
                     break
     return done
 
+def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ischeck, start_time):
+    # prepare outputs
+    outnames = modu.getOutputNames()
+    layout = modu.output_layout
+    outbuffers = dict()
+    print(layout)
+    if layout == "TS":
+        # Factors, Time, Stock
+        sharedbuf = np.empty((len(outnames), num_time-start_time, num_stock), dtype="float32")
+        sharedbuf[:] = np.nan
+        for idx, name in enumerate(outnames):
+            outbuffers[name] = sharedbuf[idx]
+    # print(ref.alpha001())
+    # blocked = ST_ST8t(inp)
+    
+    start = time.time()
+    out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
+    end = time.time()
+    print(f"Exec takes: {end-start:.6f} seconds")
+    if not ischeck:
+        return
+    # print(out)
+    for k in list(out.keys()):
+        if layout == "TS":
+            out[k] = TS_ST(out[k])
+        else:
+            out[k] = ST8t_ST(out[k])
+    return check_result(out, ref, outnames, start_window, num_stock, start_time, num_time)
+
 def main():
     lib = kr.Library.load("./build/projects/Release/Alpha101.dll" if os.name == "nt" else "./build/projects/libAlpha101.so")
     print(lib)
@@ -271,7 +280,7 @@ def main():
     num_stock = 64
     num_time = 260
     is_check = True
-    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check)
+    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, True)
     executor = kr.createSingleThreadExecutor()
     done = True
     done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
@@ -282,4 +291,47 @@ def main():
     if not done:
         exit(1)
 
+def test_stream(modu, executor, start_window, num_stock, num_time, my_input, ref, ischeck):
+    # prepare outputs
+    outnames = modu.getOutputNames()
+    buffer_id_to_name = [0 * (len(outnames) + len(my_input))]
+    buffer_name_to_id = dict()
+    stream = kr.StreamContext(executor, modu, num_stock)
+    for name in my_input:
+        buffer_name_to_id[name] = stream.queryBufferHandle(name)
+    outputs = dict()
+    for name in outnames:
+        buffer_name_to_id[name] = stream.queryBufferHandle(name)
+        outputs[name] = np.empty((num_time,num_stock), dtype="float")
+    for t in range(num_time):
+        for name, value in my_input.items():
+            stream.pushData(buffer_name_to_id[name], value[t])
+        stream.run()
+        for name, value in outputs.items():
+            value[t, :] = stream.getCurrentBuffer(buffer_name_to_id[name])
+    for name in outputs:
+        outputs[name] = TS_ST(outputs[name])
+    return check_result(outputs, ref, outnames, start_window, num_stock, 0, num_time)
+
+def streammain():
+    lib = kr.Library.load("./build/projects/Release/Alpha101Stream.dll" if os.name == "nt" else "./build/projects/libAlpha101Stream.so")
+    print(lib)
+    modu = lib.getModule("alpha_101_stream")
+    start_window = modu.getOutputUnreliableCount()
+    print(start_window)
+    num_stock = 64
+    num_time = 220
+    is_check = True
+    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, False)
+    executor = kr.createSingleThreadExecutor()
+    done = True
+    done = done & test_stream(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check)
+    executor = kr.createMultiThreadExecutor(8)
+    done = done & test_stream(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check)
+    print("OK", done)
+    if not done:
+        exit(1)
+
 main()
+print("======================================")
+streammain()

@@ -3,9 +3,9 @@
 #include <Kun/RunGraph.hpp>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 #include <string>
 #include <vector>
-#include <pybind11/stl.h>
 
 namespace py = pybind11;
 
@@ -43,25 +43,35 @@ PYBIND11_MODULE(KunRunner, m) {
     m.def("createMultiThreadExecutor", &kun::createMultiThreadExecutor);
 
     py::class_<kun::Module>(m, "Module")
-        .def_property_readonly("output_layout", [](kun::Module& mod){
-            return mod.layout == kun::OutputLayout::ST8s ? "ST8s" : "TS";
-        })
-        .def("getOutputNames", [](kun::Module& mod) {
-            std::vector<std::string> ret;
-            for (size_t i = 0; i < mod.num_buffers; i++) {
-                auto &buf = mod.buffers[i];
-                if (buf.kind == kun::BufferKind::OUTPUT) {
-                    ret.emplace_back(buf.name);
-                }
-            }
-            return ret;
-        })
-        .def("getOutputUnreliableCount", [](kun::Module& mod) {
+        .def_property_readonly("output_layout",
+                               [](kun::Module &mod) {
+                                   switch (mod.layout) {
+                                   case kun::OutputLayout::ST8s:
+                                       return "ST8s";
+                                   case kun::OutputLayout::TS:
+                                       return "TS";
+                                   case kun::OutputLayout::STREAM:
+                                       return "STREAM";
+                                   }
+                                   return "?";
+                               })
+        .def("getOutputNames",
+             [](kun::Module &mod) {
+                 std::vector<std::string> ret;
+                 for (size_t i = 0; i < mod.num_buffers; i++) {
+                     auto &buf = mod.buffers[i];
+                     if (buf.kind == kun::BufferKind::OUTPUT) {
+                         ret.emplace_back(buf.name);
+                     }
+                 }
+                 return ret;
+             })
+        .def("getOutputUnreliableCount", [](kun::Module &mod) {
             py::dict ret;
             for (size_t i = 0; i < mod.num_buffers; i++) {
                 auto &buf = mod.buffers[i];
                 if (buf.kind == kun::BufferKind::OUTPUT) {
-                    ret[buf.name] =  buf.unreliable_count;
+                    ret[buf.name] = buf.unreliable_count;
                 }
             }
             return ret;
@@ -96,12 +106,13 @@ PYBIND11_MODULE(KunRunner, m) {
                     known_S = S;
                     known_T = T;
                 }
-                expectContiguousShape(info, name.c_str(),
-                                      {known_S, known_T, (py::ssize_t)kun::simd_len});
+                expectContiguousShape(
+                    info, name.c_str(),
+                    {known_S, known_T, (py::ssize_t)kun::simd_len});
                 bufs[name] = (float *)info.ptr;
             }
-            if((py::ssize_t)length > known_T) {
-                    throw std::runtime_error("Bad parameter: length");
+            if ((py::ssize_t)length > known_T) {
+                throw std::runtime_error("Bad parameter: length");
             }
             py::dict ret{};
             py::array::ShapeContainer expected_out_shape;
@@ -137,5 +148,27 @@ PYBIND11_MODULE(KunRunner, m) {
             return ret;
         },
         py::arg("exec"), py::arg("mod"), py::arg("inputs"), py::arg("cur_time"),
-        py::arg("length"), py::arg("outputs")= py::dict());
+        py::arg("length"), py::arg("outputs") = py::dict());
+
+    py::class_<kun::StreamContext>(m, "StreamContext")
+        .def(py::init<std::shared_ptr<kun::Executor>, const kun::Module *,
+                      size_t>())
+        .def("queryBufferHandle", &kun::StreamContext::queryBufferHandle)
+        .def("getCurrentBuffer",
+             [](kun::StreamContext &ths, size_t handle) {
+                 auto buf = ths.getCurrentBufferPtr(handle);
+                 return py::array_t<float, py::array::c_style>{
+                     (py::ssize_t)ths.ctx.stock_count, buf};
+             })
+        .def("pushData",
+             [](kun::StreamContext &ths, size_t handle,
+                py::array_t<float, py::array::c_style> data) {
+                 auto info = data.request();
+                 if (info.shape.size() != 1 &&
+                     info.shape[0] != ths.ctx.stock_count) {
+                     throw std::runtime_error("Bad input data to push");
+                 }
+                 ths.pushData(handle, (float *)info.ptr);
+             })
+        .def("run", &kun::StreamContext::run);
 }

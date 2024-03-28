@@ -65,7 +65,7 @@ def _value_to_float(op: OpBase) -> str:
 
 vector_len = 8
 
-def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict) -> str:
+def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int]) -> str:
     if len(f.ops) == 3 and isinstance(f.ops[1], CrossSectionalOp):
         return f'''static auto stage_{f.name} = {f.ops[1].__class__.__name__}Stocks{f.ops[0].attrs["layout"]}_{f.ops[2].attrs["layout"]};'''
     header = f'''void stage_{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
@@ -75,11 +75,16 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         name = inp.attrs["name"]
         layout = inp.attrs["layout"]
         idx_in_ctx = input_name_to_idx[name]
-        buffer_type[inp] = f"Input{layout}"
         not_user_input = buf_kind != "INPUT" # if is user input, the time should start from __start and length of time is __total_time
         start_str = "0" if not_user_input else "__start"
         total_str = "__length" if not_user_input else "__total_time"
-        code = f"Input{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, {total_str}, {start_str}}};"
+        if stream_mode:
+            window_size = stream_window_size.get(name, 1)
+            buffer_type[inp] = f"StreamWindow<{window_size}>"
+            code = f"StreamWindow<{window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf, __stock_idx, __ctx->stock_count}};"
+        else:
+            buffer_type[inp] = f"Input{layout}"
+            code = f"Input{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, {total_str}, {start_str}}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
 
     for idx, (outp, is_tmp) in enumerate(outputs):
@@ -87,14 +92,25 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         layout = outp.attrs["layout"]
         idx_in_ctx = input_name_to_idx[name]
         buffer_type[outp] = f"Output{layout}"
-        code = f"Output{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, __length, 0}};"
+        if stream_mode:
+            window_size = stream_window_size.get(name, 1)
+            buffer_type[inp] = f"StreamWindow<{window_size}>"
+            code = f"StreamWindow<{window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf, __stock_idx, __ctx->stock_count}};"
+        else:
+            buffer_type[inp] = f"Output{layout}"
+            code = f"Output{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, __length, 0}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
     for op in f.ops:
         if op.get_parent() is None and isinstance(op, WindowedTempOutput):
             window = op.attrs["window"]
             idx = f.get_op_idx(op)
-            buffer_type[op] = f"OutputWindow<{window}>"
-            code = f"OutputWindow<{window}> temp_{idx}{{}};"
+            if stream_mode:
+                buffer_type[op] = f"StreamWindow<{window}>"
+                bufname = f"{f.name}_{idx}"
+                code = f"StreamWindow<{window}> temp_{idx}{{__ctx->buffers[{query_temp_buffer_id(bufname, window)}].stream_buf, __stock_idx, __ctx->stock_count}};"
+            else:
+                buffer_type[op] = f"OutputWindow<{window}>"
+                code = f"OutputWindow<{window}> temp_{idx}{{}};"
             toplevel.scope.append(_CppSingleLine(toplevel, code))
 
     top_for = _CppFor(toplevel, "for(size_t i = 0;i < __length;i++) ")
@@ -165,7 +181,8 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         elif isinstance(op, BackRef):
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
-            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = windowedRef<{op.attrs["window"]}>({buf_name}, i);'))
+            funcname = "windowedRefStream" if stream_mode else "windowedRef"
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{op.attrs["window"]}>({buf_name}, i);'))
         elif isinstance(op, FastWindowedSum):
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])

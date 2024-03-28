@@ -29,6 +29,8 @@ struct BufferInfo {
     size_t num_users;
     BufferKind kind;
     uint32_t unreliable_count;
+    // the max window size of the ops depending on this buffer
+    uint32_t window;
 };
 
 enum class TaskExecKind {
@@ -45,8 +47,6 @@ union FuncHolder
 };
 
 
-static constexpr size_t simd_len = 8;
-static constexpr size_t time_stride = 8;
 
 struct Stage {
     FuncHolder f;
