@@ -227,6 +227,10 @@ Note that the executors are reusable. A multithread executor is actually a threa
 
 KunQuant is a tool for general expressions. You can further read [Customize.md](./Customize.md) for how you can compile your own customized factors.
 
+## Streaming mode
+
+KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./Stream.md)
+
 ## Testing and validation
 
 Unit tests for some of the internal IR transformations:

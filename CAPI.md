@@ -86,3 +86,7 @@ The output data should be filled in the C buffer `outputs`. It is OK to reuse th
 ```
 
 Note that you cannot and do not need to release `KunModuleHandle`.
+
+## C-API for Streaming mode
+
+The logic is similar to the Python API example in [Stream.md](./Stream.md). For details, see `tests/capi/test_c.cpp` and `cpp/Kun/CApi.h`.
