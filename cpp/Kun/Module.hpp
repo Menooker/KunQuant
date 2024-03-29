@@ -17,7 +17,8 @@ struct Module {
     Stage *stages;
     size_t num_buffers;
     BufferInfo *buffers;
-    OutputLayout layout;
+    OutputLayout input_layout;
+    OutputLayout output_layout;
 };
 
 struct Library {

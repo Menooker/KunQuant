@@ -50,6 +50,20 @@ def test_avg_stddev():
     np.testing.assert_allclose(outmean, expected_mean, rtol=1e-6, equal_nan=True)
     np.testing.assert_allclose(outstd, expected_stddev, rtol=1e-6, equal_nan=True)
 
+def test_avg_stddev_TS():
+    modu = lib.getModule("avg_and_stddev_TS")
+    assert(modu)
+    inp = np.random.rand(24, 20).astype("float32")
+    df = pd.DataFrame(inp.transpose())
+    expected_mean = df.rolling(10).mean().to_numpy().transpose()
+    expected_stddev = df.rolling(10).std().to_numpy().transpose()
+    blocked = np.ascontiguousarray(inp.transpose())
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": blocked}, 0, 20)
+    outmean = out["ou1"].transpose()
+    outstd = out["ou2"].transpose()
+    np.testing.assert_allclose(outmean, expected_mean, rtol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(outstd, expected_stddev, rtol=1e-6, equal_nan=True)
 
 def test_rank():
     modu = lib.getModule("test_rank")
@@ -135,6 +149,7 @@ def test_pow():
         # np.testing.assert_allclose(ST8t_ST(out["powa_b"]), np.power(base, expo), rtol=1e-5, atol=1e-5, equal_nan=True)
         np.testing.assert_allclose(ST8t_ST(out["pow12_b"]), np.power(1.2, expo), rtol=1e-5, atol=1e-5, equal_nan=True)
 
+test_avg_stddev_TS()
 test_runtime()
 test_avg_stddev()
 test_rank()

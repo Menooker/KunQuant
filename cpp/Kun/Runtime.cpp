@@ -71,7 +71,7 @@ void checkedDealloc(void *ptr, size_t sz) {
 #endif
 
 namespace kun {
-static const uint64_t VERSION = 0x00000001;
+static const uint64_t VERSION = 0x00000002;
 
 void Buffer::alloc(size_t count, size_t use_count) {
     if (!ptr) {
@@ -165,7 +165,7 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
         throw std::runtime_error("The required version in the module does not "
                                  "match the runtime version");
     }
-    if (m->layout == OutputLayout::STREAM) {
+    if (m->output_layout == OutputLayout::STREAM) {
         throw std::runtime_error(
             "Cannot run stream mode module via runGraph()");
     }
@@ -230,7 +230,7 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
         throw std::runtime_error("The required version in the module does not "
                                  "match the runtime version");
     }
-    if (m->layout != OutputLayout::STREAM) {
+    if (m->output_layout != OutputLayout::STREAM) {
         throw std::runtime_error(
             "Cannot run batch mode module via StreamContext");
     }
