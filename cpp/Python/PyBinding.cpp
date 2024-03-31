@@ -99,7 +99,7 @@ PYBIND11_MODULE(KunRunner, m) {
                 if (mod->input_layout == kun::OutputLayout::ST8s) {
                     // ST8t layout
                     if (info.ndim != 3) {
-                        throw std::runtime_error("Bad shape at " + name);
+                        throw std::runtime_error("Bad ST8s shape at " + name);
                     }
                     auto S = info.shape[0];
                     auto T = info.shape[1];
@@ -113,17 +113,17 @@ PYBIND11_MODULE(KunRunner, m) {
                 } else if (mod->input_layout == kun::OutputLayout::TS) {
                     // TS layout
                     if (info.ndim != 2) {
-                        throw std::runtime_error("Bad shape at " + name);
+                        throw std::runtime_error("Bad TS shape at " + name);
                     }
-                    auto S = info.shape[0];
-                    auto T = info.shape[1];
+                    auto S = info.shape[1];
+                    auto T = info.shape[0];
                     if (known_S == 0) {
                         known_S = S / (py::ssize_t)kun::simd_len;
                         known_T = T;
                     }
                     expectContiguousShape(
                         info, name.c_str(),
-                        {S, T});
+                        {known_T, known_S * (py::ssize_t)kun::simd_len});
                 } else {
                     throw std::runtime_error("Unknown layout at " + name);
                 }

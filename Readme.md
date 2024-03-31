@@ -231,6 +231,10 @@ KunQuant is a tool for general expressions. You can further read [Customize.md](
 
 KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./Stream.md)
 
+## Specifing Memory layouts
+
+The developers can choose the memory layout when compiling KunQuant factor libraries. The memory layout decribes how the input/output matrix is organized. Currently, KunQuant supports `TS`, `ST8s` and `STREAM` as the memory layout. In `TS` layout, the input and output data is in plain `[num_time, num_stocks]` 2D matrix. In `ST8t`, the data should be transformed to `[num_stocks//8, num_time, 8]` for better performance. The `STREAM` layout is for the streaming mode. You can choose the input/output layout independently in `compileit()` function of `generate.py`, by the parameters `compileit(..., input_layout="TS", output_layout="ST8s")` for example. By default, the input layout is `ST8s` and the output layout is `TS`. For more info of customizing the factor compilation, see [Customize.md](./Customize.md).
+
 ## Testing and validation
 
 Unit tests for some of the internal IR transformations:
