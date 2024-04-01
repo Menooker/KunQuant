@@ -1,4 +1,5 @@
 AvgAndStddev.cpp
+AvgAndStddevTS.cpp
 TestRank.cpp
 TestRank2.cpp
 TestLog.cpp

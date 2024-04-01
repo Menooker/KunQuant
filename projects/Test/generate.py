@@ -26,6 +26,13 @@ def check_1():
     with open(paths[-1], 'w') as f:
         f.write(src)
 
+def check_TS():
+    f = build_avg_and_stddev()
+    src = compileit(f, "avg_and_stddev_TS", input_layout="TS", output_layout="TS")
+    paths.append(sys.argv[1]+"/AvgAndStddevTS.cpp")
+    with open(paths[-1], 'w') as f:
+        f.write(src)
+
 def check_rank():
     builder = Builder()
     with builder:
@@ -81,6 +88,7 @@ def check_pow():
 
 os.makedirs(sys.argv[1], exist_ok=True)
 check_1()
+check_TS()
 check_rank()
 check_rank2()
 check_log()

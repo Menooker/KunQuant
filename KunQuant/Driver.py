@@ -7,7 +7,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from KunQuant.passes import Util as PassUtil
 
-required_version = "0x00000001"
+required_version = "0x00000002"
 
 def optimize(f: Function, options: dict)->Dict[str, int]:
     if PassUtil.debug_mode:
@@ -58,10 +58,16 @@ class _Partition:
         for buf in self.in_buf:
             buf.num_users += 1
 
-def compileit(f: Function, module_name: str, partition_factor = 3, output_layout = "ST8s", options = {}):
+def compileit(f: Function, module_name: str, partition_factor = 3, input_layout = "ST8s", output_layout = "ST8s", options = {}):
     if output_layout not in ["ST8s", "TS", "STREAM"]:
         raise RuntimeError("Bad output_layout name " + output_layout)
+    if input_layout not in ["ST8s", "TS", "STREAM"]:
+        raise RuntimeError("Bad input_layout name " + input_layout)
     stream_mode = output_layout == "STREAM"
+    if stream_mode and input_layout != "STREAM":
+        print("Ignoring input_layout because output_layout is stream mode")
+        input_layout = "STREAM"
+
     if stream_mode and options.get("opt_reduce", False):
         raise RuntimeError("Currently opt_reduce in stream mode is not supported.")
     input_name_to_idx: Dict[str, int] = dict()
@@ -88,7 +94,7 @@ def compileit(f: Function, module_name: str, partition_factor = 3, output_layout
         if buf.kind == "TEMP":
             op.attrs["layout"] = "ST8s"
         elif buf.kind == "INPUT":
-            op.attrs["layout"] = "ST8s"
+            op.attrs["layout"] = input_layout
         elif buf.kind == "OUTPUT":
             op.attrs["layout"] = output_layout
 
@@ -184,6 +190,7 @@ using namespace kun::ops;
     __stages,
     {len(buffer_names)},
     __buffers,
+    OutputLayout::{input_layout},
     OutputLayout::{output_layout}
 }};''')
     return "\n\n".join(impl_src)
