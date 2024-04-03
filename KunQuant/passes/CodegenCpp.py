@@ -135,7 +135,7 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             scope.scope.append(_CppSingleLine(scope, f"temp_{idx}.store(i, v{inp[0]});"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = v{inp[0]};"))
         elif isinstance(op, ConstantOp):
-            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = constVec({_value_to_float(op)});'))
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = constVec<{simd_lanes}>({_value_to_float(op)});'))
         elif isinstance(op, Log):
             funcname = "LogFast" if options.get("fast_log", True) else "Log"
             scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}(v{inp[0]});'))
@@ -168,7 +168,9 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         elif isinstance(op, ReductionOp):
             thename = op.__class__.__name__
             if isinstance(op, ReduceDecayLinear):
-                thename = f'{thename}<{op.attrs["window"]}>'
+                thename = f'{thename}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>'
+            else:
+                thename = f'{thename}<{elem_type}, {simd_lanes}>'
             loop_op = op.inputs[0] if isinstance(op.inputs[0], ForeachBackWindow) else op.inputs[0].get_parent()
             loop_body = loop_to_cpp_loop[loop_op]
             loop_var_idx = f.get_op_idx(loop_op)
@@ -184,7 +186,7 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
             funcname = "windowedRefStream" if stream_mode else "windowedRef"
-            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{op.attrs["window"]}>({buf_name}, i);'))
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>({buf_name}, i);'))
         elif isinstance(op, FastWindowedSum):
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])

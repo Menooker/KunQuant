@@ -126,7 +126,7 @@ template <typename T, int stride, size_t window>
 struct OutputWindow : DataSource<true> {
     using simd_t = kun_simd::vec<T, stride>;
     // window slots of floatx8
-    alignas(64) T buf[window * stride];
+    alignas(alignof(simd_t)) T buf[window * stride];
     // next writable position
     size_t pos;
     OutputWindow() : pos{0} {
@@ -217,7 +217,7 @@ struct FastWindowedSum {
     simd_t v = 0;
     simd_int_t num_nans = window;
     template <typename TInput>
-    f32x8 step(TInput &input, simd_t cur, size_t index) {
+    simd_t step(TInput &input, simd_t cur, size_t index) {
         RequireWindow<TInput>{};
         auto old = input.getWindow(index, window);
         auto old_is_nan = sc_isnan(old);
@@ -235,55 +235,64 @@ struct FastWindowedSum {
     }
 };
 
+template <typename T, int stride>
 struct ReduceAdd {
-    f32x8 v = _mm256_setzero_ps();
-    void step(f32x8 input, size_t index) { v = _mm256_add_ps(v, input); }
-    operator kun_simd::vec<float, 8>() { return v; }
+    using simd_t = kun_simd::vec<T, stride>;
+    simd_t v = 0;
+    void step(simd_t input, size_t index) { v = v + input; }
+    operator simd_t() { return v; }
 };
 
+template <typename T, int stride>
 struct ReduceMul {
-    f32x8 v = _mm256_setzero_ps();
-    void step(f32x8 input, size_t index) { v = _mm256_mul_ps(v, input); }
-    operator kun_simd::vec<float, 8>() { return v; }
+    using simd_t = kun_simd::vec<T, stride>;
+    simd_t v = T(1.0);
+    void step(simd_t input, size_t index) { v = v * input; }
+    operator simd_t() { return v; }
 };
 
+template <typename T, int stride>
 struct ReduceMin {
-    f32x8 v = _mm256_set1_ps(std::numeric_limits<float>::infinity());
-    void step(f32x8 input, size_t index) { v = _mm256_min_ps(v, input); }
-    operator kun_simd::vec<float, 8>() { return v; }
+    using simd_t = kun_simd::vec<T, stride>;
+    simd_t v = std::numeric_limits<T>::infinity();
+    void step(simd_t input, size_t index) { v = sc_min(v, input); }
+    operator simd_t() { return v; }
 };
 
+template <typename T, int stride>
 struct ReduceMax {
-    f32x8 v = _mm256_set1_ps(-std::numeric_limits<float>::infinity());
-    void step(f32x8 input, size_t index) { v = _mm256_max_ps(v, input); }
-    operator kun_simd::vec<float, 8>() { return v; }
+    using simd_t = kun_simd::vec<T, stride>;
+    simd_t v = -std::numeric_limits<T>::infinity();
+    void step(simd_t input, size_t index) { v = sc_max(v, input); }
+    operator simd_t() { return v; }
 };
 
-template <int window>
+template <typename T, int stride, int window>
 struct ReduceDecayLinear {
-    static constexpr float stepSize() {
+    using simd_t = kun_simd::vec<T, stride>;
+    static constexpr T stepSize() {
         return 1.0 / ((1.0 + window) * window / 2);
     }
-    f32x8 weight = _mm256_set1_ps(window * stepSize());
-    f32x8 v = _mm256_setzero_ps();
-    void step(f32x8 input, size_t index) {
-        v = _mm256_fmadd_ps(input, weight, v);
-        weight = _mm256_sub_ps(weight, _mm256_set1_ps(stepSize()));
+    simd_t weight = window * stepSize();
+    simd_t v = 0;
+    void step(simd_t input, size_t index) {
+        v = sc_fmadd(input, weight, v);
+        weight = weight - stepSize();
     }
-    operator kun_simd::vec<float, 8>() { return v; }
+    operator simd_t() { return v; }
 };
 
-template <int window, typename TInput>
-kun_simd::vec_f32x8 windowedRef(TInput &input, size_t index) {
+template <typename T, int stride, int window, typename TInput>
+kun_simd::vec<T, stride> windowedRef(TInput &input, size_t index) {
     RequireWindow<TInput>{};
     if (index >= window) {
         return input.getWindow(index, window);
     }
-    return _mm256_set1_ps(NAN);
+    return NAN;
 }
 
-template <int window, typename TInput>
-kun_simd::vec_f32x8 windowedRefStream(TInput &input, size_t index) {
+template <typename T, int stride, int window, typename TInput>
+kun_simd::vec<T, stride> windowedRefStream(TInput &input, size_t index) {
     RequireWindow<TInput>{};
     return input.getWindow(index, window);
 }
@@ -317,53 +326,56 @@ inline auto Equals(T1 a, T2 b) -> decltype(kun_simd::operator==(a, b)) {
 //     return _mm256_cmp_ps(a, b, _CMP_NGE_UQ);
 // }
 
+template <typename T, int stride>
 struct ReduceArgMax {
-    kun_simd::vec<float, 8> v =
-        _mm256_set1_ps(-std::numeric_limits<float>::infinity());
-    kun_simd::vec<float, 8> idx = _mm256_setzero_ps();
-    void step(f32x8 input, size_t index) {
+    using simd_t = kun_simd::vec<T, stride>;
+    simd_t v = -std::numeric_limits<T>::infinity();
+    simd_t idx = 0;
+    void step(simd_t input, size_t index) {
         auto is_nan = sc_isnan(v, input);
         auto cmp = v < input;
         v = sc_select(cmp, input, v);
-        v = sc_select(is_nan, _mm256_set1_ps(NAN), v);
-        idx = sc_select(cmp, _mm256_set1_ps(float(index)), idx);
-        idx = sc_select(is_nan, _mm256_set1_ps(NAN), idx);
+        v = sc_select(is_nan, NAN, v);
+        idx = sc_select(cmp, T(index), idx);
+        idx = sc_select(is_nan, NAN, idx);
     }
-    operator kun_simd::vec<float, 8>() { return idx; }
+    operator simd_t() { return idx; }
 };
 
+template <typename T, int stride>
 struct ReduceArgMin {
-    f32x8 v = _mm256_set1_ps(std::numeric_limits<float>::infinity());
-    f32x8 idx = _mm256_setzero_ps();
-    void step(f32x8 input, size_t index) {
+    using simd_t = kun_simd::vec<T, stride>;
+    simd_t v = std::numeric_limits<T>::infinity();
+    simd_t idx = 0;
+    void step(simd_t input, size_t index) {
         auto is_nan = sc_isnan(v, input);
         auto cmp = GreaterThan(v, input);
         v = sc_select(cmp, input, v);
-        v = sc_select(is_nan, _mm256_set1_ps(NAN), v);
-        idx = sc_select(cmp, _mm256_set1_ps(float(index)), idx);
-        idx = sc_select(is_nan, _mm256_set1_ps(NAN), idx);
+        v = sc_select(is_nan, NAN, v);
+        idx = sc_select(cmp, T(index), idx);
+        idx = sc_select(is_nan, NAN, idx);
     }
-    operator kun_simd::vec<float, 8>() { return idx; }
+    operator simd_t() { return idx; }
 };
 
+template <typename T, int stride>
 struct ReduceRank {
-    kun_simd::vec_f32x8 v;
-    kun_simd::vec_f32x8 less_count = 0;
-    kun_simd::vec_f32x8 eq_count = 0;
-    ReduceRank(kun_simd::vec_f32x8 cur) : v{cur} {}
-    void step(f32x8 input, size_t index) {
+    using simd_t = kun_simd::vec<T, stride>;
+    simd_t v;
+    simd_t less_count = 0;
+    simd_t eq_count = 0;
+    ReduceRank(simd_t cur) : v{cur} {}
+    void step(simd_t input, size_t index) {
         using namespace kun_simd;
-        vec_f32x8 input2 = input;
+        simd_t input2 = input;
         auto is_nan = sc_isnan(v, input2);
         auto cmpless = input2 < v;
         auto cmpeq = input2 == v;
         less_count = sc_select(is_nan, NAN, less_count);
-        less_count = sc_select(cmpless, less_count + 1.0f, less_count);
-        eq_count = sc_select(cmpeq, eq_count + 1.0f, eq_count);
+        less_count = sc_select(cmpless, less_count + T(1.0), less_count);
+        eq_count = sc_select(cmpeq, eq_count + T(1.0), eq_count);
     }
-    operator kun_simd::vec<float, 8>() {
-        return less_count + (eq_count + 1.0f) / 2.0f;
-    }
+    operator simd_t() { return less_count + (eq_count + T(1.0)) / T(2.0); }
 };
 
 template <typename T1, typename T2>
@@ -429,7 +441,10 @@ inline DecayVec_t<T1> Sqrt(T1 a) {
     return kun_simd::sc_sqrt(a);
 }
 
-inline kun_simd::vec_f32x8 constVec(float v) { return v; }
+template <int lanes, typename T>
+inline kun_simd::vec<T, lanes> constVec(const T& v) {
+    return kun_simd::vec<T, lanes>{v};
+}
 
 template <typename T1>
 inline DecayVec_t<T1> Sign(T1 v) {
@@ -450,9 +465,11 @@ inline kun_simd::vec<T, lanes> Log(kun_simd::vec<T, lanes> a) {
     return a;
 }
 
-inline f32x8 SetInfOrNanToValue(f32x8 a, float v) {
-    auto mask = sc_isnan(_mm256_sub_ps(a, a));
-    return sc_select(mask, _mm256_set1_ps(v), a);
+template <typename T, typename T2>
+inline DecayVec_t<T> SetInfOrNanToValue(T aa, T2 v) {
+    DecayVec_t<T> a = aa;
+    auto mask = sc_isnan(a - a);
+    return sc_select(mask, v, a);
 }
 
 } // namespace ops
