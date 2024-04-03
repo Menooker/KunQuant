@@ -50,6 +50,7 @@ public:
     static INLINE void store_aligned(vec v, int32_t *p) {
         _mm256_store_si256((__m256i *)p, v.v);
     }
+    operator __m256i() const { return v; }
 };
 
 using vec_s32x8 = vec<int32_t, 8>;
@@ -112,7 +113,25 @@ INLINE vec_s32x8 sc_select(
         __mmask8 mask, vec_s32x8 const &a, vec_s32x8 const &b) {
     return _mm256_mask_blend_epi32(mask, b.v, a.v);
 }
+#else
+INLINE vec_s32x8 operator==(vec_s32x8 const &a, vec_s32x8 const &b) {
+    return _mm256_cmpeq_epi32(a, b);
+}
 #endif
+
+namespace {
+INLINE vec_s32x8 blendvps_si256(__m256i a, __m256i b, __m256i mask) {
+    __m256 res =
+        _mm256_blendv_ps(_mm256_castsi256_ps(a), _mm256_castsi256_ps(b),
+                         _mm256_castsi256_ps(mask));
+    return _mm256_castps_si256(res);
+}
+}
+
+INLINE vec_s32x8 sc_select(
+        vec_s32x8 mask, vec_s32x8 const &a, vec_s32x8 const &b) {
+    return blendvps_si256(b, a, mask);
+}
 
 INLINE vec_s32x8 operator<<(vec_s32x8 const &a, vec_s32x8 const &b) {
     return _mm256_sllv_epi32(a.v, b.v);

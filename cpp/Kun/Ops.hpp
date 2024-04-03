@@ -18,110 +18,115 @@ struct DataSource {
 
 struct dummy {};
 
-inline f32x8 Select(f32x8 cond, f32x8 vtrue, f32x8 vfalse) {
-    return _mm256_blendv_ps(vfalse, vtrue, cond);
+template <typename T1, typename T2, typename T3>
+inline T1 Select(T1 cond, T2 vtrue, T3 vfalse) {
+    return kun_simd::sc_select(cond, vtrue, vfalse);
 }
 
+template <typename T, int stride>
 struct InputST8s : DataSource<true> {
-    constexpr static size_t stride = 8;
-    float *__restrict buf;
-    InputST8s(float *base, size_t stock_idx, size_t num_stock,
-              size_t total_time, size_t start)
+    using simd_t = kun_simd::vec<T, stride>;
+    T *__restrict buf;
+    InputST8s(T *base, size_t stock_idx, size_t num_stock, size_t total_time,
+              size_t start)
         : buf{base + stock_idx * total_time * stride + start * stride} {}
-    f32x8 step(size_t index) { return _mm256_loadu_ps(&buf[index * stride]); }
+    simd_t step(size_t index) { return simd_t::load(&buf[index * stride]); }
 
-    f32x8 getWindow(size_t index, size_t offset) {
+    simd_t getWindow(size_t index, size_t offset) {
         if (index < offset) {
-            return _mm256_set1_ps(NAN);
+            return NAN;
         }
-        return _mm256_loadu_ps(&buf[(index - offset) * stride]);
+        return simd_t::load(&buf[(index - offset) * stride]);
     }
 
-    f32x8 getWindowUnordered(size_t index, size_t offset) {
+    simd_t getWindowUnordered(size_t index, size_t offset) {
         return getWindow(index, offset);
     }
 };
 
+template <typename T, int stride>
 struct InputTS : DataSource<true> {
-    constexpr static size_t stride = 8;
-    float *__restrict buf;
+    using simd_t = kun_simd::vec<T, stride>;
+    T *__restrict buf;
     size_t stock_idx;
     size_t num_stock;
-    InputTS(float *base, size_t stock_idx, size_t num_stock, size_t length,
+    InputTS(T *base, size_t stock_idx, size_t num_stock, size_t length,
             size_t start)
         : buf{base + start * num_stock}, stock_idx{stock_idx},
           num_stock{num_stock} {}
 
-    float *getPtr(size_t index) {
+    T *getPtr(size_t index) {
         return &buf[index * num_stock + stride * stock_idx];
     }
 
-    f32x8 step(size_t index) { return _mm256_loadu_ps(getPtr(index)); }
+    simd_t step(size_t index) { return simd_t::load(getPtr(index)); }
 
-    f32x8 getWindow(size_t index, size_t offset) {
+    simd_t getWindow(size_t index, size_t offset) {
         if (index < offset) {
-            return _mm256_set1_ps(NAN);
+            return NAN;
         }
-        return _mm256_loadu_ps(getPtr(index - offset));
+        return simd_t::load(getPtr(index - offset));
     }
-    f32x8 getWindowUnordered(size_t index, size_t offset) {
+    simd_t getWindowUnordered(size_t index, size_t offset) {
         return getWindow(index, offset);
     }
 };
 
+template <typename T, int stride>
 struct OutputST8s : DataSource<true> {
-    constexpr static size_t stride = 8;
-    float *__restrict buf;
-    OutputST8s(float *base, size_t stock_idx, size_t num_stock, size_t length,
+    using simd_t = kun_simd::vec<T, stride>;
+    T *__restrict buf;
+    OutputST8s(T *base, size_t stock_idx, size_t num_stock, size_t length,
                size_t start)
         : buf{base + stock_idx * length * stride} {}
-    void store(size_t index, const f32x8 &v) {
-        _mm256_storeu_ps(&buf[index * stride], v);
+    void store(size_t index, const simd_t &v) {
+        simd_t::store(v, &buf[index * stride]);
     }
 
-    f32x8 getWindow(size_t index, size_t offset) {
+    simd_t getWindow(size_t index, size_t offset) {
         if (index < offset) {
-            return _mm256_set1_ps(NAN);
+            return NAN;
         }
-        return _mm256_loadu_ps(&buf[(index - offset) * stride]);
+        return simd_t::load(&buf[(index - offset) * stride]);
     }
-    f32x8 getWindowUnordered(size_t index, size_t offset) {
+    simd_t getWindowUnordered(size_t index, size_t offset) {
         return getWindow(index, offset);
     }
 };
 
+template <typename T, int stride>
 struct OutputTS : DataSource<true> {
-    constexpr static size_t stride = 8;
-    float *__restrict buf;
+    using simd_t = kun_simd::vec<T, stride>;
+    T *__restrict buf;
     size_t stock_idx;
     size_t num_stock;
-    OutputTS(float *base, size_t stock_idx, size_t num_stock, size_t length,
+    OutputTS(T *base, size_t stock_idx, size_t num_stock, size_t length,
              size_t start)
         : buf{base}, stock_idx{stock_idx}, num_stock{num_stock} {}
 
-    float *getPtr(size_t index) {
+    T *getPtr(size_t index) {
         return &buf[index * num_stock + stride * stock_idx];
     }
-    void store(size_t index, const f32x8 &v) {
-        _mm256_storeu_ps(getPtr(index), v);
+    void store(size_t index, const simd_t &v) {
+        simd_t::store(v, getPtr(index));
     }
 
-    f32x8 getWindow(size_t index, size_t offset) {
+    simd_t getWindow(size_t index, size_t offset) {
         if (index < offset) {
-            return _mm256_set1_ps(NAN);
+            return NAN;
         }
-        return _mm256_loadu_ps(getPtr(index - offset));
+        return simd_t::load(getPtr(index - offset));
     }
-    f32x8 getWindowUnordered(size_t index, size_t offset) {
+    simd_t getWindowUnordered(size_t index, size_t offset) {
         return getWindow(index, offset);
     }
 };
 
-template <size_t window>
+template <typename T, int stride, size_t window>
 struct OutputWindow : DataSource<true> {
-    constexpr static size_t stride = 8;
+    using simd_t = kun_simd::vec<T, stride>;
     // window slots of floatx8
-    alignas(64) float buf[window * stride];
+    alignas(64) T buf[window * stride];
     // next writable position
     size_t pos;
     OutputWindow() : pos{0} {
@@ -129,151 +134,135 @@ struct OutputWindow : DataSource<true> {
             buf[i] = NAN;
         }
     }
-    void store(size_t index, const f32x8 &in) {
-        _mm256_store_ps(&buf[pos * stride], in);
+    void store(size_t index, const simd_t &in) {
+        simd_t::store(in, &buf[pos * stride]);
         pos += 1;
         pos = (pos >= window) ? 0 : pos;
     }
-    f32x8 getWindow(size_t index, size_t offset) {
+    simd_t getWindow(size_t index, size_t offset) {
         offset += 1;
         auto idx = pos >= offset ? (pos - offset) : (pos + window - offset);
-        return _mm256_load_ps(&buf[idx * stride]);
+        return simd_t::load(&buf[idx * stride]);
     }
-    f32x8 getWindowUnordered(size_t index, size_t offset) {
-        return _mm256_load_ps(&buf[offset * stride]);
+    simd_t getWindowUnordered(size_t index, size_t offset) {
+        return simd_t::load(&buf[offset * stride]);
     }
 };
 
-template <size_t window>
+template <typename T, int stride, size_t window>
 struct StreamWindow : DataSource<true> {
-    constexpr static size_t stride = 8;
+    using simd_t = kun_simd::vec<T, stride>;
     // next writable position
     size_t &pos;
     // window size
     size_t stock_idx;
     size_t num_stock;
     // window slots of floatx8
-    float *buf;
+    T *buf;
     StreamWindow(StreamBuffer *buf, size_t stock_idx, size_t num_stock)
         : pos{*buf->getPos(stock_idx, num_stock, window)}, stock_idx{stock_idx},
           num_stock{num_stock}, buf{buf->getBuffer()} {}
-    void store(size_t index, const f32x8 &in) {
-        _mm256_store_ps(&buf[pos * num_stock + stock_idx * stride], in);
+    void store(size_t index, const simd_t &in) {
+        simd_t::store(in, &buf[pos * num_stock + stock_idx * stride]);
         pos += 1;
         pos = (pos >= window) ? 0 : pos;
     }
-    float* getWindowPtr(size_t index, size_t offset) {
+    T *getWindowPtr(size_t index, size_t offset) {
         offset += 1;
         auto idx = pos >= offset ? (pos - offset) : (pos + window - offset);
         return &buf[idx * num_stock + stock_idx * stride];
     }
-    f32x8 getWindow(size_t index, size_t offset) {
-        return _mm256_load_ps(getWindowPtr(index, offset));
+    simd_t getWindow(size_t index, size_t offset) {
+        return simd_t::load(getWindowPtr(index, offset));
     }
-    f32x8 step(size_t index) { return getWindow(index, 0); }
-    f32x8 getWindowUnordered(size_t index, size_t offset) {
-        return _mm256_load_ps(&buf[offset * stride]);
+    simd_t step(size_t index) { return getWindow(index, 0); }
+    simd_t getWindowUnordered(size_t index, size_t offset) {
+        return simd_t::load(&buf[offset * stride]);
     }
 };
 
-template <>
-struct StreamWindow<1ul> : DataSource<true> {
-    constexpr static size_t stride = 8;
+template <typename T, int stride>
+struct StreamWindow<T, stride, 1ul> : DataSource<true> {
+    using simd_t = kun_simd::vec<T, stride>;
     // window size
     size_t stock_idx;
     // window slots of floatx8
-    float *buf;
+    T *buf;
     StreamWindow(StreamBuffer *buf, size_t stock_idx, size_t num_stock)
         : stock_idx{stock_idx}, buf{buf->getBuffer()} {}
-    void store(size_t index, const f32x8 &in) {
-        _mm256_store_ps(&buf[stock_idx * stride], in);
+    void store(size_t index, const simd_t &in) {
+        simd_t::store(in, &buf[stock_idx * stride]);
     }
-    // f32x8 getWindow(size_t index, size_t offset) {
+    // simd_t getWindow(size_t index, size_t offset) {
     //     return _mm256_load_ps(buf);
     // }
-    f32x8 step(size_t index) {
-        return _mm256_load_ps(&buf[stock_idx * stride]);
-    }
-    // f32x8 getWindowUnordered(size_t index, size_t offset) {
+    simd_t step(size_t index) { return simd_t::load(&buf[stock_idx * stride]); }
+    // simd_t getWindowUnordered(size_t index, size_t offset) {
     //     return _mm256_load_ps(&buf[offset * stride]);
     // }
 };
-
-static inline __m256i blendvps_si256(__m256i a, __m256i b, __m256i mask) {
-    __m256 res =
-        _mm256_blendv_ps(_mm256_castsi256_ps(a), _mm256_castsi256_ps(b),
-                         _mm256_castsi256_ps(mask));
-    return _mm256_castps_si256(res);
-}
 
 template <typename TInput>
 struct RequireWindow {
     static_assert(TInput::containsWindow, "This stage needs window data");
 };
 
-inline f32x8 isNAN(f32x8 v) { return _mm256_cmp_ps(v, v, _CMP_UNORD_Q); }
+using kun_simd::sc_isnan;
+using kun_simd::sc_select;
 
-// returns true when v1 or v2 is NAN
-inline f32x8 isNAN(f32x8 v1, f32x8 v2) {
-    return _mm256_cmp_ps(v1, v2, _CMP_UNORD_Q);
-}
-
-template <int window>
+template <typename T, int stride, int window>
 struct FastWindowedSum {
-    f32x8 v = _mm256_setzero_ps();
-    __m256i num_nans = _mm256_set1_epi32(window);
+    using simd_t = kun_simd::vec<T, stride>;
+    using simd_int_t = kun_simd::vec<int32_t, stride>;
+    simd_t v = 0;
+    simd_int_t num_nans = window;
     template <typename TInput>
-    f32x8 step(TInput &input, f32x8 cur, size_t index) {
+    f32x8 step(TInput &input, simd_t cur, size_t index) {
         RequireWindow<TInput>{};
         auto old = input.getWindow(index, window);
-        auto old_is_nan = isNAN(old);
-        auto new_is_nan = isNAN(cur);
+        auto old_is_nan = sc_isnan(old);
+        auto new_is_nan = sc_isnan(cur);
         // v = old_is_nan? v : (v-old)
-        v = Select(old_is_nan, v, _mm256_sub_ps(v, old));
-        // v = new_is_nan? v : (v-cur)
-        v = Select(new_is_nan, v, _mm256_add_ps(v, cur));
-        num_nans = _mm256_sub_epi32(
-            num_nans,
-            blendvps_si256(_mm256_setzero_si256(), _mm256_set1_epi32(1),
-                           _mm256_castps_si256(old_is_nan)));
-        num_nans = _mm256_add_epi32(
-            num_nans,
-            blendvps_si256(_mm256_setzero_si256(), _mm256_set1_epi32(1),
-                           _mm256_castps_si256(new_is_nan)));
-        auto out_is_normal = _mm256_castsi256_ps(
-            _mm256_cmpeq_epi32(num_nans, _mm256_setzero_si256()));
-        return Select(out_is_normal, v, _mm256_set1_ps(NAN));
+        v = sc_select(old_is_nan, v, v - old);
+        // v = new_is_nan? v : (v+cur)
+        v = sc_select(new_is_nan, v, v + cur);
+        num_nans = num_nans -
+                   sc_select(kun_simd::bitcast<simd_int_t>(old_is_nan), 1, 0);
+        num_nans = num_nans +
+                   sc_select(kun_simd::bitcast<simd_int_t>(new_is_nan), 1, 0);
+        auto out_is_normal = kun_simd::bitcast<simd_t>(num_nans == 0);
+        return sc_select(out_is_normal, v, NAN);
     }
 };
 
 struct ReduceAdd {
     f32x8 v = _mm256_setzero_ps();
     void step(f32x8 input, size_t index) { v = _mm256_add_ps(v, input); }
-    operator f32x8() { return v; }
+    operator kun_simd::vec<float, 8>() { return v; }
 };
 
 struct ReduceMul {
     f32x8 v = _mm256_setzero_ps();
     void step(f32x8 input, size_t index) { v = _mm256_mul_ps(v, input); }
-    operator f32x8() { return v; }
+    operator kun_simd::vec<float, 8>() { return v; }
 };
 
 struct ReduceMin {
     f32x8 v = _mm256_set1_ps(std::numeric_limits<float>::infinity());
     void step(f32x8 input, size_t index) { v = _mm256_min_ps(v, input); }
-    operator f32x8() { return v; }
+    operator kun_simd::vec<float, 8>() { return v; }
 };
 
 struct ReduceMax {
     f32x8 v = _mm256_set1_ps(-std::numeric_limits<float>::infinity());
     void step(f32x8 input, size_t index) { v = _mm256_max_ps(v, input); }
-    operator f32x8() { return v; }
+    operator kun_simd::vec<float, 8>() { return v; }
 };
 
 template <int window>
 struct ReduceDecayLinear {
     static constexpr float stepSize() {
-        return 1.0f / ((1 + window) * window / 2);
+        return 1.0 / ((1.0 + window) * window / 2);
     }
     f32x8 weight = _mm256_set1_ps(window * stepSize());
     f32x8 v = _mm256_setzero_ps();
@@ -281,11 +270,11 @@ struct ReduceDecayLinear {
         v = _mm256_fmadd_ps(input, weight, v);
         weight = _mm256_sub_ps(weight, _mm256_set1_ps(stepSize()));
     }
-    operator f32x8() { return v; }
+    operator kun_simd::vec<float, 8>() { return v; }
 };
 
 template <int window, typename TInput>
-f32x8 windowedRef(TInput &input, size_t index) {
+kun_simd::vec_f32x8 windowedRef(TInput &input, size_t index) {
     RequireWindow<TInput>{};
     if (index >= window) {
         return input.getWindow(index, window);
@@ -294,71 +283,74 @@ f32x8 windowedRef(TInput &input, size_t index) {
 }
 
 template <int window, typename TInput>
-f32x8 windowedRefStream(TInput &input, size_t index) {
+kun_simd::vec_f32x8 windowedRefStream(TInput &input, size_t index) {
     RequireWindow<TInput>{};
     return input.getWindow(index, window);
 }
 
-inline f32x8 LessThan(f32x8 a, f32x8 b) {
-    return _mm256_cmp_ps(a, b, _CMP_LT_OQ);
+template <typename T1, typename T2>
+inline auto LessThan(T1 a, T2 b) -> decltype(kun_simd::operator<(a, b)) {
+    return kun_simd::operator<(a, b);
 }
 
-inline f32x8 LessEqual(f32x8 a, f32x8 b) {
-    return _mm256_cmp_ps(a, b, _CMP_LE_OQ);
+template <typename T1, typename T2>
+inline auto LessEqual(T1 a, T2 b) -> decltype(kun_simd::operator<=(a, b)) {
+    return kun_simd::operator<=(a, b);
 }
 
-inline f32x8 GreaterThan(f32x8 a, f32x8 b) {
-    return _mm256_cmp_ps(a, b, _CMP_GT_OQ);
+template <typename T1, typename T2>
+inline auto GreaterThan(T1 a, T2 b) -> decltype(kun_simd::operator>(a, b)) {
+    return kun_simd::operator>(a, b);
 }
 
-inline f32x8 GreaterEqual(f32x8 a, f32x8 b) {
-    return _mm256_cmp_ps(a, b, _CMP_GE_OQ);
+template <typename T1, typename T2>
+inline auto GreaterEqual(T1 a, T2 b) -> decltype(kun_simd::operator>=(a, b)) {
+    return kun_simd::operator>=(a, b);
 }
 
-inline f32x8 Equals(f32x8 a, f32x8 b) {
-    return _mm256_cmp_ps(a, b, _CMP_EQ_OQ);
+template <typename T1, typename T2>
+inline auto Equals(T1 a, T2 b) -> decltype(kun_simd::operator==(a, b)) {
+    return kun_simd::operator==(a, b);
 }
 
-inline f32x8 LessThan(f32x8 a, float b) {
-    return _mm256_cmp_ps(a, _mm256_set1_ps(b), _CMP_LT_OQ);
-}
-inline f32x8 LessThanOrNan(f32x8 a, f32x8 b) {
-    return _mm256_cmp_ps(a, b, _CMP_NGE_UQ);
-}
+// inline f32x8 LessThanOrNan(f32x8 a, f32x8 b) {
+//     return _mm256_cmp_ps(a, b, _CMP_NGE_UQ);
+// }
 
 struct ReduceArgMax {
-    f32x8 v = _mm256_set1_ps(-std::numeric_limits<float>::infinity());
-    f32x8 idx = _mm256_setzero_ps();
+    kun_simd::vec<float, 8> v =
+        _mm256_set1_ps(-std::numeric_limits<float>::infinity());
+    kun_simd::vec<float, 8> idx = _mm256_setzero_ps();
     void step(f32x8 input, size_t index) {
-        auto is_nan = isNAN(v, input);
-        auto cmp = LessThan(v, input);
-        v = Select(cmp, input, v);
-        v = Select(is_nan, _mm256_set1_ps(NAN), v);
-        idx = Select(cmp, _mm256_set1_ps(float(index)), idx);
-        idx = Select(is_nan, _mm256_set1_ps(NAN), idx);
+        auto is_nan = sc_isnan(v, input);
+        auto cmp = v < input;
+        v = sc_select(cmp, input, v);
+        v = sc_select(is_nan, _mm256_set1_ps(NAN), v);
+        idx = sc_select(cmp, _mm256_set1_ps(float(index)), idx);
+        idx = sc_select(is_nan, _mm256_set1_ps(NAN), idx);
     }
-    operator f32x8() { return idx; }
+    operator kun_simd::vec<float, 8>() { return idx; }
 };
 
 struct ReduceArgMin {
     f32x8 v = _mm256_set1_ps(std::numeric_limits<float>::infinity());
     f32x8 idx = _mm256_setzero_ps();
     void step(f32x8 input, size_t index) {
-        auto is_nan = isNAN(v, input);
+        auto is_nan = sc_isnan(v, input);
         auto cmp = GreaterThan(v, input);
-        v = Select(cmp, input, v);
-        v = Select(is_nan, _mm256_set1_ps(NAN), v);
-        idx = Select(cmp, _mm256_set1_ps(float(index)), idx);
-        idx = Select(is_nan, _mm256_set1_ps(NAN), idx);
+        v = sc_select(cmp, input, v);
+        v = sc_select(is_nan, _mm256_set1_ps(NAN), v);
+        idx = sc_select(cmp, _mm256_set1_ps(float(index)), idx);
+        idx = sc_select(is_nan, _mm256_set1_ps(NAN), idx);
     }
-    operator f32x8() { return idx; }
+    operator kun_simd::vec<float, 8>() { return idx; }
 };
 
 struct ReduceRank {
     kun_simd::vec_f32x8 v;
     kun_simd::vec_f32x8 less_count = 0;
     kun_simd::vec_f32x8 eq_count = 0;
-    ReduceRank(f32x8 cur) : v{cur} {}
+    ReduceRank(kun_simd::vec_f32x8 cur) : v{cur} {}
     void step(f32x8 input, size_t index) {
         using namespace kun_simd;
         vec_f32x8 input2 = input;
@@ -369,55 +361,79 @@ struct ReduceRank {
         less_count = sc_select(cmpless, less_count + 1.0f, less_count);
         eq_count = sc_select(cmpeq, eq_count + 1.0f, eq_count);
     }
-    operator f32x8() { return less_count + (eq_count + 1.0f) / 2.0f; }
+    operator kun_simd::vec<float, 8>() {
+        return less_count + (eq_count + 1.0f) / 2.0f;
+    }
 };
 
-inline f32x8 Max(f32x8 a, f32x8 b) { return _mm256_max_ps(a, b); }
-
-inline f32x8 Min(f32x8 a, f32x8 b) { return _mm256_min_ps(a, b); }
-
-inline f32x8 Abs(f32x8 a) { return kun_simd::sc_abs(kun_simd::vec_f32x8(a)); }
-
-inline f32x8 Add(f32x8 a, f32x8 b) { return _mm256_add_ps(a, b); }
-inline f32x8 Add(f32x8 a, float b) {
-    return _mm256_add_ps(a, _mm256_set1_ps(b));
-}
-inline f32x8 Sub(f32x8 a, f32x8 b) { return _mm256_sub_ps(a, b); }
-inline f32x8 Sub(float a, f32x8 b) {
-    return _mm256_sub_ps(_mm256_set1_ps(a), b);
-}
-inline f32x8 Sub(f32x8 a, float b) {
-    return _mm256_sub_ps(a, _mm256_set1_ps(b));
-}
-inline f32x8 Mul(f32x8 a, f32x8 b) { return _mm256_mul_ps(a, b); }
-inline f32x8 Mul(f32x8 a, float b) {
-    return _mm256_mul_ps(a, _mm256_set1_ps(b));
-}
-inline f32x8 Mul(float a, f32x8 b) {
-    return _mm256_mul_ps(_mm256_set1_ps(a), b);
-}
-inline f32x8 Div(f32x8 a, f32x8 b) { return _mm256_div_ps(a, b); }
-inline f32x8 Div(f32x8 a, float b) {
-    return _mm256_div_ps(a, _mm256_set1_ps(b));
+template <typename T1, typename T2>
+inline auto Max(T1 a, T2 b) -> decltype(kun_simd::sc_max(a, b)) {
+    return kun_simd::sc_max(a, b);
 }
 
-inline f32x8 Div(float a, f32x8 b) {
-    return _mm256_div_ps(_mm256_set1_ps(a), b);
+template <typename T1, typename T2>
+inline auto Min(T1 a, T2 b) -> decltype(kun_simd::sc_min(a, b)) {
+    return kun_simd::sc_min(a, b);
 }
 
-inline f32x8 Or(f32x8 a, f32x8 b) { return _mm256_or_ps(a, b); }
-inline f32x8 And(f32x8 a, f32x8 b) { return _mm256_and_ps(a, b); }
-inline f32x8 Not(f32x8 a) {
-    return _mm256_xor_ps(a, _mm256_castsi256_ps(_mm256_set1_epi32(-1)));
+template <typename T1>
+struct DecayVec {
+    using result = decltype(kun_simd::sc_abs(std::declval<T1>()));
+};
+
+template <typename T1>
+using DecayVec_t = typename DecayVec<T1>::result;
+
+template <typename T1>
+inline DecayVec_t<T1> Abs(T1 a) {
+    return kun_simd::sc_abs(a);
 }
 
-inline f32x8 Sqrt(f32x8 a) { return _mm256_sqrt_ps(a); }
+template <typename T1, typename T2>
+inline auto Add(T1 a, T2 b) -> decltype(kun_simd::operator+(a, b)) {
+    return kun_simd::operator+(a, b);
+}
 
-inline f32x8 constVec(float v) { return _mm256_set1_ps(v); }
+template <typename T1, typename T2>
+inline auto Sub(T1 a, T2 b) -> decltype(kun_simd::operator-(a, b)) {
+    return kun_simd::operator-(a, b);
+}
 
-inline f32x8 Sign(f32x8 in) {
+template <typename T1, typename T2>
+inline auto Mul(T1 a, T2 b) -> decltype(kun_simd::operator*(a, b)) {
+    return kun_simd::operator*(a, b);
+}
+
+template <typename T1, typename T2>
+inline auto Div(T1 a, T2 b) -> decltype(kun_simd::operator/(a, b)) {
+    return kun_simd::operator/(a, b);
+}
+
+template <typename T1, typename T2>
+inline auto Or(T1 a, T2 b) -> decltype(kun_simd::operator|(a, b)) {
+    return kun_simd::operator|(a, b);
+}
+
+template <typename T1, typename T2>
+inline auto And(T1 a, T2 b) -> decltype(kun_simd::operator&(a, b)) {
+    return kun_simd::operator&(a, b);
+}
+
+template <typename T1>
+inline DecayVec_t<T1> Not(T1 a) {
+    return kun_simd::operator!(a);
+}
+
+template <typename T1>
+inline DecayVec_t<T1> Sqrt(T1 a) {
+    return kun_simd::sc_sqrt(a);
+}
+
+inline kun_simd::vec_f32x8 constVec(float v) { return v; }
+
+template <typename T1>
+inline DecayVec_t<T1> Sign(T1 v) {
     using namespace kun_simd;
-    vec_f32x8 v = in;
     auto is_nan = sc_isnan(v);
     auto v1 = sc_select(is_nan, NAN, 1.0f);
     v1 = sc_select(v < 0.0f, -1.0f, v1);
@@ -425,18 +441,18 @@ inline f32x8 Sign(f32x8 in) {
     return v1;
 }
 
-inline f32x8 Log(f32x8 a) {
-    alignas(32) float v[8];
-    _mm256_store_ps(v, a);
+template <typename T, int lanes>
+inline kun_simd::vec<T, lanes> Log(kun_simd::vec<T, lanes> a) {
+    T *v = a.raw;
     for (int i = 0; i < 8; i++) {
         v[i] = std::log(v[i]);
     }
-    return _mm256_load_ps(v);
+    return a;
 }
 
 inline f32x8 SetInfOrNanToValue(f32x8 a, float v) {
-    auto mask = isNAN(_mm256_sub_ps(a, a));
-    return Select(mask, _mm256_set1_ps(v), a);
+    auto mask = sc_isnan(_mm256_sub_ps(a, a));
+    return sc_select(mask, _mm256_set1_ps(v), a);
 }
 
 } // namespace ops
