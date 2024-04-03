@@ -23,11 +23,11 @@
 #include "common.hpp"
 #include <KunSIMD/Vector.hpp>
 
-namespace kun_simd{
+namespace kun_simd {
 
-template<>
+template <>
 struct alignas(32) vec<float, 8> {
-public:
+  public:
     union {
         __m256 v;
         float raw[8];
@@ -36,25 +36,19 @@ public:
     INLINE vec() = default;
     INLINE vec(float f) { v = _mm256_set1_ps(f); }
     INLINE vec(float i0, float i1, float i2, float i3, float i4, float i5,
-            float i6, float i7) {
+               float i6, float i7) {
         v = _mm256_setr_ps(i0, i1, i2, i3, i4, i5, i6, i7);
     }
     INLINE vec(__m256 const &x) { v = x; }
 
     static INLINE vec load(const float *p) { return _mm256_loadu_ps(p); }
-    static INLINE vec load_aligned(const float *p) {
-        return _mm256_load_ps(p);
-    }
-    static INLINE void store(vec v, float *p) {
-        _mm256_storeu_ps(p, v.v);
-    }
+    static INLINE vec load_aligned(const float *p) { return _mm256_load_ps(p); }
+    static INLINE void store(vec v, float *p) { _mm256_storeu_ps(p, v.v); }
     static INLINE void store_aligned(vec v, float *p) {
         _mm256_store_ps(p, v.v);
     }
 
-    operator __m256() const {
-        return v;
-    }
+    operator __m256() const { return v; }
 };
 
 using vec_f32x8 = vec<float, 8>;
@@ -75,8 +69,8 @@ INLINE vec_f32x8 operator/(vec_f32x8 const &a, vec_f32x8 const &b) {
     return _mm256_div_ps(a.v, b.v);
 }
 
-INLINE vec_f32x8 sc_select(
-        vec_f32x8 cond, vec_f32x8 const &a, vec_f32x8 const &b) {
+INLINE vec_f32x8 sc_select(vec_f32x8 cond, vec_f32x8 const &a,
+                           vec_f32x8 const &b) {
     return _mm256_blendv_ps(b, a, cond);
 }
 
@@ -105,18 +99,28 @@ INLINE vec_f32x8 operator<=(vec_f32x8 const &a, vec_f32x8 const &b) {
     return ret;
 }
 
-INLINE vec_f32x8 sc_fmadd(
-        vec_f32x8 const &a, vec_f32x8 const &b, vec_f32x8 const &c) {
+INLINE vec_f32x8 operator|(vec_f32x8 const &a, vec_f32x8 const &b) {
+    return _mm256_or_ps(a, b);
+}
+INLINE vec_f32x8 operator&(vec_f32x8 const &a, vec_f32x8 const &b) {
+    return _mm256_and_ps(a, b);
+}
+INLINE vec_f32x8 operator!(vec_f32x8 a) {
+    return _mm256_xor_ps(a, _mm256_castsi256_ps(_mm256_set1_epi32(-1)));
+}
+
+INLINE vec_f32x8 sc_fmadd(vec_f32x8 const &a, vec_f32x8 const &b,
+                          vec_f32x8 const &c) {
     return _mm256_fmadd_ps(a.v, b.v, c.v);
 }
 
-INLINE vec_f32x8 sc_fmsub(
-        vec_f32x8 const &a, vec_f32x8 const &b, vec_f32x8 const &c) {
+INLINE vec_f32x8 sc_fmsub(vec_f32x8 const &a, vec_f32x8 const &b,
+                          vec_f32x8 const &c) {
     return _mm256_fmsub_ps(a.v, b.v, c.v);
 }
 
-INLINE vec_f32x8 sc_fnmadd(
-        vec_f32x8 const &a, vec_f32x8 const &b, vec_f32x8 const &c) {
+INLINE vec_f32x8 sc_fnmadd(vec_f32x8 const &a, vec_f32x8 const &b,
+                           vec_f32x8 const &c) {
     return _mm256_fnmadd_ps(a.v, b.v, c.v);
 }
 
@@ -131,19 +135,11 @@ INLINE vec_f32x8 sc_round(vec_f32x8 const &a) {
     return _mm256_round_ps(a.v, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
 }
 
-INLINE vec_f32x8 sc_ceil(vec_f32x8 const &a) {
-    return _mm256_ceil_ps(a.v);
-}
-INLINE vec_f32x8 sc_floor(vec_f32x8 const &a) {
-    return _mm256_floor_ps(a.v);
-}
+INLINE vec_f32x8 sc_ceil(vec_f32x8 const &a) { return _mm256_ceil_ps(a.v); }
+INLINE vec_f32x8 sc_floor(vec_f32x8 const &a) { return _mm256_floor_ps(a.v); }
 
-INLINE vec_f32x8 sc_sqrt(vec_f32x8 const &a) {
-    return _mm256_sqrt_ps(a.v);
-}
-INLINE vec_f32x8 sc_rsqrt(vec_f32x8 const &a) {
-    return _mm256_rsqrt_ps(a.v);
-}
+INLINE vec_f32x8 sc_sqrt(vec_f32x8 const &a) { return _mm256_sqrt_ps(a.v); }
+INLINE vec_f32x8 sc_rsqrt(vec_f32x8 const &a) { return _mm256_rsqrt_ps(a.v); }
 
 INLINE vec_f32x8 sc_abs(vec_f32x8 const &a) {
     return _mm256_andnot_ps(_mm256_set1_ps(-0.0f), a.v);
@@ -157,5 +153,5 @@ inline vec_f32x8 sc_isnan(vec_f32x8 v1) {
     return _mm256_cmp_ps(v1.v, v1.v, _CMP_UNORD_Q);
 }
 
-}
+} // namespace kun_simd
 #endif

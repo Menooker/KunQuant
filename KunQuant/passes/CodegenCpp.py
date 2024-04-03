@@ -71,6 +71,8 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
     header = f'''static void stage_{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
     toplevel = _CppScope(None)
     buffer_type: Dict[OpBase, str] = dict()
+    elem_type = "float"
+    simd_lanes = 8
     for inp, buf_kind in inputs:
         name = inp.attrs["name"]
         layout = inp.attrs["layout"]
@@ -80,37 +82,37 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         total_str = "__length" if not_user_input else "__total_time"
         if stream_mode:
             window_size = stream_window_size.get(name, 1)
-            buffer_type[inp] = f"StreamWindow<{window_size}>"
-            code = f"StreamWindow<{window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf, __stock_idx, __ctx->stock_count}};"
+            buffer_type[inp] = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}>"
+            code = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf, __stock_idx, __ctx->stock_count}};"
         else:
-            buffer_type[inp] = f"Input{layout}"
-            code = f"Input{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, {total_str}, {start_str}}};"
+            buffer_type[inp] = f"Input{layout}<{elem_type}, {simd_lanes}>"
+            code = f"Input{layout}<{elem_type}, {simd_lanes}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, {total_str}, {start_str}}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
 
     for idx, (outp, is_tmp) in enumerate(outputs):
         name = outp.attrs["name"]
         layout = outp.attrs["layout"]
         idx_in_ctx = input_name_to_idx[name]
-        buffer_type[outp] = f"Output{layout}"
+        buffer_type[outp] = f"Output{layout}<{elem_type}, {simd_lanes}>"
         if stream_mode:
             window_size = stream_window_size.get(name, 1)
-            buffer_type[inp] = f"StreamWindow<{window_size}>"
-            code = f"StreamWindow<{window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf, __stock_idx, __ctx->stock_count}};"
+            buffer_type[inp] = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}>"
+            code = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf, __stock_idx, __ctx->stock_count}};"
         else:
-            buffer_type[inp] = f"Output{layout}"
-            code = f"Output{layout} buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, __length, 0}};"
+            buffer_type[inp] = f"Output{layout}<{elem_type}, {simd_lanes}>"
+            code = f"Output{layout}<{elem_type}, {simd_lanes}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, __length, 0}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
     for op in f.ops:
         if op.get_parent() is None and isinstance(op, WindowedTempOutput):
             window = op.attrs["window"]
             idx = f.get_op_idx(op)
             if stream_mode:
-                buffer_type[op] = f"StreamWindow<{window}>"
+                buffer_type[op] = f"StreamWindow<{elem_type}, {simd_lanes}, {window}>"
                 bufname = f"{f.name}_{idx}"
-                code = f"StreamWindow<{window}> temp_{idx}{{__ctx->buffers[{query_temp_buffer_id(bufname, window)}].stream_buf, __stock_idx, __ctx->stock_count}};"
+                code = f"StreamWindow<{elem_type}, {simd_lanes}, {window}> temp_{idx}{{__ctx->buffers[{query_temp_buffer_id(bufname, window)}].stream_buf, __stock_idx, __ctx->stock_count}};"
             else:
-                buffer_type[op] = f"OutputWindow<{window}>"
-                code = f"OutputWindow<{window}> temp_{idx}{{}};"
+                buffer_type[op] = f"OutputWindow<{elem_type}, {simd_lanes}, {window}>"
+                code = f"OutputWindow<{elem_type}, {simd_lanes}, {window}> temp_{idx}{{}};"
             toplevel.scope.append(_CppSingleLine(toplevel, code))
 
     top_for = _CppFor(toplevel, "for(size_t i = 0;i < __length;i++) ")
@@ -133,7 +135,7 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             scope.scope.append(_CppSingleLine(scope, f"temp_{idx}.store(i, v{inp[0]});"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = v{inp[0]};"))
         elif isinstance(op, ConstantOp):
-            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = constVec({_value_to_float(op)});'))
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = constVec<{simd_lanes}>({_value_to_float(op)});'))
         elif isinstance(op, Log):
             funcname = "LogFast" if options.get("fast_log", True) else "Log"
             scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}(v{inp[0]});'))
@@ -166,7 +168,9 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         elif isinstance(op, ReductionOp):
             thename = op.__class__.__name__
             if isinstance(op, ReduceDecayLinear):
-                thename = f'{thename}<{op.attrs["window"]}>'
+                thename = f'{thename}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>'
+            else:
+                thename = f'{thename}<{elem_type}, {simd_lanes}>'
             loop_op = op.inputs[0] if isinstance(op.inputs[0], ForeachBackWindow) else op.inputs[0].get_parent()
             loop_body = loop_to_cpp_loop[loop_op]
             loop_var_idx = f.get_op_idx(loop_op)
@@ -182,12 +186,12 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
             funcname = "windowedRefStream" if stream_mode else "windowedRef"
-            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{op.attrs["window"]}>({buf_name}, i);'))
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>({buf_name}, i);'))
         elif isinstance(op, FastWindowedSum):
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
             window = op.attrs["window"]
-            toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"FastWindowedSum<{window}> sum_{idx};"))
+            toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"FastWindowedSum<{elem_type}, {simd_lanes}, {window}> sum_{idx};"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = sum_{idx}.step({buf_name}, v{inp[0]}, i);"))
         elif isinstance(op, Select):
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
