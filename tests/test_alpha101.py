@@ -279,7 +279,7 @@ def main():
     print(start_window)
     num_stock = 64
     num_time = 260
-    is_check = False
+    is_check = True
     my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, True)
     executor = kr.createSingleThreadExecutor()
     done = True
@@ -334,4 +334,4 @@ def streammain():
 
 main()
 print("======================================")
-#streammain()
+streammain()

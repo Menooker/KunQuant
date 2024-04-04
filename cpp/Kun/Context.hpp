@@ -115,37 +115,5 @@ struct Context {
 
 KUN_API std::shared_ptr<Executor> createSingleThreadExecutor();
 KUN_API std::shared_ptr<Executor> createMultiThreadExecutor(int num_threads);
-namespace ops {
-KUN_API void RankStocksSTs_STs(RuntimeStage *stage, size_t __stock_idx,
-                                 size_t __total_time, size_t __start,
-                                 size_t __length);
-KUN_API void RankStocksSTs_TS(RuntimeStage *stage, size_t __stock_idx,
-                               size_t __total_time, size_t __start,
-                               size_t __length);
-KUN_API void RankStocksTS_STs(RuntimeStage *stage, size_t __stock_idx,
-                               size_t __total_time, size_t __start,
-                               size_t __length);
-KUN_API void RankStocksTS_TS(RuntimeStage *stage, size_t __stock_idx,
-                             size_t __total_time, size_t __start,
-                             size_t __length);
-KUN_API void RankStocksSTREAM_STREAM(RuntimeStage *stage, size_t __stock_idx,
-                                     size_t __total_time, size_t __start,
-                                     size_t __length);
 
-KUN_API void ScaleStocksSTs_STs(RuntimeStage *stage, size_t __stock_idx,
-                                  size_t __total_time, size_t __start,
-                                  size_t __length);
-KUN_API void ScaleStocksSTs_TS(RuntimeStage *stage, size_t __stock_idx,
-                                size_t __total_time, size_t __start,
-                                size_t __length);
-KUN_API void ScaleStocksTS_STs(RuntimeStage *stage, size_t __stock_idx,
-                                size_t __total_time, size_t __start,
-                                size_t __length);
-KUN_API void ScaleStocksTS_TS(RuntimeStage *stage, size_t __stock_idx,
-                              size_t __total_time, size_t __start,
-                              size_t __length);
-KUN_API void ScaleStocksSTREAM_STREAM(RuntimeStage *stage, size_t __stock_idx,
-                                      size_t __total_time, size_t __start,
-                                      size_t __length);
-} // namespace ops
 } // namespace kun

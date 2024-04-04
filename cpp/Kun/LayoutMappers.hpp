@@ -6,48 +6,51 @@
 namespace kun {
 namespace ops {
 
-struct MapperSTs {
+template<typename T, size_t simd_len>
+struct KUN_API MapperSTs {
     static const float *getInput(Buffer *b, BufferInfo *info,
                                  size_t num_stock) {
         return b->ptr;
     }
     static float *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
-                            size_t simd_len) {
+                            size_t simd_len2) {
         return b->ptr;
     }
     static size_t call(size_t stockid, size_t t, size_t num_time,
-                       size_t num_stock, size_t simd_len) {
+                       size_t num_stock, size_t simd_len2) {
         auto S = stockid / simd_len;
         return S * num_time * simd_len + t * simd_len + stockid % simd_len;
     }
 };
 
-struct MapperTS {
+template<typename T, size_t simd_len>
+struct KUN_API MapperTS {
     static const float *getInput(Buffer *b, BufferInfo *info,
                                  size_t num_stock) {
         return b->ptr;
     }
     static float *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
-                            size_t simd_len) {
+                            size_t simd_len2) {
         return b->ptr;
     }
     static size_t call(size_t stockid, size_t t, size_t num_time,
-                       size_t num_stock, size_t simd_len) {
+                       size_t num_stock, size_t simd_len2) {
         return t * num_stock + stockid;
     }
 };
 
-struct MapperSTREAM {
+template<typename T, size_t simd_len>
+struct KUN_API MapperSTREAM {
     static const float *getInput(Buffer *b, BufferInfo *info,
                                  size_t num_stock) {
         return b->stream_buf->getCurrentBufferPtr(num_stock, info->window);
     }
     static float *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
-                            size_t simd_len) {
+                            size_t simd_len2) {
         return b->stream_buf->pushData(num_stock, info->window, simd_len);
     }
     static size_t call(size_t stockid, size_t t, size_t num_time,
-                       size_t num_stock, size_t simd_len) {
+                       size_t num_stock, size_t simd_len2) {
         return stockid;
     }
 };

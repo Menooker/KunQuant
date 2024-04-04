@@ -124,6 +124,8 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
     impl_src = ['''#include <Kun/Context.hpp>
 #include <Kun/Module.hpp>
 #include <Kun/Ops.hpp>
+#include <Kun/Rank.hpp>
+#include <Kun/Scale.hpp>
 
 using namespace kun;
 using namespace kun::ops;
