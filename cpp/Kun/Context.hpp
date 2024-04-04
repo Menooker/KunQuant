@@ -109,19 +109,20 @@ struct Context {
     size_t total_time;
     size_t start;
     size_t length;
+    size_t simd_len;
     bool is_stream;
 };
 
 KUN_API std::shared_ptr<Executor> createSingleThreadExecutor();
 KUN_API std::shared_ptr<Executor> createMultiThreadExecutor(int num_threads);
 namespace ops {
-KUN_API void RankStocksST8s_ST8s(RuntimeStage *stage, size_t __stock_idx,
+KUN_API void RankStocksSTs_STs(RuntimeStage *stage, size_t __stock_idx,
                                  size_t __total_time, size_t __start,
                                  size_t __length);
-KUN_API void RankStocksST8s_TS(RuntimeStage *stage, size_t __stock_idx,
+KUN_API void RankStocksSTs_TS(RuntimeStage *stage, size_t __stock_idx,
                                size_t __total_time, size_t __start,
                                size_t __length);
-KUN_API void RankStocksTS_ST8s(RuntimeStage *stage, size_t __stock_idx,
+KUN_API void RankStocksTS_STs(RuntimeStage *stage, size_t __stock_idx,
                                size_t __total_time, size_t __start,
                                size_t __length);
 KUN_API void RankStocksTS_TS(RuntimeStage *stage, size_t __stock_idx,
@@ -131,13 +132,13 @@ KUN_API void RankStocksSTREAM_STREAM(RuntimeStage *stage, size_t __stock_idx,
                                      size_t __total_time, size_t __start,
                                      size_t __length);
 
-KUN_API void ScaleStocksST8s_ST8s(RuntimeStage *stage, size_t __stock_idx,
+KUN_API void ScaleStocksSTs_STs(RuntimeStage *stage, size_t __stock_idx,
                                   size_t __total_time, size_t __start,
                                   size_t __length);
-KUN_API void ScaleStocksST8s_TS(RuntimeStage *stage, size_t __stock_idx,
+KUN_API void ScaleStocksSTs_TS(RuntimeStage *stage, size_t __stock_idx,
                                 size_t __total_time, size_t __start,
                                 size_t __length);
-KUN_API void ScaleStocksTS_ST8s(RuntimeStage *stage, size_t __stock_idx,
+KUN_API void ScaleStocksTS_STs(RuntimeStage *stage, size_t __stock_idx,
                                 size_t __total_time, size_t __start,
                                 size_t __length);
 KUN_API void ScaleStocksTS_TS(RuntimeStage *stage, size_t __stock_idx,

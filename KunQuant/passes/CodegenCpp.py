@@ -65,14 +65,12 @@ def _value_to_float(op: OpBase) -> str:
 
 vector_len = 8
 
-def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int]) -> str:
+def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int], elem_type, simd_lanes) -> str:
     if len(f.ops) == 3 and isinstance(f.ops[1], CrossSectionalOp):
         return f'''static auto stage_{f.name} = {f.ops[1].__class__.__name__}Stocks{f.ops[0].attrs["layout"]}_{f.ops[2].attrs["layout"]};'''
     header = f'''static void stage_{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
     toplevel = _CppScope(None)
     buffer_type: Dict[OpBase, str] = dict()
-    elem_type = "float"
-    simd_lanes = 8
     for inp, buf_kind in inputs:
         name = inp.attrs["name"]
         layout = inp.attrs["layout"]

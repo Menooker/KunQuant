@@ -7,7 +7,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from KunQuant.passes import Util as PassUtil
 
-required_version = "0x00000002"
+required_version = "0x64100002"
 
 def optimize(f: Function, options: dict)->Dict[str, int]:
     if PassUtil.debug_mode:
@@ -58,10 +58,23 @@ class _Partition:
         for buf in self.in_buf:
             buf.num_users += 1
 
-def compileit(f: Function, module_name: str, partition_factor = 3, input_layout = "ST8s", output_layout = "ST8s", options = {}):
-    if output_layout not in ["ST8s", "TS", "STREAM"]:
+def _deprecation_check(name: str, argname: str) -> str:
+    if name == "ST8s":
+        print(f"The layout name given in {argname} ST8s is depracated. Use STs and blocking_len=8 instead")
+        return "STs"
+    return name
+
+def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "float", blocking_len = None, input_layout = "STs", output_layout = "STs", options = {}):
+    input_layout = _deprecation_check(input_layout, "input_layout")
+    output_layout = _deprecation_check(output_layout, "input_layout")
+    if dtype not in ["float", "double"]:
+        raise RuntimeError("Bad dtype " + dtype)
+    if blocking_len is None:
+        suggested_len = {"float": 8, "double": 4}
+        blocking_len = suggested_len[dtype]
+    if output_layout not in ["STs", "TS", "STREAM"]:
         raise RuntimeError("Bad output_layout name " + output_layout)
-    if input_layout not in ["ST8s", "TS", "STREAM"]:
+    if input_layout not in ["STs", "TS", "STREAM"]:
         raise RuntimeError("Bad input_layout name " + input_layout)
     stream_mode = output_layout == "STREAM"
     if stream_mode and input_layout != "STREAM":
@@ -92,7 +105,7 @@ def compileit(f: Function, module_name: str, partition_factor = 3, input_layout 
             op.attrs["layout"] = "STREAM"
             return
         if buf.kind == "TEMP":
-            op.attrs["layout"] = "ST8s"
+            op.attrs["layout"] = "STs"
         elif buf.kind == "INPUT":
             op.attrs["layout"] = input_layout
         elif buf.kind == "OUTPUT":
@@ -134,7 +147,7 @@ using namespace kun::ops;
         def query_temp_buf_id(tempname: str, window: int) -> int:
             input_windows[tempname] = window
             return insert_name_str(tempname, "TEMP").idx
-        src = codegen_cpp(func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows)
+        src = codegen_cpp(func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows, dtype, blocking_len)
         impl_src.append(src)
         newparti = _Partition(func.name, len(partitions), pins, pouts)
         if len(func.ops) == 3 and isinstance(func.ops[1], CrossSectionalOp):
@@ -184,13 +197,16 @@ using namespace kun::ops;
 {parti_dep_src2}
 }}
 ''')
+    dty = dtype[0].upper() + dtype[1:]
     impl_src.append(f'''KUN_EXPORT Module {module_name}{{
     {required_version},
     {len(partitions)},
     __stages,
     {len(buffer_names)},
     __buffers,
-    OutputLayout::{input_layout},
-    OutputLayout::{output_layout}
+    MemoryLayout::{input_layout},
+    MemoryLayout::{output_layout},
+    {blocking_len},
+    Datatype::{dty}
 }};''')
     return "\n\n".join(impl_src)

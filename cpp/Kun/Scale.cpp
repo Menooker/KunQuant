@@ -19,39 +19,40 @@ static void ScaleStocks(RuntimeStage *stage, size_t time_idx,
     const float *input =
         INPUT::getInput(&inbuf, stage->stage->in_buffers[0], num_stocks);
     auto outinfo = stage->stage->out_buffers[0];
-    float *output = OUTPUT::getOutput(&stage->ctx->buffers[outinfo->id], outinfo,
-                                      num_stocks);
+    auto simd_len = stage->ctx->simd_len;
+    float *output = OUTPUT::getOutput(&stage->ctx->buffers[outinfo->id],
+                                      outinfo, num_stocks, simd_len);
     auto time_end =
         std::min(__start + (time_idx + 1) * time_stride, __start + __length);
     for (size_t t = __start + time_idx * time_stride; t < time_end; t++) {
         float sum = 0;
         for (size_t i = 0; i < num_stocks; i++) {
             float in = input[INPUT::call(i, t - in_base_time, in_num_time,
-                                         num_stocks)];
+                                         num_stocks, simd_len)];
             if (!std::isnan(in)) {
                 sum += std::abs(in);
             }
         }
         for (size_t i = 0; i < num_stocks; i++) {
             float in = input[INPUT::call(i, t - in_base_time, in_num_time,
-                                         num_stocks)];
+                                         num_stocks, simd_len)];
             float out = (in == 0 && sum == 0) ? NAN : (in / sum);
-            output[OUTPUT::call(i, t - __start, __length, num_stocks)] = out;
+            output[OUTPUT::call(i, t - __start, __length, num_stocks,
+                                simd_len)] = out;
         }
     }
 }
 
-void ScaleStocksST8s_ST8s(RuntimeStage *stage, size_t time_idx,
-                          size_t __total_time, size_t __start,
-                          size_t __length) {
-    ScaleStocks<MapperST8s, MapperST8s>(stage, time_idx, __total_time, __start,
-                                        __length);
+void ScaleStocksSTs_STs(RuntimeStage *stage, size_t time_idx,
+                        size_t __total_time, size_t __start, size_t __length) {
+    ScaleStocks<MapperSTs, MapperSTs>(stage, time_idx, __total_time, __start,
+                                      __length);
 }
 
-void ScaleStocksST8s_TS(RuntimeStage *stage, size_t time_idx,
-                        size_t __total_time, size_t __start, size_t __length) {
-    ScaleStocks<MapperST8s, MapperTS>(stage, time_idx, __total_time, __start,
-                                      __length);
+void ScaleStocksSTs_TS(RuntimeStage *stage, size_t time_idx,
+                       size_t __total_time, size_t __start, size_t __length) {
+    ScaleStocks<MapperSTs, MapperTS>(stage, time_idx, __total_time, __start,
+                                     __length);
 }
 
 void ScaleStocksTS_TS(RuntimeStage *stage, size_t time_idx, size_t __total_time,
@@ -67,10 +68,10 @@ void ScaleStocksSTREAM_STREAM(RuntimeStage *stage, size_t time_idx,
                                             __start, __length);
 }
 
-void ScaleStocksTS_ST8s(RuntimeStage *stage, size_t time_idx,
-                        size_t __total_time, size_t __start, size_t __length) {
-    ScaleStocks<MapperTS, MapperST8s>(stage, time_idx, __total_time, __start,
-                                      __length);
+void ScaleStocksTS_STs(RuntimeStage *stage, size_t time_idx,
+                       size_t __total_time, size_t __start, size_t __length) {
+    ScaleStocks<MapperTS, MapperSTs>(stage, time_idx, __total_time, __start,
+                                     __length);
 }
 
 } // namespace ops

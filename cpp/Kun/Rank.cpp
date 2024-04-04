@@ -19,8 +19,9 @@ static void RankStocks(RuntimeStage *stage, size_t time_idx,
     const float *input =
         INPUT::getInput(&inbuf, stage->stage->in_buffers[0], num_stocks);
     auto outinfo = stage->stage->out_buffers[0];
+    auto simd_len = stage->ctx->simd_len;
     float *output = OUTPUT::getOutput(&stage->ctx->buffers[outinfo->id], outinfo,
-                                      num_stocks);
+                                      num_stocks, simd_len);
     auto time_end =
         std::min(__start + (time_idx + 1) * time_stride, __start + __length);
     std::vector<float> data;
@@ -29,7 +30,7 @@ static void RankStocks(RuntimeStage *stage, size_t time_idx,
         for (size_t i = 0; i < num_stocks; i++) {
             auto S = i / simd_len;
             float in = input[INPUT::call(i, t - in_base_time, in_num_time,
-                                         num_stocks)];
+                                         num_stocks, simd_len)];
             if (!std::isnan(in)) {
                 data.push_back(in);
             }
@@ -38,7 +39,7 @@ static void RankStocks(RuntimeStage *stage, size_t time_idx,
         for (size_t i = 0; i < num_stocks; i++) {
             auto S = i / simd_len;
             float in = input[INPUT::call(i, t - in_base_time, in_num_time,
-                                         num_stocks)];
+                                         num_stocks, simd_len)];
             float out;
             if (!std::isnan(in)) {
                 auto pos = std::equal_range(data.begin(), data.end(), in);
@@ -48,21 +49,21 @@ static void RankStocks(RuntimeStage *stage, size_t time_idx,
             } else {
                 out = NAN;
             }
-            output[OUTPUT::call(i, t - __start, __length, num_stocks)] = out;
+            output[OUTPUT::call(i, t - __start, __length, num_stocks, simd_len)] = out;
         }
         data.clear();
     }
 }
 
-void RankStocksST8s_ST8s(RuntimeStage *stage, size_t time_idx,
+void RankStocksSTs_STs(RuntimeStage *stage, size_t time_idx,
                          size_t __total_time, size_t __start, size_t __length) {
-    RankStocks<MapperST8s, MapperST8s>(stage, time_idx, __total_time, __start,
+    RankStocks<MapperSTs, MapperSTs>(stage, time_idx, __total_time, __start,
                                        __length);
 }
 
-void RankStocksST8s_TS(RuntimeStage *stage, size_t time_idx,
+void RankStocksSTs_TS(RuntimeStage *stage, size_t time_idx,
                        size_t __total_time, size_t __start, size_t __length) {
-    RankStocks<MapperST8s, MapperTS>(stage, time_idx, __total_time, __start,
+    RankStocks<MapperSTs, MapperTS>(stage, time_idx, __total_time, __start,
                                      __length);
 }
 
@@ -79,9 +80,9 @@ void RankStocksSTREAM_STREAM(RuntimeStage *stage, size_t time_idx,
                                            __start, __length);
 }
 
-void RankStocksTS_ST8s(RuntimeStage *stage, size_t time_idx,
+void RankStocksTS_STs(RuntimeStage *stage, size_t time_idx,
                        size_t __total_time, size_t __start, size_t __length) {
-    RankStocks<MapperTS, MapperST8s>(stage, time_idx, __total_time, __start,
+    RankStocks<MapperTS, MapperSTs>(stage, time_idx, __total_time, __start,
                                      __length);
 }
 

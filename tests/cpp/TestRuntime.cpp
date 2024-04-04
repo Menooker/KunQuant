@@ -5,6 +5,8 @@
 using namespace kun;
 
 static constexpr size_t num_splits = 4;
+const static size_t simd_len = 8;
+
 
 static void stage1(Context *__ctx, size_t __stock_idx, size_t __total_time,
                    size_t __start, size_t __length) {
@@ -86,10 +88,13 @@ Stage *stage2_dep[] = {&stages[2]};
 } // namespace
 
 KUN_EXPORT Module testRuntimeModule{
-    0x2,
+    0x64100002,
     arraySize(stages),
     stages,
     arraySize(buffers),
     buffers,
-    OutputLayout::ST8s
+    MemoryLayout::STs,
+    MemoryLayout::STs,
+    simd_len,
+    Datatype::Float
 };

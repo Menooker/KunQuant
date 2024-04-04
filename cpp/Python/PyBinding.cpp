@@ -46,11 +46,11 @@ PYBIND11_MODULE(KunRunner, m) {
         .def_property_readonly("output_layout",
                                [](kun::Module &mod) {
                                    switch (mod.output_layout) {
-                                   case kun::OutputLayout::ST8s:
-                                       return "ST8s";
-                                   case kun::OutputLayout::TS:
+                                   case kun::MemoryLayout::STs:
+                                       return "STs";
+                                   case kun::MemoryLayout::TS:
                                        return "TS";
-                                   case kun::OutputLayout::STREAM:
+                                   case kun::MemoryLayout::STREAM:
                                        return "STREAM";
                                    }
                                    return "?";
@@ -88,6 +88,7 @@ PYBIND11_MODULE(KunRunner, m) {
             std::unordered_map<std::string, float *> bufs;
             py::ssize_t known_S = 0;
             py::ssize_t known_T = 0;
+            py::ssize_t simd_len = mod->blocking_len;
             for (auto kv : inputs) {
                 auto name = py::cast<std::string>(kv.first);
                 auto buf_obj = py::cast<py::buffer>(kv.second);
@@ -96,10 +97,10 @@ PYBIND11_MODULE(KunRunner, m) {
                     throw std::runtime_error("Expecting float buffer at " +
                                              name);
                 }
-                if (mod->input_layout == kun::OutputLayout::ST8s) {
+                if (mod->input_layout == kun::MemoryLayout::STs) {
                     // ST8t layout
                     if (info.ndim != 3) {
-                        throw std::runtime_error("Bad ST8s shape at " + name);
+                        throw std::runtime_error("Bad STs shape at " + name);
                     }
                     auto S = info.shape[0];
                     auto T = info.shape[1];
@@ -109,8 +110,8 @@ PYBIND11_MODULE(KunRunner, m) {
                     }
                     expectContiguousShape(
                         info, name.c_str(),
-                        {known_S, known_T, (py::ssize_t)kun::simd_len});
-                } else if (mod->input_layout == kun::OutputLayout::TS) {
+                        {known_S, known_T, (py::ssize_t)mod->blocking_len});
+                } else if (mod->input_layout == kun::MemoryLayout::TS) {
                     // TS layout
                     if (info.ndim != 2) {
                         throw std::runtime_error("Bad TS shape at " + name);
@@ -118,12 +119,11 @@ PYBIND11_MODULE(KunRunner, m) {
                     auto S = info.shape[1];
                     auto T = info.shape[0];
                     if (known_S == 0) {
-                        known_S = S / (py::ssize_t)kun::simd_len;
+                        known_S = S / simd_len;
                         known_T = T;
                     }
-                    expectContiguousShape(
-                        info, name.c_str(),
-                        {known_T, known_S * (py::ssize_t)kun::simd_len});
+                    expectContiguousShape(info, name.c_str(),
+                                          {known_T, known_S * simd_len});
                 } else {
                     throw std::runtime_error("Unknown layout at " + name);
                 }
@@ -134,12 +134,10 @@ PYBIND11_MODULE(KunRunner, m) {
             }
             py::dict ret{};
             py::array::ShapeContainer expected_out_shape;
-            if (mod->output_layout == kun::OutputLayout::ST8s) {
-                expected_out_shape = {known_S, (py::ssize_t)length,
-                                      (py::ssize_t)kun::simd_len};
+            if (mod->output_layout == kun::MemoryLayout::STs) {
+                expected_out_shape = {known_S, (py::ssize_t)length, simd_len};
             } else {
-                expected_out_shape = {(py::ssize_t)length,
-                                      known_S * (py::ssize_t)kun::simd_len};
+                expected_out_shape = {(py::ssize_t)length, known_S * simd_len};
             }
             for (size_t i = 0; i < mod->num_buffers; i++) {
                 auto &buf = mod->buffers[i];
@@ -161,7 +159,7 @@ PYBIND11_MODULE(KunRunner, m) {
                     ret[buf.name] = outbuffer;
                 }
             }
-            kun::runGraph(exec, mod, bufs, known_S * kun::simd_len, known_T,
+            kun::runGraph(exec, mod, bufs, known_S * simd_len, known_T,
                           cur_time, length);
             return ret;
         },

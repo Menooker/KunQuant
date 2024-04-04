@@ -71,7 +71,7 @@ void checkedDealloc(void *ptr, size_t sz) {
 #endif
 
 namespace kun {
-static const uint64_t VERSION = 0x00000002;
+static const uint64_t VERSION = 0x64100002;
 
 void Buffer::alloc(size_t count, size_t use_count) {
     if (!ptr) {
@@ -102,7 +102,7 @@ Buffer::~Buffer() {
 
 size_t RuntimeStage::getNumTasks() const {
     return stage->kind == TaskExecKind::SLICE_BY_STOCK
-               ? divideAndCeil(ctx->stock_count, simd_len)
+               ? divideAndCeil(ctx->stock_count, ctx->simd_len)
                : divideAndCeil(ctx->length, time_stride);
 }
 
@@ -165,7 +165,7 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
         throw std::runtime_error("The required version in the module does not "
                                  "match the runtime version");
     }
-    if (m->output_layout == OutputLayout::STREAM) {
+    if (m->output_layout == MemoryLayout::STREAM) {
         throw std::runtime_error(
             "Cannot run stream mode module via runGraph()");
     }
@@ -192,6 +192,7 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
                 total_time,
                 cur_time,
                 length,
+                m->blocking_len,
                 false};
     std::vector<RuntimeStage> &stages = ctx.stages;
     stages.reserve(m->num_stages);
@@ -210,9 +211,10 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
 
 void StreamContext::Deleter::operator()(char *b) { kunAlignedFree(b); }
 
-char *StreamBuffer::make(size_t stock_count, size_t window_size) {
+char *StreamBuffer::make(size_t stock_count, size_t window_size,
+                         size_t simd_len) {
     auto ret = kunAlignedAlloc(
-        32, StreamBuffer::getBufferSize(stock_count, window_size));
+        32, StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
     auto buf = (StreamBuffer *)ret;
     for (size_t i = 0; i < stock_count * window_size; i++) {
         buf->getBuffer()[i] = NAN;
@@ -230,7 +232,7 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
         throw std::runtime_error("The required version in the module does not "
                                  "match the runtime version");
     }
-    if (m->output_layout != OutputLayout::STREAM) {
+    if (m->output_layout != MemoryLayout::STREAM) {
         throw std::runtime_error(
             "Cannot run batch mode module via StreamContext");
     }
@@ -240,7 +242,8 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
     for (size_t i = 0; i < m->num_buffers; i++) {
         auto &buf = m->buffers[i];
         buffers.emplace_back(
-            StreamBuffer::make(num_stocks, buf.window), StreamContext::Deleter {
+            StreamBuffer::make(num_stocks, buf.window, m->blocking_len),
+            StreamContext::Deleter {
 #if CHECKED_PTR
                 StreamBuffer::getBufferSize(num_stocks, buf.window)
 #endif
@@ -255,6 +258,7 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
     ctx.start = 0;
     ctx.length = 1;
     ctx.is_stream = true;
+    ctx.simd_len = m->blocking_len;
 }
 
 size_t StreamContext::queryBufferHandle(const char *name) const {
@@ -274,7 +278,8 @@ const float *StreamContext::getCurrentBufferPtr(size_t handle) const {
 
 void StreamContext::pushData(size_t handle, const float *data) {
     auto buf = (StreamBuffer *)buffers.at(handle).get();
-    float *ptr = buf->pushData(ctx.stock_count, m->buffers[handle].window);
+    float *ptr = buf->pushData(ctx.stock_count, m->buffers[handle].window,
+                               m->blocking_len);
     memcpy(ptr, data, ctx.stock_count * sizeof(float));
 }
 
