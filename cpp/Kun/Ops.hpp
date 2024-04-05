@@ -159,7 +159,7 @@ struct StreamWindow : DataSource<true> {
     size_t num_stock;
     // window slots of floatx8
     T *buf;
-    StreamWindow(StreamBuffer *buf, size_t stock_idx, size_t num_stock)
+    StreamWindow(StreamBuffer<T> *buf, size_t stock_idx, size_t num_stock)
         : pos{*buf->getPos(stock_idx, num_stock, window)}, stock_idx{stock_idx},
           num_stock{num_stock}, buf{buf->getBuffer()} {}
     void store(size_t index, const simd_t &in) {
@@ -188,7 +188,7 @@ struct StreamWindow<T, stride, 1ul> : DataSource<true> {
     size_t stock_idx;
     // window slots of floatx8
     T *buf;
-    StreamWindow(StreamBuffer *buf, size_t stock_idx, size_t num_stock)
+    StreamWindow(StreamBuffer<T> *buf, size_t stock_idx, size_t num_stock)
         : stock_idx{stock_idx}, buf{buf->getBuffer()} {}
     void store(size_t index, const simd_t &in) {
         simd_t::store(in, &buf[stock_idx * stride]);

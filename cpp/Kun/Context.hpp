@@ -60,7 +60,7 @@ struct KUN_API Executor {
 struct Buffer {
     union {
         float *__restrict ptr;
-        StreamBuffer *stream_buf;
+        StreamBuffer<float> *stream_buf;
     };
     size_t num_time; // the dimension in time
 #if CHECKED_PTR
@@ -68,7 +68,7 @@ struct Buffer {
 #endif
     std::atomic<int> refcount;
 
-    KUN_API void alloc(size_t count, size_t use_count);
+    KUN_API void alloc(size_t count, size_t use_count, size_t elem_size);
 
     Buffer(size_t num_time) {
         ptr = nullptr;
@@ -110,6 +110,7 @@ struct Context {
     size_t start;
     size_t length;
     size_t simd_len;
+    Datatype dtype;
     bool is_stream;
 };
 

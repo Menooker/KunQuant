@@ -73,12 +73,12 @@ void checkedDealloc(void *ptr, size_t sz) {
 namespace kun {
 static const uint64_t VERSION = 0x64100002;
 
-void Buffer::alloc(size_t count, size_t use_count) {
+void Buffer::alloc(size_t count, size_t use_count, size_t elem_size) {
     if (!ptr) {
-        ptr = (float *)kunAlignedAlloc(32, count * sizeof(float));
+        ptr = (float *)kunAlignedAlloc(32, count * elem_size);
         refcount = use_count;
 #if CHECKED_PTR
-        size = count * sizeof(float);
+        size = count * elem_size;
 #endif
     }
 }
@@ -126,11 +126,19 @@ bool RuntimeStage::doJob() {
     return false;
 }
 
+static size_t getSizeofDtype(Datatype dtype) {
+    if (dtype==Datatype::Double) {
+        return sizeof(double);
+    }
+    return sizeof(float);
+}
+
 void RuntimeStage::enqueue() {
+    size_t sz = getSizeofDtype(ctx->dtype);
     for (size_t i = 0; i < stage->num_out_buffers; i++) {
         auto buf_id = stage->out_buffers[i];
         ctx->buffers[buf_id->id].alloc(ctx->buffer_len,
-                                       stage->out_buffers[i]->num_users);
+                                       stage->out_buffers[i]->num_users, sz);
     }
     ctx->executor->enqueue(this);
 }
@@ -193,6 +201,7 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
                 cur_time,
                 length,
                 m->blocking_len,
+                m->dtype,
                 false};
     std::vector<RuntimeStage> &stages = ctx.stages;
     stages.reserve(m->num_stages);
@@ -211,7 +220,8 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
 
 void StreamContext::Deleter::operator()(char *b) { kunAlignedFree(b); }
 
-char *StreamBuffer::make(size_t stock_count, size_t window_size,
+template <typename T>
+char *StreamBuffer<T>::make(size_t stock_count, size_t window_size,
                          size_t simd_len) {
     auto ret = kunAlignedAlloc(
         32, StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
@@ -225,6 +235,9 @@ char *StreamBuffer::make(size_t stock_count, size_t window_size,
     return (char *)ret;
 }
 
+template struct StreamBuffer<float>;
+template struct StreamBuffer<double>;
+
 StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
                              size_t num_stocks)
     : m{m} {
@@ -236,16 +249,20 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
         throw std::runtime_error(
             "Cannot run batch mode module via StreamContext");
     }
+    if (m->dtype != Datatype::Float) {
+        throw std::runtime_error(
+            "Stream mode currently does not support double type yet");
+    }
     std::vector<Buffer> rtlbuffers;
     rtlbuffers.reserve(m->num_buffers);
     buffers.reserve(m->num_buffers);
     for (size_t i = 0; i < m->num_buffers; i++) {
         auto &buf = m->buffers[i];
         buffers.emplace_back(
-            StreamBuffer::make(num_stocks, buf.window, m->blocking_len),
+            StreamBuffer<float>::make(num_stocks, buf.window, m->blocking_len),
             StreamContext::Deleter {
 #if CHECKED_PTR
-                StreamBuffer::getBufferSize(num_stocks, buf.window)
+                StreamBuffer<float>::getBufferSize(num_stocks, buf.window)
 #endif
             });
         rtlbuffers.emplace_back((float *)buffers.back().get(), 1);
@@ -257,6 +274,7 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
     ctx.total_time = 1;
     ctx.start = 0;
     ctx.length = 1;
+    ctx.dtype = m->dtype;
     ctx.is_stream = true;
     ctx.simd_len = m->blocking_len;
 }
@@ -272,12 +290,12 @@ size_t StreamContext::queryBufferHandle(const char *name) const {
 }
 
 const float *StreamContext::getCurrentBufferPtr(size_t handle) const {
-    auto buf = (StreamBuffer *)buffers.at(handle).get();
+    auto buf = (StreamBuffer<float> *)buffers.at(handle).get();
     return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window);
 }
 
 void StreamContext::pushData(size_t handle, const float *data) {
-    auto buf = (StreamBuffer *)buffers.at(handle).get();
+    auto buf = (StreamBuffer<float> *)buffers.at(handle).get();
     float *ptr = buf->pushData(ctx.stock_count, m->buffers[handle].window,
                                m->blocking_len);
     memcpy(ptr, data, ctx.stock_count * sizeof(float));

@@ -11,10 +11,6 @@ enum class MemoryLayout {
     STREAM,
 };
 
-enum class Datatype {
-    Float,
-    Double,
-};
 
 struct Module {
     size_t required_version;

@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 namespace kun {
+template<typename T>
 struct StreamBuffer {
     // [#stock_count of float data]
     // [#stock_count of float data]
@@ -13,12 +14,12 @@ struct StreamBuffer {
     alignas(32) char buf[0];
     float *getBuffer() const { return (float *)(buf); }
     size_t *getPos(size_t idx, size_t stock_count, size_t window_size) const {
-        return (size_t *)(buf + sizeof(float) * stock_count * window_size +
+        return (size_t *)(buf + sizeof(T) * stock_count * window_size +
                           idx * sizeof(size_t));
     }
     static size_t getBufferSize(size_t stock_count, size_t window_size,
                                 size_t simd_len) {
-        return sizeof(float) * stock_count * window_size +
+        return sizeof(T) * stock_count * window_size +
                stock_count / simd_len * sizeof(size_t);
     }
     static char *make(size_t stock_count, size_t window_size, size_t simd_len);

@@ -9,7 +9,8 @@
 
 namespace py = pybind11;
 
-static void expectContiguousShape(const py::buffer_info &info, const char *name,
+static void expectContiguousShape(kun::Datatype dtype,
+                                  const py::buffer_info &info, const char *name,
                                   const std::vector<py::ssize_t> &shape) {
     if (info.format != py::format_descriptor<float>::format()) {
         throw std::runtime_error(std::string("Expecting float buffer at ") +
@@ -25,7 +26,8 @@ static void expectContiguousShape(const py::buffer_info &info, const char *name,
                                      name);
         }
     }
-    py::ssize_t stride = sizeof(float);
+    py::ssize_t stride =
+        dtype == kun::Datatype::Double ? sizeof(double) : sizeof(float);
     auto &strides = info.strides;
     for (int i = (int)info.ndim - 1; i >= 0; i--) {
         if (strides[i] != stride) {
@@ -109,7 +111,7 @@ PYBIND11_MODULE(KunRunner, m) {
                         known_T = T;
                     }
                     expectContiguousShape(
-                        info, name.c_str(),
+                        mod->dtype, info, name.c_str(),
                         {known_S, known_T, (py::ssize_t)mod->blocking_len});
                 } else if (mod->input_layout == kun::MemoryLayout::TS) {
                     // TS layout
@@ -122,7 +124,7 @@ PYBIND11_MODULE(KunRunner, m) {
                         known_S = S / simd_len;
                         known_T = T;
                     }
-                    expectContiguousShape(info, name.c_str(),
+                    expectContiguousShape(mod->dtype, info, name.c_str(),
                                           {known_T, known_S * simd_len});
                 } else {
                     throw std::runtime_error("Unknown layout at " + name);
@@ -148,7 +150,7 @@ PYBIND11_MODULE(KunRunner, m) {
                             outputs[buf.name]
                                 .cast<py::array_t<float, py::array::c_style>>();
                         auto info = outbuffer.request();
-                        expectContiguousShape(info, buf.name,
+                        expectContiguousShape(mod->dtype, info, buf.name,
                                               *expected_out_shape);
                         bufs[buf.name] = (float *)info.ptr;
                     } else {
