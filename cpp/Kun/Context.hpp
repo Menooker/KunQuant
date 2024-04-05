@@ -60,6 +60,7 @@ struct KUN_API Executor {
 struct Buffer {
     union {
         float *__restrict ptr;
+        double *__restrict ptrD;
         StreamBuffer<float> *stream_buf;
     };
     size_t num_time; // the dimension in time

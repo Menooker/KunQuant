@@ -28,6 +28,8 @@ public:
         __m256i v;
         int32_t raw[8];
     };
+    using T = int32_t;
+    static constexpr int lanes = 8;
 
     INLINE vec() = default;
     INLINE vec(int32_t f) { v = _mm256_set1_epi32(f); }

@@ -4,3 +4,4 @@ TestRank.cpp
 TestRank2.cpp
 TestLog.cpp
 TestPow.cpp
+Alpha101.cpp

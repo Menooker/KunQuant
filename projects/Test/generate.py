@@ -86,6 +86,21 @@ def check_pow():
     with open(paths[-1], 'w') as f:
         f.write(src)
 
+def check_alpha101():
+    builder = Builder()
+    with builder:
+        all_data = AllData(low=Input("low"),high=Input("high"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
+        for f in all_alpha:
+            # if f.__name__ != "alpha043" and f.__name__ != "alpha039":
+            #     continue
+            out = f(all_data)
+            Output(out, f.__name__)
+    f = Function(builder.ops)
+    src = compileit(f, "alpha_101", input_layout="TS", output_layout="TS", dtype="double", options={"opt_reduce": True, "fast_log": False})
+    os.makedirs(sys.argv[1], exist_ok=True)
+    with open(sys.argv[1]+"/Alpha101.cpp", 'w') as f:
+        f.write(src)
+
 os.makedirs(sys.argv[1], exist_ok=True)
 check_1()
 check_TS()
@@ -93,6 +108,7 @@ check_rank()
 check_rank2()
 check_log()
 check_pow()
+check_alpha101()
 
 # with open(sys.argv[1]+"/generated.txt", 'w') as f:
 #     f.write(";".join(paths))

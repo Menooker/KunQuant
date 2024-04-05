@@ -29,6 +29,9 @@ public:
         int64_t raw[4];
     };
 
+    using T = int64_t;
+    static constexpr int lanes = 4;
+
     INLINE vec() = default;
     INLINE vec(int64_t f) { v = _mm256_set1_epi64x(f); }
     INLINE vec(int64_t i0, int64_t i1, int64_t i2, int64_t i3) {
