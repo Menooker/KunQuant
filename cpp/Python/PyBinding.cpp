@@ -12,8 +12,12 @@ namespace py = pybind11;
 static void expectContiguousShape(kun::Datatype dtype,
                                   const py::buffer_info &info, const char *name,
                                   const std::vector<py::ssize_t> &shape) {
-    if (info.format != py::format_descriptor<float>::format()) {
-        throw std::runtime_error(std::string("Expecting float buffer at ") +
+    if (dtype == kun::Datatype::Float) {
+        if (info.format != py::format_descriptor<float>::format())
+            throw std::runtime_error(std::string("Expecting float buffer at ") +
+                                     name);
+    } else if (info.format != py::format_descriptor<double>::format()) {
+        throw std::runtime_error(std::string("Expecting double buffer at ") +
                                  name);
     }
     // ST8t layout
@@ -95,8 +99,13 @@ PYBIND11_MODULE(KunRunner, m) {
                 auto name = py::cast<std::string>(kv.first);
                 auto buf_obj = py::cast<py::buffer>(kv.second);
                 auto info = buf_obj.request();
-                if (info.format != py::format_descriptor<float>::format()) {
-                    throw std::runtime_error("Expecting float buffer at " +
+                if (mod->dtype == kun::Datatype::Float) {
+                    if (info.format != py::format_descriptor<float>::format())
+                        throw std::runtime_error("Expecting float buffer at " +
+                                                 name);
+                } else if (info.format !=
+                           py::format_descriptor<double>::format()) {
+                    throw std::runtime_error("Expecting double buffer at " +
                                              name);
                 }
                 if (mod->input_layout == kun::MemoryLayout::STs) {
@@ -144,18 +153,32 @@ PYBIND11_MODULE(KunRunner, m) {
             for (size_t i = 0; i < mod->num_buffers; i++) {
                 auto &buf = mod->buffers[i];
                 if (buf.kind == kun::BufferKind::OUTPUT) {
-                    py::array_t<float, py::array::c_style> outbuffer;
+                    py::array outbuffer;
                     if (!outputs.is_none() && outputs.contains(buf.name)) {
-                        outbuffer =
-                            outputs[buf.name]
-                                .cast<py::array_t<float, py::array::c_style>>();
+                        py::array v;
+                        if (mod->dtype == kun::Datatype::Float) {
+                            outbuffer =
+                                outputs[buf.name]
+                                    .cast<py::array_t<float,
+                                                      py::array::c_style>>();
+                        } else {
+                            outbuffer =
+                                outputs[buf.name]
+                                    .cast<py::array_t<double,
+                                                      py::array::c_style>>();
+                        }
                         auto info = outbuffer.request();
                         expectContiguousShape(mod->dtype, info, buf.name,
                                               *expected_out_shape);
                         bufs[buf.name] = (float *)info.ptr;
                     } else {
-                        outbuffer = py::array_t<float, py::array::c_style>{
-                            expected_out_shape};
+                        if (mod->dtype == kun::Datatype::Float) {
+                            outbuffer = py::array_t<float, py::array::c_style>{
+                                expected_out_shape};
+                        } else {
+                            outbuffer = py::array_t<double, py::array::c_style>{
+                                expected_out_shape};
+                        }
                         bufs[buf.name] = (float *)outbuffer.request().ptr;
                     }
                     ret[buf.name] = outbuffer;

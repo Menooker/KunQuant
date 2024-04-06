@@ -59,10 +59,16 @@ struct KUN_API Executor {
 #define CHECKED_PTR 0
 struct Buffer {
     union {
+        void* __restrict raw;
         float *__restrict ptr;
         double *__restrict ptrD;
         StreamBuffer<float> *stream_buf;
     };
+    
+    template <typename T>
+    T* getPtr() const {
+        return reinterpret_cast<T*>(raw);
+    }
     size_t num_time; // the dimension in time
 #if CHECKED_PTR
     size_t size; // size in bytes

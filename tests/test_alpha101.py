@@ -31,30 +31,30 @@ def count_unmatched_elements(arr1: np.ndarray, arr2: np.ndarray, atol=1e-8, rtol
 def rand_float(stocks, low = 0.9, high = 1.11):
     return np.random.uniform(low, high, size= stocks)
 
-def gen_stock_data2(low, high, stocks, num_time, stddev):
-    xopen = np.random.uniform(low, high, size = (stocks, 1)).astype("float32")
-    # xvol = np.random.uniform(5, 5.2, size = (stocks, 1)).astype("float32")
+def gen_stock_data2(low, high, stocks, num_time, stddev, dtype):
+    xopen = np.random.uniform(low, high, size = (stocks, 1)).astype(dtype)
+    # xvol = np.random.uniform(5, 5.2, size = (stocks, 1)).astype(dtype)
 
-    chopen = np.random.normal(1, stddev, size = (stocks, num_time)).astype("float32")
-    chopen = np.cumprod(chopen, axis=1, dtype="float32")
+    chopen = np.random.normal(1, stddev, size = (stocks, num_time)).astype(dtype)
+    chopen = np.cumprod(chopen, axis=1, dtype=dtype)
     outopen = xopen * chopen
 
-    chopen = np.random.uniform(0.95, 1.05, size = (stocks, num_time)).astype("float32")
+    chopen = np.random.uniform(0.95, 1.05, size = (stocks, num_time)).astype(dtype)
     outclose = outopen * chopen
 
-    chopen = np.random.uniform(0.995, 1.12, size = (stocks, num_time)).astype("float32")
+    chopen = np.random.uniform(0.995, 1.12, size = (stocks, num_time)).astype(dtype)
     outhigh = outopen * chopen
     outhigh = np.maximum.reduce([outopen, outhigh, outclose])
 
-    chopen = np.random.uniform(0.9, 1.005, size = (stocks, num_time)).astype("float32")
+    chopen = np.random.uniform(0.9, 1.005, size = (stocks, num_time)).astype(dtype)
     outlow = outopen * chopen
     outlow = np.minimum.reduce([outopen, outhigh, outclose, outlow])
     
-    # chopen = np.random.normal(1, stddev, size = (stocks, num_time)).astype("float32")
-    # chopen = np.cumprod(chopen, axis=1, dtype="float32")
-    outvol = np.random.uniform(5, 10, size = (stocks, num_time)).astype("float32")
+    # chopen = np.random.normal(1, stddev, size = (stocks, num_time)).astype(dtype)
+    # chopen = np.cumprod(chopen, axis=1, dtype=dtype)
+    outvol = np.random.uniform(5, 10, size = (stocks, num_time)).astype(dtype)
 
-    outamount = outvol * outopen * np.random.uniform(0.99, 1.01, size = (stocks, num_time)).astype("float32")
+    outamount = outvol * outopen * np.random.uniform(0.99, 1.01, size = (stocks, num_time)).astype(dtype)
     return outopen, outclose, outhigh, outlow, outvol, outamount
 
 def gen_stock_data(low, high, stocks, num_time, stddev):
@@ -95,12 +95,12 @@ def TS_ST(data: np.ndarray) -> np.ndarray:
     return data.transpose()
 
 def ST_TS(data: np.ndarray) -> np.ndarray:
-    return data.transpose()
+    return np.ascontiguousarray(data.transpose())
 
-def make_data_and_ref(num_stock, num_time, ischeck, input_ST8t):
+def make_data_and_ref(num_stock, num_time, ischeck, input_ST8t, dtype="float32"):
     rng = np.random.get_state()
     start = time.time()
-    dopen, dclose, dhigh, dlow, dvol, damount = gen_stock_data2(0.5, 100, num_stock, num_time, 0.03 if num_time > 1000 else 0.05)
+    dopen, dclose, dhigh, dlow, dvol, damount = gen_stock_data2(0.5, 100, num_stock, num_time, 0.03 if num_time > 1000 else 0.05, dtype)
     end = time.time()
     print(f"DataGen takes: {end-start:.6f} seconds")
     transpose_func = ST_ST8t if input_ST8t else ST_TS
@@ -224,11 +224,11 @@ def check_result(out, ref, outnames, start_window, num_stock, start_time, num_ti
         bad_count, result = count_unmatched_elements(v, refv, rtol=cur_rtol, atol=cur_atol, equal_nan=True)
         bad_rate = bad_count/ (result.size if result.size else 1)
         if bad_count:
-            print(k)
-            print(f"Unmatched bad_count = {bad_count}/{result.size} ({bad_rate*100:.4f}%) atol={cur_atol} rtol={cur_rtol}")
+            # print(f"Unmatched bad_count = {bad_count}/{result.size} ({bad_rate*100:.4f}%) atol={cur_atol} rtol={cur_rtol}")
             if bad_rate < tolerance["bad_count"].get(k, 0.0001):
-                print("bad count meets the tolerance, skipping")
+                # print("bad count meets the tolerance, skipping")
                 continue
+            print(k)
             done = False
             # print(rng)
             for i in range(num_stock):
@@ -273,10 +273,9 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
 
 def main():
     lib = kr.Library.load("./build/projects/Release/Alpha101.dll" if os.name == "nt" else "./build/projects/libAlpha101.so")
-    print(lib)
     modu = lib.getModule("alpha_101")
     start_window = modu.getOutputUnreliableCount()
-    print(start_window)
+    # print(start_window)
     num_stock = 64
     num_time = 260
     is_check = True
@@ -315,10 +314,9 @@ def test_stream(modu, executor, start_window, num_stock, num_time, my_input, ref
 
 def streammain():
     lib = kr.Library.load("./build/projects/Release/Alpha101Stream.dll" if os.name == "nt" else "./build/projects/libAlpha101Stream.so")
-    print(lib)
     modu = lib.getModule("alpha_101_stream")
     start_window = modu.getOutputUnreliableCount()
-    print(start_window)
+    # print(start_window)
     num_stock = 64
     num_time = 220
     is_check = True
@@ -332,6 +330,59 @@ def streammain():
     if not done:
         exit(1)
 
+
+def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, ischeck, start_time):
+    # prepare outputs
+    outnames = modu.getOutputNames()
+    layout = modu.output_layout
+    outbuffers = dict()
+    print(layout)
+    if layout == "TS":
+        # Factors, Time, Stock
+        sharedbuf = np.empty((len(outnames), num_time-start_time, num_stock), dtype="float64")
+        sharedbuf[:] = np.nan
+        for idx, name in enumerate(outnames):
+            outbuffers[name] = sharedbuf[idx]
+    # print(ref.alpha001())
+    # blocked = ST_ST8t(inp)
+    
+    start = time.time()
+    out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
+    end = time.time()
+    print(f"Exec takes: {end-start:.6f} seconds")
+    if not ischeck:
+        return True
+    # print(out)
+    for k in list(out.keys()):
+        if layout == "TS":
+            out[k] = TS_ST(out[k])
+        else:
+            out[k] = ST8t_ST(out[k])
+    return check_result(out, ref, outnames, start_window, num_stock, start_time, num_time)
+
+def main64():
+    lib = kr.Library.load("./build/projects/Release/Test.dll" if os.name == "nt" else "./build/projects/libTest.so")
+    modu = lib.getModule("alpha_101")
+    start_window = modu.getOutputUnreliableCount()
+    num_stock = 64
+    num_time = 260
+    is_check = True
+    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, False, "float64")
+    executor = kr.createSingleThreadExecutor()
+    done = True
+    done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
+    executor = kr.createMultiThreadExecutor(4)
+    done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    print("OK", done)
+    if not done:
+        exit(1)
+
+print("Check f64 batch")
+main64()
+print("======================================")
+print("Check f32 batch")
 main()
 print("======================================")
+print("Check f32 stream")
 streammain()

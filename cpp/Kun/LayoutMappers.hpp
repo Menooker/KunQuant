@@ -8,13 +8,13 @@ namespace ops {
 
 template<typename T, size_t simd_len>
 struct KUN_API MapperSTs {
-    static const float *getInput(Buffer *b, BufferInfo *info,
+    static const T *getInput(Buffer *b, BufferInfo *info,
                                  size_t num_stock) {
-        return b->ptr;
+        return b->getPtr<T>();
     }
-    static float *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
+    static T *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
                             size_t simd_len2) {
-        return b->ptr;
+        return b->getPtr<T>();
     }
     static size_t call(size_t stockid, size_t t, size_t num_time,
                        size_t num_stock, size_t simd_len2) {
@@ -25,13 +25,13 @@ struct KUN_API MapperSTs {
 
 template<typename T, size_t simd_len>
 struct KUN_API MapperTS {
-    static const float *getInput(Buffer *b, BufferInfo *info,
+    static const T *getInput(Buffer *b, BufferInfo *info,
                                  size_t num_stock) {
-        return b->ptr;
+        return b->getPtr<T>();
     }
-    static float *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
+    static T *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
                             size_t simd_len2) {
-        return b->ptr;
+        return b->getPtr<T>();
     }
     static size_t call(size_t stockid, size_t t, size_t num_time,
                        size_t num_stock, size_t simd_len2) {
@@ -41,11 +41,11 @@ struct KUN_API MapperTS {
 
 template<typename T, size_t simd_len>
 struct KUN_API MapperSTREAM {
-    static const float *getInput(Buffer *b, BufferInfo *info,
+    static const T *getInput(Buffer *b, BufferInfo *info,
                                  size_t num_stock) {
         return b->stream_buf->getCurrentBufferPtr(num_stock, info->window);
     }
-    static float *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
+    static T *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
                             size_t simd_len2) {
         return b->stream_buf->pushData(num_stock, info->window, simd_len);
     }
