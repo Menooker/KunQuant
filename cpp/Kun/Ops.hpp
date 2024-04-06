@@ -214,7 +214,7 @@ template <typename T, int stride, int window>
 struct FastWindowedSum {
     using simd_t = kun_simd::vec<T, stride>;
     using simd_int_t =
-        kun_simd::vec<typename kun_simd::int_type_of_same_size<T>::result, stride>;
+        kun_simd::vec<typename kun_simd::fp_trait<T>::int_t, stride>;
     simd_t v = 0;
     simd_int_t num_nans = window;
     template <typename TInput>

@@ -7,19 +7,21 @@ struct vec {};
 
 
 template <typename T>
-struct int_type_of_same_size {
+struct fp_trait {
 
 };
 
 
 template <>
-struct int_type_of_same_size<float> {
-    using result = int32_t;
+struct fp_trait<float> {
+    using int_t = int32_t;
+    static constexpr int fraction_bits = 23;
 };
 
 template <>
-struct int_type_of_same_size<double> {
-    using result = int64_t;
+struct fp_trait<double> {
+    using int_t = int64_t;
+    static constexpr int fraction_bits = 52;
 };
 
 }

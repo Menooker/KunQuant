@@ -59,18 +59,18 @@ inline vec<T, lanes> log(vec<T, lanes> inval) {
 template <typename T, int lanes>
 inline vec<T, lanes> exp(vec<T, lanes> inval) {
     using Vec = vec<T, lanes>;
-    using VecInt = vec<int32_t, lanes>;
+    using VecInt = vec<typename fp_trait<T>::int_t, lanes>;
 
-    Vec ZERO = 0.0f;
-    Vec ln2 = 0.693147181f;
-    Vec minus_ln2 = -0.693147181f;
-    Vec one_over_ln2 = 1.442695041f;
-    Vec half_float = 0.5f;
-    Vec ONE_f = 1.0f;
+    Vec ZERO = T{0.0};
+    Vec ln2 = T{0.6931471805599453};
+    Vec minus_ln2 = T{-0.6931471805599453};
+    Vec one_over_ln2 = T{1.4426950408889634};
+    Vec half_float = T{0.5};
+    Vec ONE_f = T{1.0};
     VecInt ONE_i = 1;
-    Vec overflow_x = 88.72283935f;
-    Vec underflow_x = -87.33654785f;
-    Vec ret_infinity = std::numeric_limits<float>::infinity();
+    Vec overflow_x = T{88.72283935}; // double can handle more than here
+    Vec underflow_x = T{-87.33654785}; // double can handle more than here
+    Vec ret_infinity = std::numeric_limits<T>::infinity();
 
     // to avoid overflow
     auto a_ = inval;
@@ -85,16 +85,16 @@ inline vec<T, lanes> exp(vec<T, lanes> inval) {
 
     // table[6] = gen_vec_const(elements, 0.142857143f);
 
-    auto Tn = sc_fmadd(r, 0.166666667f, ONE_f);
+    auto Tn = sc_fmadd(r, T{0.16666666666666666}, ONE_f);
     // Tn = Tn * (r / i) + 1
-    Tn = sc_fmadd(Tn, r * 0.2f, ONE_f);
-    Tn = sc_fmadd(Tn, r * 0.25f, ONE_f);
-    Tn = sc_fmadd(Tn, r * 0.333333333f, ONE_f);
-    Tn = sc_fmadd(Tn, r * 0.5f, ONE_f);
+    Tn = sc_fmadd(Tn, r * T{0.2}, ONE_f);
+    Tn = sc_fmadd(Tn, r * T{0.25}, ONE_f);
+    Tn = sc_fmadd(Tn, r * T{0.3333333333333333}, ONE_f);
+    Tn = sc_fmadd(Tn, r * T{0.5}, ONE_f);
     Tn = sc_fmadd(Tn, r, ONE_f);
 
     // 2^k_int, shift to exponent bits position
-    auto p = k_int << 23;
+    auto p = k_int << fp_trait<T>::fraction_bits;
     auto result = p + bitcast<VecInt>(Tn);
     auto res = bitcast<Vec>(result);
     res = sc_select(inval > overflow_x, ret_infinity, res);
