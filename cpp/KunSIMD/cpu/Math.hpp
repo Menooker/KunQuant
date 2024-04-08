@@ -45,14 +45,16 @@ inline vec<T, lanes> log(vec<T, lanes> inval) {
     poly_f = sc_fmadd(poly_f, Z, 0.333333343f);
     poly_f = sc_fmadd(poly_f, Z, -0.5f);
     poly_f = sc_fmadd(poly_f, Z, ONE_f) * Z;
-    auto log_Ri_minus_127 =
+    // -log(Ri) - (127 * ln2)
+    auto minus_log_Ri_minus_127_mul_ln2 =
         gather<4>((const float *)log_const_table2, mantissa_high5);
     // the exponential value + mantissa_high1 for rounding
     auto expo_rounded = (inval_int >> mantissa_bits) + mantissa_high1;
     // Cast the exponential value in FP format. Note that IEEE Float point
     // format stores E+127 instead of E in the data
     auto E_plus_127 = cast<Vec>(expo_rounded);
-    auto v2 = sc_fmadd(E_plus_127, ln2, log_Ri_minus_127);
+    // (E+127) * ln2 + -log(Ri) - (127 * ln2) == E * ln2 - log(Ri)
+    auto v2 = sc_fmadd(E_plus_127, ln2, minus_log_Ri_minus_127_mul_ln2);
     // two sum algorithm
     auto res_hi = poly_f + v2;
     auto res_lo = res_hi - v2;
