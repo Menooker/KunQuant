@@ -26,25 +26,36 @@ inline vec<T, lanes> log(vec<T, lanes> inval) {
     const int approx_bits = 5;
     const int mantissa_bits = 23;
 
+    // int representation of the FP value
     auto inval_int = bitcast<VecInt>(inval);
-    auto aux1_int = (inval_int >> (mantissa_bits - approx_bits)) & 0x0000001f;
-    auto aux2_int = aux1_int >> (approx_bits - 1);
-    auto aux3_int = (inval_int >> mantissa_bits) + aux2_int;
-    auto aux3_f = cast<Vec>(aux3_int);
-    aux2_int = (aux2_int ^ 0x0000007f) << 23;
-    inval_int = (inval_int & 0x007fffff) | aux2_int;
-    auto aux2_f = gather<4>((const float *)log_const_table1, aux1_int);
-    aux2_f = aux2_f * bitcast<Vec>(inval_int) - ONE_f;
+    // the higher order 5 bits of mantissa
+    auto mantissa_high5 =
+        (inval_int >> (mantissa_bits - approx_bits)) & 0x0000001f;
+    // the higher order 1 bit of mantissa
+    auto mantissa_high1 = mantissa_high5 >> (approx_bits - 1);
+    // prepare the exponential bits for M (it should be 0 or 1 + 127, based on
+    // rounding of mantissa_high1)
+    auto E_1 = (mantissa_high1 ^ 0x0000007f) << 23;
+    // get value of M: expontential be 0/1, and keep the mantissa same of X
+    auto M = (inval_int & 0x007fffff) | E_1;
+    auto Ri = gather<4>((const float *)log_const_table1, mantissa_high5);
+    auto Z = Ri * bitcast<Vec>(M) - ONE_f;
     Vec poly_f = 0.199984118f;
-    poly_f = sc_fmadd(poly_f, aux2_f, -0.250035613f);
-    poly_f = sc_fmadd(poly_f, aux2_f, 0.333333343f);
-    poly_f = sc_fmadd(poly_f, aux2_f, -0.5f);
-    poly_f = sc_fmadd(poly_f, aux2_f, ONE_f) * aux2_f;
-    aux2_f = gather<4>((const float *)log_const_table2, aux1_int);
-    aux2_f = sc_fmadd(aux3_f, ln2, aux2_f);
+    poly_f = sc_fmadd(poly_f, Z, -0.250035613f);
+    poly_f = sc_fmadd(poly_f, Z, 0.333333343f);
+    poly_f = sc_fmadd(poly_f, Z, -0.5f);
+    poly_f = sc_fmadd(poly_f, Z, ONE_f) * Z;
+    auto log_Ri_minus_127 =
+        gather<4>((const float *)log_const_table2, mantissa_high5);
+    // the exponential value + mantissa_high1 for rounding
+    auto expo_rounded = (inval_int >> mantissa_bits) + mantissa_high1;
+    // Cast the exponential value in FP format. Note that IEEE Float point
+    // format stores E+127 instead of E in the data
+    auto E_plus_127 = cast<Vec>(expo_rounded);
+    auto v2 = sc_fmadd(E_plus_127, ln2, log_Ri_minus_127);
     // two sum algorithm
-    auto res_hi = poly_f + aux2_f;
-    auto res_lo = res_hi - aux2_f;
+    auto res_hi = poly_f + v2;
+    auto res_lo = res_hi - v2;
     res_lo = res_lo - poly_f;
     res_hi = res_hi + res_lo;
     res_hi = sc_select(inval == ZERO, neg_inf_f, res_hi);
@@ -68,7 +79,7 @@ inline vec<T, lanes> exp(vec<T, lanes> inval) {
     Vec half_float = T{0.5};
     Vec ONE_f = T{1.0};
     VecInt ONE_i = 1;
-    Vec overflow_x = T{88.72283935}; // double can handle more than here
+    Vec overflow_x = T{88.72283935};   // double can handle more than here
     Vec underflow_x = T{-87.33654785}; // double can handle more than here
     Vec ret_infinity = std::numeric_limits<T>::infinity();
 
