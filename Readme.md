@@ -19,7 +19,7 @@ Experiments show that KunQuant-generated code can be more than 170x faster than 
 |---|---|---|
 | 6.138s |  0.115s  |  0.035s  |
 
-The data was collected on 4-core Intel i7-7700HQ CPU, running synthetic data of 64 stocks with 260 rows of data. Environment:
+The data was collected on 4-core Intel i7-7700HQ CPU, running synthetic data of 64 stocks with 260 rows of data in single precision float point data type. Environment:
 
 ```
 OS=Ubuntu 22.04.3 on WSL2 on Windows 10
@@ -28,6 +28,13 @@ pandas=2.1.4
 numpy=1.26.3
 g++=11.4.0
 ```
+
+## Supported features of KunQuant
+
+ * Batch mode and stream mode for the input
+ * Double and single precision float point data type
+ * TS or STs memory layout as input/output in batch mode
+ * Python/C/C++ interfaces to call the factor computation functions
 
 ## Why KunQuant is fast
 
