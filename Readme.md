@@ -19,7 +19,7 @@ Experiments show that KunQuant-generated code can be more than 170x faster than 
 |---|---|---|
 | 6.138s |  0.115s  |  0.035s  |
 
-The data was collected on 4-core Intel i7-7700HQ CPU, running synthetic data of 64 stocks with 260 rows of data. Environment:
+The data was collected on 4-core Intel i7-7700HQ CPU, running synthetic data of 64 stocks with 260 rows of data in single precision float point data type. Environment:
 
 ```
 OS=Ubuntu 22.04.3 on WSL2 on Windows 10
@@ -28,6 +28,13 @@ pandas=2.1.4
 numpy=1.26.3
 g++=11.4.0
 ```
+
+## Supported features of KunQuant
+
+ * Batch mode and stream mode for the input
+ * Double and single precision float point data type
+ * TS or STs memory layout as input/output in batch mode
+ * Python/C/C++ interfaces to call the factor computation functions
 
 ## Why KunQuant is fast
 
@@ -233,7 +240,7 @@ KunQuant can be configured to generate factor libraries for streaming, when the 
 
 ## Specifing Memory layouts
 
-The developers can choose the memory layout when compiling KunQuant factor libraries. The memory layout decribes how the input/output matrix is organized. Currently, KunQuant supports `TS`, `ST8s` and `STREAM` as the memory layout. In `TS` layout, the input and output data is in plain `[num_time, num_stocks]` 2D matrix. In `ST8t`, the data should be transformed to `[num_stocks//8, num_time, 8]` for better performance. The `STREAM` layout is for the streaming mode. You can choose the input/output layout independently in `compileit()` function of `generate.py`, by the parameters `compileit(..., input_layout="TS", output_layout="ST8s")` for example. By default, the input layout is `ST8s` and the output layout is `TS`. For more info of customizing the factor compilation, see [Customize.md](./Customize.md).
+The developers can choose the memory layout when compiling KunQuant factor libraries. The memory layout decribes how the input/output matrix is organized. Currently, KunQuant supports `TS`, `STs` and `STREAM` as the memory layout. In `TS` layout, the input and output data is in plain `[num_time, num_stocks]` 2D matrix. In `STs` with `blocking_len = 8`, the data should be transformed to `[num_stocks//8, num_time, 8]` for better performance. The `STREAM` layout is for the streaming mode. You can choose the input/output layout independently in `compileit()` function of `generate.py`, by the parameters `compileit(..., input_layout="TS", output_layout="STs")` for example. By default, the input layout is `STs` and the output layout is `TS`. For more info of customizing the factor compilation, see [Customize.md](./Customize.md).
 
 ## Testing and validation
 

@@ -5,11 +5,12 @@
 
 namespace kun {
 
-enum class OutputLayout {
-    ST8s,
+enum class MemoryLayout {
+    STs,
     TS,
     STREAM,
 };
+
 
 struct Module {
     size_t required_version;
@@ -17,8 +18,10 @@ struct Module {
     Stage *stages;
     size_t num_buffers;
     BufferInfo *buffers;
-    OutputLayout input_layout;
-    OutputLayout output_layout;
+    MemoryLayout input_layout;
+    MemoryLayout output_layout;
+    size_t blocking_len;
+    Datatype dtype;
 };
 
 struct Library {

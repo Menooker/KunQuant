@@ -47,6 +47,11 @@ union FuncHolder
 };
 
 
+enum class Datatype {
+    Float,
+    Double,
+};
+
 
 struct Stage {
     FuncHolder f;

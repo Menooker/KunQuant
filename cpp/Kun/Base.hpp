@@ -6,7 +6,6 @@
 namespace kun {
 struct Context;
 using f32x8 = __m256;
-static constexpr size_t simd_len = 8;
 static constexpr size_t time_stride = 8;
 } // namespace kun
 #endif

@@ -57,22 +57,23 @@ def _get_buffer_name(op: OpBase, idx: int) -> str:
         return f"temp_{idx}"
     raise RuntimeError("Bad buffer" + str(op))
 
-def _value_to_float(op: OpBase) -> str:
+def _value_to_float(op: OpBase, dtype: str) -> str:
     ret = str(op.attrs["value"])
     if '.' not in ret and 'e' not in ret:
-        return str(ret)+".f"
-    return str(ret)+"f"
+        ret += '.'
+    if dtype == "float":
+        ret += 'f'
+    return ret
 
 vector_len = 8
 
-def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int]) -> str:
+def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int], elem_type: str, simd_lanes: int) -> str:
     if len(f.ops) == 3 and isinstance(f.ops[1], CrossSectionalOp):
-        return f'''static auto stage_{f.name} = {f.ops[1].__class__.__name__}Stocks{f.ops[0].attrs["layout"]}_{f.ops[2].attrs["layout"]};'''
+        return f'''static auto stage_{f.name} = {f.ops[1].__class__.__name__}Stocks<Mapper{f.ops[0].attrs["layout"]}<{elem_type}, {simd_lanes}>, Mapper{f.ops[2].attrs["layout"]}<{elem_type}, {simd_lanes}>>;'''
     header = f'''static void stage_{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
     toplevel = _CppScope(None)
     buffer_type: Dict[OpBase, str] = dict()
-    elem_type = "float"
-    simd_lanes = 8
+    ptrname = "" if elem_type == "float" else "D"
     for inp, buf_kind in inputs:
         name = inp.attrs["name"]
         layout = inp.attrs["layout"]
@@ -86,7 +87,7 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             code = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf, __stock_idx, __ctx->stock_count}};"
         else:
             buffer_type[inp] = f"Input{layout}<{elem_type}, {simd_lanes}>"
-            code = f"Input{layout}<{elem_type}, {simd_lanes}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, {total_str}, {start_str}}};"
+            code = f"Input{layout}<{elem_type}, {simd_lanes}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr{ptrname}, __stock_idx, __ctx->stock_count, {total_str}, {start_str}}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
 
     for idx, (outp, is_tmp) in enumerate(outputs):
@@ -100,7 +101,7 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             code = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf, __stock_idx, __ctx->stock_count}};"
         else:
             buffer_type[inp] = f"Output{layout}<{elem_type}, {simd_lanes}>"
-            code = f"Output{layout}<{elem_type}, {simd_lanes}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr, __stock_idx, __ctx->stock_count, __length, 0}};"
+            code = f"Output{layout}<{elem_type}, {simd_lanes}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr{ptrname}, __stock_idx, __ctx->stock_count, __length, 0}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
     for op in f.ops:
         if op.get_parent() is None and isinstance(op, WindowedTempOutput):
@@ -135,14 +136,14 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             scope.scope.append(_CppSingleLine(scope, f"temp_{idx}.store(i, v{inp[0]});"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = v{inp[0]};"))
         elif isinstance(op, ConstantOp):
-            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = constVec<{simd_lanes}>({_value_to_float(op)});'))
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = constVec<{simd_lanes}>({_value_to_float(op, elem_type)});'))
         elif isinstance(op, Log):
             funcname = "LogFast" if options.get("fast_log", True) else "Log"
             scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}(v{inp[0]});'))
         elif isinstance(op, BinaryConstOp):
             assert(op.__class__.__name__.endswith("Const"))
             thename = op.__class__.__name__.replace("Const", "")
-            rhs = _value_to_float(op)
+            rhs = _value_to_float(op, elem_type)
             if not op.attrs.get("swap", False):
                 scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]}, {rhs});"))
             else:

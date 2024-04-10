@@ -33,6 +33,9 @@ struct alignas(32) vec<float, 8> {
         float raw[8];
     };
 
+    using T = float;
+    static constexpr int lanes = 8;
+
     INLINE vec() = default;
     INLINE vec(float f) { v = _mm256_set1_ps(f); }
     INLINE vec(float i0, float i1, float i2, float i3, float i4, float i5,

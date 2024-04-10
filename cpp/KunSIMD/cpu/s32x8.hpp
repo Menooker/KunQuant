@@ -28,6 +28,8 @@ public:
         __m256i v;
         int32_t raw[8];
     };
+    using T = int32_t;
+    static constexpr int lanes = 8;
 
     INLINE vec() = default;
     INLINE vec(int32_t f) { v = _mm256_set1_epi32(f); }
@@ -138,6 +140,10 @@ INLINE vec_s32x8 operator<<(vec_s32x8 const &a, vec_s32x8 const &b) {
 }
 INLINE vec_s32x8 operator>>(vec_s32x8 const &a, vec_s32x8 const &b) {
     return _mm256_srav_epi32(a.v, b.v);
+}
+
+INLINE vec_s32x8 logical_shr(vec_s32x8 const &a, vec_s32x8 const &b) {
+    return _mm256_srlv_epi32(a.v, b.v);
 }
 
 // operator /

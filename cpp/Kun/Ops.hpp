@@ -24,11 +24,11 @@ inline T1 Select(T1 cond, T2 vtrue, T3 vfalse) {
 }
 
 template <typename T, int stride>
-struct InputST8s : DataSource<true> {
+struct InputSTs : DataSource<true> {
     using simd_t = kun_simd::vec<T, stride>;
     T *__restrict buf;
-    InputST8s(T *base, size_t stock_idx, size_t num_stock, size_t total_time,
-              size_t start)
+    InputSTs(T *base, size_t stock_idx, size_t num_stock, size_t total_time,
+             size_t start)
         : buf{base + stock_idx * total_time * stride + start * stride} {}
     simd_t step(size_t index) { return simd_t::load(&buf[index * stride]); }
 
@@ -73,11 +73,11 @@ struct InputTS : DataSource<true> {
 };
 
 template <typename T, int stride>
-struct OutputST8s : DataSource<true> {
+struct OutputSTs : DataSource<true> {
     using simd_t = kun_simd::vec<T, stride>;
     T *__restrict buf;
-    OutputST8s(T *base, size_t stock_idx, size_t num_stock, size_t length,
-               size_t start)
+    OutputSTs(T *base, size_t stock_idx, size_t num_stock, size_t length,
+              size_t start)
         : buf{base + stock_idx * length * stride} {}
     void store(size_t index, const simd_t &v) {
         simd_t::store(v, &buf[index * stride]);
@@ -159,7 +159,7 @@ struct StreamWindow : DataSource<true> {
     size_t num_stock;
     // window slots of floatx8
     T *buf;
-    StreamWindow(StreamBuffer *buf, size_t stock_idx, size_t num_stock)
+    StreamWindow(StreamBuffer<T> *buf, size_t stock_idx, size_t num_stock)
         : pos{*buf->getPos(stock_idx, num_stock, window)}, stock_idx{stock_idx},
           num_stock{num_stock}, buf{buf->getBuffer()} {}
     void store(size_t index, const simd_t &in) {
@@ -188,7 +188,7 @@ struct StreamWindow<T, stride, 1ul> : DataSource<true> {
     size_t stock_idx;
     // window slots of floatx8
     T *buf;
-    StreamWindow(StreamBuffer *buf, size_t stock_idx, size_t num_stock)
+    StreamWindow(StreamBuffer<T> *buf, size_t stock_idx, size_t num_stock)
         : stock_idx{stock_idx}, buf{buf->getBuffer()} {}
     void store(size_t index, const simd_t &in) {
         simd_t::store(in, &buf[stock_idx * stride]);
@@ -213,7 +213,8 @@ using kun_simd::sc_select;
 template <typename T, int stride, int window>
 struct FastWindowedSum {
     using simd_t = kun_simd::vec<T, stride>;
-    using simd_int_t = kun_simd::vec<int32_t, stride>;
+    using simd_int_t =
+        kun_simd::vec<typename kun_simd::fp_trait<T>::int_t, stride>;
     simd_t v = 0;
     simd_int_t num_nans = window;
     template <typename TInput>
@@ -389,14 +390,6 @@ inline auto Min(T1 a, T2 b) -> decltype(kun_simd::sc_min(a, b)) {
 }
 
 template <typename T1>
-struct DecayVec {
-    using result = decltype(kun_simd::sc_abs(std::declval<T1>()));
-};
-
-template <typename T1>
-using DecayVec_t = typename DecayVec<T1>::result;
-
-template <typename T1>
 inline DecayVec_t<T1> Abs(T1 a) {
     return kun_simd::sc_abs(a);
 }
@@ -442,7 +435,7 @@ inline DecayVec_t<T1> Sqrt(T1 a) {
 }
 
 template <int lanes, typename T>
-inline kun_simd::vec<T, lanes> constVec(const T& v) {
+inline kun_simd::vec<T, lanes> constVec(const T &v) {
     return kun_simd::vec<T, lanes>{v};
 }
 
@@ -456,10 +449,13 @@ inline DecayVec_t<T1> Sign(T1 v) {
     return v1;
 }
 
-template <typename T, int lanes>
-inline kun_simd::vec<T, lanes> Log(kun_simd::vec<T, lanes> a) {
+template <typename TIn>
+inline DecayVec_t<TIn> Log(TIn a0) {
+    DecayVec_t<TIn> a = a0;
+    using T = typename DecayVec_t<TIn>::T;
+    constexpr int lanes = DecayVec_t<TIn>::lanes;
     T *v = a.raw;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < lanes; i++) {
         v[i] = std::log(v[i]);
     }
     return a;
