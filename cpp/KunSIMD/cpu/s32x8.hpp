@@ -142,6 +142,10 @@ INLINE vec_s32x8 operator>>(vec_s32x8 const &a, vec_s32x8 const &b) {
     return _mm256_srav_epi32(a.v, b.v);
 }
 
+INLINE vec_s32x8 logical_shr(vec_s32x8 const &a, vec_s32x8 const &b) {
+    return _mm256_srlv_epi32(a.v, b.v);
+}
+
 // operator /
 
 INLINE vec_s32x8 sc_max(vec_s32x8 const &a, vec_s32x8 const &b) {

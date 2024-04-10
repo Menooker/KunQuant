@@ -390,14 +390,6 @@ inline auto Min(T1 a, T2 b) -> decltype(kun_simd::sc_min(a, b)) {
 }
 
 template <typename T1>
-struct DecayVec {
-    using result = decltype(kun_simd::sc_abs(std::declval<T1>()));
-};
-
-template <typename T1>
-using DecayVec_t = typename DecayVec<T1>::result;
-
-template <typename T1>
 inline DecayVec_t<T1> Abs(T1 a) {
     return kun_simd::sc_abs(a);
 }

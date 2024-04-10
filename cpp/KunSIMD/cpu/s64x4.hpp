@@ -111,8 +111,15 @@ INLINE vec_s64x4 sc_select(
 INLINE vec_s64x4 operator<<(vec_s64x4 const &a, vec_s64x4 const &b) {
     return _mm256_sllv_epi64(a.v, b.v);
 }
+
+#ifdef __AVX512F__
 INLINE vec_s64x4 operator>>(vec_s64x4 const &a, vec_s64x4 const &b) {
     return _mm256_srav_epi64(a.v, b.v);
+}
+#endif
+
+INLINE vec_s64x4 logical_shr(vec_s64x4 const &a, vec_s64x4 const &b) {
+    return _mm256_srlv_epi64(a.v, b.v);
 }
 
 // operator /

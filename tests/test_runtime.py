@@ -28,8 +28,8 @@ def test_runtime():
         raise RuntimeError("")
 
 
-def ST_ST8t(data: np.ndarray) -> np.ndarray:
-    return np.ascontiguousarray(data.reshape((-1, 8, data.shape[1])).transpose((0, 2, 1)))
+def ST_ST8t(data: np.ndarray, blocking = 8) -> np.ndarray:
+    return np.ascontiguousarray(data.reshape((-1, blocking, data.shape[1])).transpose((0, 2, 1)))
 
 
 def ST8t_ST(data: np.ndarray) -> np.ndarray:
@@ -103,16 +103,16 @@ def test_rank2():
     # print(output[:,0])
     np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)
 
-def test_log():
-    modu = lib.getModule("test_log")
-    inp = np.zeros(shape=(24, 20), dtype="float32")
+def test_log(dtype, name):
+    modu = lib.getModule(f"test_log{name}")
+    inp = np.zeros(shape=(24, 20), dtype=dtype)
     for i in range(24):
         inp[i,:] = pow(10, i-10)
     inp[0,:] = -10
     inp[-1,:] = 0
     inp[1,:] = np.nan
     # print(inp)
-    blocked = ST_ST8t(inp)
+    blocked = ST_ST8t(inp, 8 if dtype == "float32" else 4)
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"a": blocked}, 0, 20)
     output = ST8t_ST(out["outlog"])
@@ -154,6 +154,7 @@ test_runtime()
 test_avg_stddev()
 test_rank()
 test_rank2()
-test_log()
+test_log("float32", "")
+test_log("float64", "64")
 test_pow()
 print("done")

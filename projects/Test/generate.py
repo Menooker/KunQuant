@@ -58,14 +58,14 @@ def check_rank2():
     with open(paths[-1], 'w') as f:
         f.write(src)
 
-def check_log():
+def check_log(dtype, name):
     builder = Builder()
     with builder:
         inp1 = Input("a")
         Output(Log(inp1), "outlog")
     f = Function(builder.ops)
-    src = compileit(f, "test_log")
-    paths.append(sys.argv[1]+"/TestLog.cpp")
+    src = compileit(f, f"test_log{name}", dtype=dtype)
+    paths.append(sys.argv[1]+f"/TestLog{name}.cpp")
     with open(paths[-1], 'w') as f:
         f.write(src)
 
@@ -86,7 +86,7 @@ def check_pow():
     with open(paths[-1], 'w') as f:
         f.write(src)
 
-def check_alpha101():
+def check_alpha101_double():
     builder = Builder()
     with builder:
         all_data = AllData(low=Input("low"),high=Input("high"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
@@ -96,7 +96,7 @@ def check_alpha101():
             out = f(all_data)
             Output(out, f.__name__)
     f = Function(builder.ops)
-    src = compileit(f, "alpha_101", input_layout="TS", output_layout="TS", dtype="double", options={"opt_reduce": True, "fast_log": False})
+    src = compileit(f, "alpha_101", input_layout="TS", output_layout="TS", dtype="double", options={"opt_reduce": True, "fast_log": True})
     os.makedirs(sys.argv[1], exist_ok=True)
     with open(sys.argv[1]+"/Alpha101.cpp", 'w') as f:
         f.write(src)
@@ -106,9 +106,10 @@ check_1()
 check_TS()
 check_rank()
 check_rank2()
-check_log()
+check_log("float", "")
+check_log("double", "64")
 check_pow()
-check_alpha101()
+check_alpha101_double()
 
 # with open(sys.argv[1]+"/generated.txt", 'w') as f:
 #     f.write(";".join(paths))
