@@ -218,7 +218,43 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
     exec->runUntilDone();
 }
 
-void StreamContext::Deleter::operator()(char *b) { kunAlignedFree(b); }
+
+AlignedPtr::AlignedPtr(void* ptr, size_t size) noexcept {
+    this->ptr = ptr;
+#if CHECKED_PTR
+    this->size = size;
+#endif
+}
+AlignedPtr::AlignedPtr(AlignedPtr&& other) noexcept {
+    ptr = other.ptr;
+    other.ptr = nullptr;
+#if CHECKED_PTR
+    size = other.size;
+#endif
+}
+
+void AlignedPtr::release() noexcept {
+    if(ptr) {
+        kunAlignedFree(ptr);
+        ptr = nullptr;
+    }
+}
+
+AlignedPtr& AlignedPtr::operator=(AlignedPtr&& other) noexcept {
+    if (&other == this) {
+        return *this;
+    }
+    release();
+    ptr = other.ptr;
+    other.ptr = nullptr;
+#if CHECKED_PTR
+    size = other.size;
+#endif
+}
+
+AlignedPtr::~AlignedPtr() {
+    release();
+}
 
 template <typename T>
 char *StreamBuffer<T>::make(size_t stock_count, size_t window_size,
@@ -260,11 +296,8 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
         auto &buf = m->buffers[i];
         buffers.emplace_back(
             StreamBuffer<float>::make(num_stocks, buf.window, m->blocking_len),
-            StreamContext::Deleter {
-#if CHECKED_PTR
-                StreamBuffer<float>::getBufferSize(num_stocks, buf.window)
-#endif
-            });
+            StreamBuffer<float>::getBufferSize(num_stocks, buf.window)
+            );
         rtlbuffers.emplace_back((float *)buffers.back().get(), 1);
     }
     ctx.buffers = std::move(rtlbuffers);
