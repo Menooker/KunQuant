@@ -76,7 +76,7 @@ static const uint64_t VERSION = 0x64100002;
 void Buffer::alloc(size_t count, size_t use_count, size_t elem_size) {
     if (!ptr) {
         ptr = (float *)kunAlignedAlloc(32, count * elem_size);
-        refcount = use_count;
+        refcount = (int)use_count;
 #if CHECKED_PTR
         size = count * elem_size;
 #endif
@@ -250,6 +250,7 @@ AlignedPtr& AlignedPtr::operator=(AlignedPtr&& other) noexcept {
 #if CHECKED_PTR
     size = other.size;
 #endif
+    return *this;
 }
 
 AlignedPtr::~AlignedPtr() {

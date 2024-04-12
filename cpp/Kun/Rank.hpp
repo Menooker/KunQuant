@@ -11,7 +11,7 @@
 namespace kun {
 namespace ops {
 template <typename INPUT, typename OUTPUT>
-void KUN_API RankStocks(RuntimeStage *stage, size_t time_idx,
+void KUN_TEMPLATE_EXPORT RankStocks(RuntimeStage *stage, size_t time_idx,
                        size_t __total_time, size_t __start, size_t __length) {
     auto num_stocks = stage->ctx->stock_count;
     auto &inbuf = stage->ctx->buffers[stage->stage->in_buffers[0]->id];

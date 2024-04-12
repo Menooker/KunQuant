@@ -41,6 +41,8 @@ struct KUN_API StreamContext {
     // position register.
     void pushData(size_t handle, const float *data);
     void run();
+    StreamContext(const StreamContext&) = delete;
+    StreamContext& operator=(const StreamContext&) = delete;
     ~StreamContext();
 };
 

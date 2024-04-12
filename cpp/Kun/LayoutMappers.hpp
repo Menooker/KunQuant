@@ -7,7 +7,7 @@ namespace kun {
 namespace ops {
 
 template<typename T, size_t simd_len>
-struct KUN_API MapperSTs {
+struct KUN_TEMPLATE_ARG MapperSTs {
     static const T *getInput(Buffer *b, BufferInfo *info,
                                  size_t num_stock) {
         return b->getPtr<T>();
@@ -24,7 +24,7 @@ struct KUN_API MapperSTs {
 };
 
 template<typename T, size_t simd_len>
-struct KUN_API MapperTS {
+struct KUN_TEMPLATE_ARG MapperTS {
     static const T *getInput(Buffer *b, BufferInfo *info,
                                  size_t num_stock) {
         return b->getPtr<T>();
@@ -40,7 +40,7 @@ struct KUN_API MapperTS {
 };
 
 template<typename T, size_t simd_len>
-struct KUN_API MapperSTREAM {
+struct KUN_TEMPLATE_ARG MapperSTREAM {
     static const T *getInput(Buffer *b, BufferInfo *info,
                                  size_t num_stock) {
         return b->stream_buf->getCurrentBufferPtr(num_stock, info->window);
