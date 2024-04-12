@@ -76,7 +76,7 @@ static const uint64_t VERSION = 0x64100002;
 void Buffer::alloc(size_t count, size_t use_count, size_t elem_size) {
     if (!ptr) {
         ptr = (float *)kunAlignedAlloc(32, count * elem_size);
-        refcount = use_count;
+        refcount = (int)use_count;
 #if CHECKED_PTR
         size = count * elem_size;
 #endif
@@ -127,7 +127,7 @@ bool RuntimeStage::doJob() {
 }
 
 static size_t getSizeofDtype(Datatype dtype) {
-    if (dtype==Datatype::Double) {
+    if (dtype == Datatype::Double) {
         return sizeof(double);
     }
     return sizeof(float);
@@ -218,11 +218,45 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
     exec->runUntilDone();
 }
 
-void StreamContext::Deleter::operator()(char *b) { kunAlignedFree(b); }
+AlignedPtr::AlignedPtr(void *ptr, size_t size) noexcept {
+    this->ptr = ptr;
+#if CHECKED_PTR
+    this->size = size;
+#endif
+}
+AlignedPtr::AlignedPtr(AlignedPtr &&other) noexcept {
+    ptr = other.ptr;
+    other.ptr = nullptr;
+#if CHECKED_PTR
+    size = other.size;
+#endif
+}
+
+void AlignedPtr::release() noexcept {
+    if (ptr) {
+        kunAlignedFree(ptr);
+        ptr = nullptr;
+    }
+}
+
+AlignedPtr &AlignedPtr::operator=(AlignedPtr &&other) noexcept {
+    if (&other == this) {
+        return *this;
+    }
+    release();
+    ptr = other.ptr;
+    other.ptr = nullptr;
+#if CHECKED_PTR
+    size = other.size;
+#endif
+    return *this;
+}
+
+AlignedPtr::~AlignedPtr() { release(); }
 
 template <typename T>
 char *StreamBuffer<T>::make(size_t stock_count, size_t window_size,
-                         size_t simd_len) {
+                            size_t simd_len) {
     auto ret = kunAlignedAlloc(
         32, StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
     auto buf = (StreamBuffer *)ret;
@@ -260,11 +294,8 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
         auto &buf = m->buffers[i];
         buffers.emplace_back(
             StreamBuffer<float>::make(num_stocks, buf.window, m->blocking_len),
-            StreamContext::Deleter {
-#if CHECKED_PTR
-                StreamBuffer<float>::getBufferSize(num_stocks, buf.window)
-#endif
-            });
+            StreamBuffer<float>::getBufferSize(num_stocks, buf.window,
+                                               m->blocking_len));
         rtlbuffers.emplace_back((float *)buffers.back().get(), 1);
     }
     ctx.buffers = std::move(rtlbuffers);

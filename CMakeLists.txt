@@ -7,7 +7,7 @@ message(STATUS ${pybind11_INCLUDE_DIRS})
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fvisibility=hidden -fvisibility-inlines-hidden -mavx2 -mfma -pthread")
 else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4251")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4251 /wd4200 /wd4305")
 endif()
 
 

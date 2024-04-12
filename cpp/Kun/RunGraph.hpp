@@ -11,15 +11,23 @@ KUN_API void runGraph(std::shared_ptr<Executor> exec, const Module *m,
                       size_t num_stocks, size_t total_time, size_t cur_time,
                       size_t length);
 
-struct KUN_API StreamContext {
-    struct Deleter {
+struct AlignedPtr {
+    void* ptr;
 #if CHECKED_PTR
-        size_t size;
-        Deleter(size_t size) : size{size} {}
+    size_t size;
 #endif
-        void operator()(char *b);
-    };
-    std::vector<std::unique_ptr<char[], Deleter>> buffers;
+    char* get() const noexcept {
+        return (char*)ptr;
+    }
+    AlignedPtr(void* ptr, size_t size) noexcept;
+    AlignedPtr(AlignedPtr&& other) noexcept;
+    AlignedPtr& operator=(AlignedPtr&& other) noexcept;
+    void release() noexcept;
+    ~AlignedPtr();
+};
+
+struct KUN_API StreamContext {
+    std::vector<AlignedPtr> buffers;
     Context ctx;
     const Module *m;
     StreamContext(std::shared_ptr<Executor> exec, const Module *m,
@@ -33,6 +41,8 @@ struct KUN_API StreamContext {
     // position register.
     void pushData(size_t handle, const float *data);
     void run();
+    StreamContext(const StreamContext&) = delete;
+    StreamContext& operator=(const StreamContext&) = delete;
     ~StreamContext();
 };
 
