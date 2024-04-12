@@ -6,14 +6,13 @@
 namespace kun {
 namespace ops {
 
-template<typename T, size_t simd_len>
+template <typename T, size_t simd_len>
 struct KUN_TEMPLATE_ARG MapperSTs {
-    static const T *getInput(Buffer *b, BufferInfo *info,
-                                 size_t num_stock) {
+    static const T *getInput(Buffer *b, BufferInfo *info, size_t num_stock) {
         return b->getPtr<T>();
     }
     static T *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
-                            size_t simd_len2) {
+                        size_t simd_len2) {
         return b->getPtr<T>();
     }
     static size_t call(size_t stockid, size_t t, size_t num_time,
@@ -23,14 +22,13 @@ struct KUN_TEMPLATE_ARG MapperSTs {
     }
 };
 
-template<typename T, size_t simd_len>
+template <typename T, size_t simd_len>
 struct KUN_TEMPLATE_ARG MapperTS {
-    static const T *getInput(Buffer *b, BufferInfo *info,
-                                 size_t num_stock) {
+    static const T *getInput(Buffer *b, BufferInfo *info, size_t num_stock) {
         return b->getPtr<T>();
     }
     static T *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
-                            size_t simd_len2) {
+                        size_t simd_len2) {
         return b->getPtr<T>();
     }
     static size_t call(size_t stockid, size_t t, size_t num_time,
@@ -39,14 +37,13 @@ struct KUN_TEMPLATE_ARG MapperTS {
     }
 };
 
-template<typename T, size_t simd_len>
+template <typename T, size_t simd_len>
 struct KUN_TEMPLATE_ARG MapperSTREAM {
-    static const T *getInput(Buffer *b, BufferInfo *info,
-                                 size_t num_stock) {
+    static const T *getInput(Buffer *b, BufferInfo *info, size_t num_stock) {
         return b->stream_buf->getCurrentBufferPtr(num_stock, info->window);
     }
     static T *getOutput(Buffer *b, BufferInfo *info, size_t num_stock,
-                            size_t simd_len2) {
+                        size_t simd_len2) {
         return b->stream_buf->pushData(num_stock, info->window, simd_len);
     }
     static size_t call(size_t stockid, size_t t, size_t num_time,

@@ -12,7 +12,8 @@ namespace kun {
 namespace ops {
 template <typename INPUT, typename OUTPUT>
 void KUN_TEMPLATE_EXPORT RankStocks(RuntimeStage *stage, size_t time_idx,
-                       size_t __total_time, size_t __start, size_t __length) {
+                                    size_t __total_time, size_t __start,
+                                    size_t __length) {
     auto num_stocks = stage->ctx->stock_count;
     auto &inbuf = stage->ctx->buffers[stage->stage->in_buffers[0]->id];
     auto in_num_time = inbuf.num_time;
@@ -23,7 +24,7 @@ void KUN_TEMPLATE_EXPORT RankStocks(RuntimeStage *stage, size_t time_idx,
     auto outinfo = stage->stage->out_buffers[0];
     auto simd_len = stage->ctx->simd_len;
     T *output = OUTPUT::getOutput(&stage->ctx->buffers[outinfo->id], outinfo,
-                                      num_stocks, simd_len);
+                                  num_stocks, simd_len);
     auto time_end =
         std::min(__start + (time_idx + 1) * time_stride, __start + __length);
     std::vector<T> data;
@@ -32,7 +33,7 @@ void KUN_TEMPLATE_EXPORT RankStocks(RuntimeStage *stage, size_t time_idx,
         for (size_t i = 0; i < num_stocks; i++) {
             auto S = i / simd_len;
             T in = input[INPUT::call(i, t - in_base_time, in_num_time,
-                                         num_stocks, simd_len)];
+                                     num_stocks, simd_len)];
             if (!std::isnan(in)) {
                 data.push_back(in);
             }
@@ -41,7 +42,7 @@ void KUN_TEMPLATE_EXPORT RankStocks(RuntimeStage *stage, size_t time_idx,
         for (size_t i = 0; i < num_stocks; i++) {
             auto S = i / simd_len;
             T in = input[INPUT::call(i, t - in_base_time, in_num_time,
-                                         num_stocks, simd_len)];
+                                     num_stocks, simd_len)];
             T out;
             if (!std::isnan(in)) {
                 auto pos = std::equal_range(data.begin(), data.end(), in);
@@ -51,12 +52,12 @@ void KUN_TEMPLATE_EXPORT RankStocks(RuntimeStage *stage, size_t time_idx,
             } else {
                 out = NAN;
             }
-            output[OUTPUT::call(i, t - __start, __length, num_stocks, simd_len)] = out;
+            output[OUTPUT::call(i, t - __start, __length, num_stocks,
+                                simd_len)] = out;
         }
         data.clear();
     }
 }
-
 
 extern template void RankStocks<MapperSTs<float, 8>, MapperSTs<float, 8>>(
     RuntimeStage *stage, size_t time_idx, size_t __total_time, size_t __start,

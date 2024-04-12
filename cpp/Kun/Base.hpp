@@ -1,6 +1,6 @@
 #pragma once
 
-#include <stdint.h>
+#include <cstddef>
 #ifdef __cplusplus
 namespace kun {
 struct Context;
@@ -21,6 +21,7 @@ static constexpr size_t time_stride = 8;
 #else
 #define KUN_API __attribute__((visibility("default")))
 #define KUN_EXPORT KUN_API
+#define KUN_TEMPLATE_EXPORT KUN_API
 // g++ has an strange behavior, it needs T to be
 // exported if we want to export func<T>
 #define KUN_TEMPLATE_ARG KUN_API
