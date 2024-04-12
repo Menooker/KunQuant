@@ -16,7 +16,7 @@ struct AlignedPtr {
 #if CHECKED_PTR
     size_t size;
 #endif
-    char* get() noexcept {
+    char* get() const noexcept {
         return (char*)ptr;
     }
     AlignedPtr(void* ptr, size_t size) noexcept;

@@ -296,7 +296,7 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
         auto &buf = m->buffers[i];
         buffers.emplace_back(
             StreamBuffer<float>::make(num_stocks, buf.window, m->blocking_len),
-            StreamBuffer<float>::getBufferSize(num_stocks, buf.window)
+            StreamBuffer<float>::getBufferSize(num_stocks, buf.window, m->blocking_len)
             );
         rtlbuffers.emplace_back((float *)buffers.back().get(), 1);
     }
