@@ -236,6 +236,20 @@ struct FastWindowedSum {
     }
 };
 
+template <typename T, int stride, int window>
+struct ExpMovingAvg {
+    using simd_t = kun_simd::vec<T, stride>;
+    using simd_int_t =
+        kun_simd::vec<typename kun_simd::fp_trait<T>::int_t, stride>;
+    simd_t v = 0;
+    static constexpr T weight_latest = T(2.0) / (window + 1);
+    simd_t step(simd_t cur, size_t index) {
+        T weight = index == 0 ? 1 : weight_latest;
+        v = v * (1 - weight) + cur * weight;
+        return v;
+    }
+};
+
 template <typename T, int stride>
 struct ReduceAdd {
     using simd_t = kun_simd::vec<T, stride>;

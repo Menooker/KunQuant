@@ -194,6 +194,11 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             window = op.attrs["window"]
             toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"FastWindowedSum<{elem_type}, {simd_lanes}, {window}> sum_{idx};"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = sum_{idx}.step({buf_name}, v{inp[0]}, i);"))
+        elif isinstance(op, ExpMovingAvg):
+            assert(op.get_parent() is None)
+            window = op.attrs["window"]
+            toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"ExpMovingAvg<{elem_type}, {simd_lanes}, {window}> ema_{idx};"))
+            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = ema_{idx}.step(v{inp[0]}, i);"))
         elif isinstance(op, Select):
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
         else:

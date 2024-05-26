@@ -6,3 +6,4 @@ TestLog.cpp
 TestLog64.cpp
 TestPow.cpp
 Alpha101.cpp
+TestEMA.cpp
