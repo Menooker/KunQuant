@@ -137,7 +137,7 @@ def test_pow():
     expo[1,:] = np.nan
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"a": ST_ST8t(base), "b": ST_ST8t(expo)}, 0, 20)
-    print(out.keys())
+    # print(out.keys())
     # print(expected[:,0])
     # print(output[:,0])
     with warnings.catch_warnings():
@@ -149,6 +149,16 @@ def test_pow():
         # np.testing.assert_allclose(ST8t_ST(out["powa_b"]), np.power(base, expo), rtol=1e-5, atol=1e-5, equal_nan=True)
         np.testing.assert_allclose(ST8t_ST(out["pow12_b"]), np.power(1.2, expo), rtol=1e-5, atol=1e-5, equal_nan=True)
 
+def test_ema():
+    modu = lib.getModule("test_ema")
+    assert(modu)
+    inp = np.random.rand(20, 24).astype("float32")
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
+    output = out["ou2"]
+    expected = pd.DataFrame(inp).ewm(span=5, adjust=False).mean()
+    np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)
+
 test_avg_stddev_TS()
 test_runtime()
 test_avg_stddev()
@@ -157,4 +167,5 @@ test_rank2()
 test_log("float32", "")
 test_log("float64", "64")
 test_pow()
+test_ema()
 print("done")

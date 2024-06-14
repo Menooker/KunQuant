@@ -33,6 +33,17 @@ def check_TS():
     with open(paths[-1], 'w') as f:
         f.write(src)
 
+def check_ema():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out2 = Output(ExpMovingAvg(inp1, 5), "ou2")
+    f = Function(builder.ops)
+    src = compileit(f, "test_ema", input_layout="TS", output_layout="TS")
+    paths.append(sys.argv[1]+"/TestEMA.cpp")
+    with open(paths[-1], 'w') as f:
+        f.write(src)
+
 def check_rank():
     builder = Builder()
     with builder:
@@ -110,6 +121,7 @@ check_log("float", "")
 check_log("double", "64")
 check_pow()
 check_alpha101_double()
+check_ema()
 
 # with open(sys.argv[1]+"/generated.txt", 'w') as f:
 #     f.write(";".join(paths))
