@@ -26,22 +26,47 @@ class WindowedReduce(WindowedCompositiveOp):
         return b.ops
 
 class WindowedSum(WindowedReduce):
+    '''
+    Sum of a rolling look back window, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).sum()
+    '''
     def make_reduce(self, v: OpBase) -> OpBase:
         return ReduceAdd(v)
 
 class WindowedProduct(WindowedReduce):
+    '''
+    Product of a rolling look back window, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).product()
+    '''
     def make_reduce(self, v: OpBase) -> OpBase:
         return ReduceMul(v)
 
 class WindowedMin(WindowedReduce):
+    '''
+    Min of a rolling look back window, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).min()
+    '''
     def make_reduce(self, v: OpBase) -> OpBase:
         return ReduceMin(v)
     
 class WindowedMax(WindowedReduce):
+    '''
+    Max of a rolling look back window, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).max()
+    '''
     def make_reduce(self, v: OpBase) -> OpBase:
         return ReduceMax(v)
 
 class WindowedAvg(WindowedCompositiveOp):
+    '''
+    Average of a rolling look back window, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).mean()
+    '''
     def decompose(self) -> List[OpBase]:
         b = Builder(self.get_parent())
         with b:
@@ -50,6 +75,11 @@ class WindowedAvg(WindowedCompositiveOp):
         return b.ops
 
 class WindowedStddev(WindowedCompositiveOp):
+    '''
+    Unbiased standard deviation of a rolling look back window, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).std()
+    '''
     def decompose(self) -> List[OpBase]:
         window = self.attrs["window"]
         b = Builder(self.get_parent())
@@ -66,6 +96,11 @@ class WindowedStddev(WindowedCompositiveOp):
         return b.ops
 
 class WindowedCovariance(WindowedCompositiveOp):
+    '''
+    Unbiased estimated covariance of a rolling look back window of two inputs, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).cov(y)
+    '''
     def decompose(self) -> List[OpBase]:
         window = self.attrs["window"]
         x = self.inputs[0]
@@ -86,6 +121,11 @@ class WindowedCovariance(WindowedCompositiveOp):
         return b.ops
 
 class WindowedCorrelation(WindowedCompositiveOp):
+    '''
+    Correlation of a rolling look back window of two inputs, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).corr(y)
+    '''
     def decompose(self) -> List[OpBase]:
         window = self.attrs["window"]
         x = self.inputs[0]
@@ -112,6 +152,11 @@ class WindowedCorrelation(WindowedCompositiveOp):
         return b.ops
 
 class TsArgMax(WindowedCompositiveOp):
+    '''
+    ArgMax in a rolling look back window, including the current newest data.
+    The result should be the index of the max element in the rolling window. The index of the oldest element of the rolling window is 1.
+    Similar to df.rolling(window).apply(np.argmax) + 1 
+    '''
     def decompose(self) -> List[OpBase]:
         b = Builder(self.get_parent())
         with b:
@@ -122,6 +167,11 @@ class TsArgMax(WindowedCompositiveOp):
         return b.ops
     
 class TsArgMin(WindowedCompositiveOp):
+    '''
+    ArgMin in a rolling look back window, including the current newest data.
+    The result should be the index of the min element in the rolling window. The index of the oldest element of the rolling window is 1.
+    Similar to df.rolling(window).apply(np.argmin) + 1 
+    '''
     def decompose(self) -> List[OpBase]:
         b = Builder(self.get_parent())
         with b:
@@ -132,6 +182,13 @@ class TsArgMin(WindowedCompositiveOp):
         return b.ops
 
 class TsRank(WindowedCompositiveOp):
+    '''
+    Time series rank of the newest data in a rolling look back window, including the current newest data.
+    Let num_values_less = the number of values in rolling window that is less than the current newest data.
+    Let num_values_eq = the number of values in rolling window that is equal to the current newest data.
+    rank = num_values_less + (num_values_eq + 1) / 2
+    Similar to df.rolling(window).rank()
+    '''
     def decompose(self) -> List[OpBase]:
         b = Builder(self.get_parent())
         with b:
@@ -141,6 +198,11 @@ class TsRank(WindowedCompositiveOp):
         return b.ops
 
 class Clip(CompositiveOp):
+    '''
+    Elementwisely clip the input value `v` with a given positive constant `eps`:
+    Clip(v) = max(min(v, eps), -eps)
+    The output will be between [-eps, +eps]
+    '''
     def __init__(self, v: OpBase, eps: float) -> None:
         inputs = [v]
         super().__init__(inputs, [("value", eps)])
@@ -155,6 +217,13 @@ class Clip(CompositiveOp):
         return b.ops
 
 class DecayLinear(WindowedCompositiveOp):
+    '''
+    Weighted average in a rolling look back window, including the current newest data.
+    The weight decreases linearly and the newer value has the higher weight.
+    step_size = 1.0 / ((1.0 + window) * window / 2)
+    weight[i] = (i+1) * step_size
+    DecayLinear = sum([weight[i] for i in 0 to window])
+    '''
     def decompose(self) -> List[OpBase]:
         b = Builder(self.get_parent())
         window = self.attrs["window"]
@@ -165,6 +234,9 @@ class DecayLinear(WindowedCompositiveOp):
         return b.ops
     
 class Pow(CompositiveOp):
+    '''
+    elementwise math function power: base ** expo
+    '''
     def __init__(self, base: OpBase, expo: OpBase) -> None:
         inputs = [base, expo]
         super().__init__(inputs, None)

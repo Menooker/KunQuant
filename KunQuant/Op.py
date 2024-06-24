@@ -214,6 +214,9 @@ class OpBase:
         return self._build_op2(other, And) 
 
 class GraphSourceTrait:
+    '''
+    The "source" of a graph, like input and constant ops. They have no inputs.
+    '''
     pass
 
 class ConstantOp(OpBase, GraphSourceTrait):
@@ -237,6 +240,9 @@ class CompositiveOp(OpBase):
 
 
 class WindowedDataSourceOp(OpBase):
+    '''
+    The ops that can be an input of WindowedTrait. It provides a window of data
+    '''
     pass
 
 
@@ -247,10 +253,10 @@ class Input(WindowedDataSourceOp, GraphSourceTrait):
     def to_string(self, indent: int, identity: bool) -> str:
         return "{}input({})".format(make_indents(indent), self.attrs["name"])
 
-# Should keep Ops extending this class even if no reference to these ops
-
-
 class SinkOpTrait:
+    '''
+    The "sink" of a graph, like "output" op. Should keep ops extending this class even if no reference to these ops
+    '''
     pass
 
 
@@ -260,11 +266,17 @@ class Output(WindowedDataSourceOp, SinkOpTrait):
 
 
 class WindowedTempOutput(WindowedDataSourceOp):
+    '''
+    Mark that we need a windowed buffer of previous data of the input
+    '''
     def __init__(self, inp: OpBase, window: int) -> None:
         super().__init__([inp], [("window", window)])
 
 
 class WindowedTrait:
+    '''
+    The ops that require a window of inputs of previous data.
+    '''
     def verify(self, func: 'KunQuant.Stage.Function') -> None:
         if not func.strict_window:
             return
@@ -282,7 +294,13 @@ _clazzWindowedTrait = WindowedTrait
 
 
 class ForeachBackWindow(OpBase, WindowedTrait):
-    def __init__(self, inp: WindowedTempOutput, window: int, *args) -> None:
+    '''
+    A for-loop to iterate the input ops (must be windowed inputs) and reduce outputs
+    inp: A windowed input
+    window: for-loop length in window size
+    args: optional other windowed inputs to iterate
+    '''
+    def __init__(self, inp: WindowedTrait, window: int, *args) -> None:
         inputs = [inp]
         if args:
             inputs.extend(args)
@@ -295,6 +313,14 @@ class ForeachBackWindow(OpBase, WindowedTrait):
         return kwargs["display"].to_string(indent+1, identity)
 
 class IterValue(OpBase):
+    '''
+    Gets the current iteration value of the ForeachBackWindow
+    loop: the loop
+    src: the specific input of the loop to iterate. For example,
+    itr = ForeachBackWindow(X, window = 10, Y)
+    xItr = IterValue(itr, X) # the current value of X in the window in this iteration
+    yItr = IterValue(itr, Y) # the current value of Y in the window in this iteration
+    '''
     def __init__(self, loop: ForeachBackWindow, src: OpBase) -> None:
         super().__init__([loop, src], None)
         self.set_parent(loop)
@@ -317,10 +343,17 @@ _clazzBackWindow = ForeachBackWindow
 
 
 class StatefulOpTrait:
+    '''
+    The ops that have an internal state
+    '''
     pass
 
 
 class ReductionOp(OpBase, StatefulOpTrait):
+    '''
+    Base class of all reduction ops. A reduction op takes inputs that is originated from a IterValue. The input must be in a loop (v.get_parent() is a loop). The data produced
+    by a ReductionOp should be used outside of the loop
+    '''
     def __init__(self, v: OpBase, init_val: OpBase = None, attrs: Union[List[Tuple[str, object]], OrderedDict, None] = None) -> None:
         super().__init__([v] if init_val is None else [v, init_val], attrs)
 
@@ -344,12 +377,18 @@ class CrossSectionalOp(OpBase):
     def __init__(self, v: OpBase) -> None:
         super().__init__([v], None)
 
-# the cross sectional rank among different stocks. Between [0, 1]
 class Rank(CrossSectionalOp):
+    '''
+    the cross sectional rank among different stocks. Between [0, 1]
+    Similar to df.rank(axis=1, pct=True, method="average")
+    '''
     pass
 
-# the cross sectionally scale different stocks, to make sum([abs(stock[i]) for i in stock]) == 1
 class Scale(CrossSectionalOp):
+    '''
+    the cross sectionally scale different stocks, to make sum([abs(stock[i]) for i in stock]) == 1
+    Similar to df.div(df.abs().sum(axis=1), axis=0)
+    '''
     pass
 
 # if __name__ == "__main__":

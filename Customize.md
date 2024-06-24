@@ -146,3 +146,5 @@ modu = lib.getModule("my_library_name")
 Note that `MyLib` corresponds to the directory name in `projects/`, and `"my_library_name"` corresponds to `src = compileit(f, "my_library_name", ...)` in our Python script.
 
 You can check the script in `projects/` for more examples using KunQuant to convert expressions to C++ source code file.
+
+More reading on operators provided by KunQuant: See [Operators.md](./Operators.md)

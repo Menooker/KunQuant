@@ -2,6 +2,12 @@ from KunQuant.Op import UnaryElementwiseOp, BinaryElementwiseOp, OpBase
 
 class BinaryConstOp(UnaryElementwiseOp):
     def __init__(self, inp: OpBase, v: float, swap: bool = False) -> None:
+        '''
+        Deprecated. The base class binary ops whose one of the input is constant.
+        inp: the input
+        v: the constant input
+        swap: if false, the constant `v` is on the right hand side. Otherwise, swap the two inputs 
+        '''
         attrs = [("value", v)]
         if swap:
             attrs.append(("swap", swap))
@@ -68,24 +74,45 @@ class LessThanConst(BinaryConstOp):
     pass
 
 class Sqrt(UnaryElementwiseOp):
+    '''
+    Square root of input
+    '''
     pass
 
 class Log(UnaryElementwiseOp):
+    '''
+    logarithm to the base of the mathematical constant e
+    '''
     pass
 
 class Abs(UnaryElementwiseOp):
+    '''
+    absolute value
+    '''
     pass
 
 class Sign(UnaryElementwiseOp):
+    '''
+    +1/0/-1 for positive/zero/negative inputs
+    '''
     pass
 
 class Not(UnaryElementwiseOp):
+    '''
+    logical not
+    '''
     pass
 
 class Exp(UnaryElementwiseOp):
+    '''
+    exponential function to the base of the mathematical constant e
+    '''
     pass
 
 class SetInfOrNanToValue(UnaryElementwiseOp):
+    '''
+    If input is inf or Nan, set output to `value`
+    '''
     def __init__(self, lhs: OpBase, value: float = 0.0) -> None:
         super().__init__(lhs, [("value", value)])
 
