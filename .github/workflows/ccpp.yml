@@ -3,7 +3,7 @@ name: C/C++ CI
 on:
   push:
     branches:
-    - master
+    - main
   pull_request:
   workflow_dispatch:
 
@@ -27,7 +27,7 @@ jobs:
       with:
         python-version: '3.9'
         cache: 'pip' # caching pip dependencies
-    - run: pip install pandas numpy
+    - run: pip install pandas==2.2.2 numpy==1.26.4
     - name: make
       working-directory: ./
       run: mkdir build && cd build && cmake .. && cmake --build . --target TestingTargets --config Release -- -j
