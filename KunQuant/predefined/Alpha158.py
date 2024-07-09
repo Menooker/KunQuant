@@ -62,9 +62,9 @@ class AllData:
             ]
         if "price" in config:
             windows = config["price"].get("windows", range(5))
-            feature = config["price"].get("feature", [self.open, self.high, self.low])
-            for field in feature:
-                field_name = field.attrs["name"].lower()
+            feature = config["price"].get("feature", [("OPEN", self.open), ("HIGH",self.high), ("LOW",self.low)])
+            for field_name, field in feature:
+                field_name = field_name.lower()
                 fields += [BackRef(field, d)/self.close if d != 0 else field/self.close for d in windows]
                 names += [field_name.upper() + str(d) for d in windows]
         if "volume" in config:
@@ -99,33 +99,33 @@ class AllData:
             if use("BETA"):
                 # The rate of close price change in the past d days, divided by latest close price to remove unit
                 # For example, price increase 10 dollar per day in the past d days, then Slope will be 10.
-                fields += [(1 - BackRef(self.close, d)/self.close)/d  for d in windows]
+                fields += [WindowedLinearRegressionSlope(self.close, d)/self.close for d in windows]
                 names += ["BETA%d" % d for d in windows]
-            # if use("RSQR"):
-            #     # The R-sqaure value of linear regression for the past d days, represent the trend linear
-            #     fields += ["Rsquare(self.close, d)  for d in windows]
-            #     names += ["RSQR%d" % d for d in windows]
-            # if use("RESI"):
-            #     # The redisdual for linear regression for the past d days, represent the trend linearity for past d days.
-            #     fields += ["Resi(self.close, d)/self.close" % d for d in windows]
-            #     names += ["RESI%d" % d for d in windows]
+            if use("RSQR"):
+                # The R-sqaure value of linear regression for the past d days, represent the trend linear
+                fields += [WindowedLinearRegressionRSqaure(self.close, d) for d in windows]
+                names += ["RSQR%d" % d for d in windows]
+            if use("RESI"):
+                # The redisdual for linear regression for the past d days, represent the trend linearity for past d days.
+                fields += [WindowedLinearRegressionResi(self.close, d)/self.close for d in windows]
+                names += ["RESI%d" % d for d in windows]
             if use("MAX"):
                 # The max price for past d days, divided by latest close price to remove unit
                 fields += [WindowedMax(self.high, d)/self.close for d in windows]
                 names += ["MAX%d" % d for d in windows]
             if use("LOW"):
                 # The low price for past d days, divided by latest close price to remove unit
-                fields += [WindowedMax(self.low, d)/self.close for d in windows]
+                fields += [WindowedMin(self.low, d)/self.close for d in windows]
                 names += ["MIN%d" % d for d in windows]
-            # if use("QTLU"):
-            #     # The 80% quantile of past d day's close price, divided by latest close price to remove unit
-            #     # Used with MIN and MAX
-            #     fields += ["Quantile(self.close, %d, 0.8)/self.close" % d for d in windows]
-            #     names += ["QTLU%d" % d for d in windows]
-            # if use("QTLD"):
-            #     # The 20% quantile of past d day's close price, divided by latest close price to remove unit
-            #     fields += ["Quantile(self.close, %d, 0.2)/self.close" % d for d in windows]
-            #     names += ["QTLD%d" % d for d in windows]
+            if use("QTLU"):
+                # The 80% quantile of past d day's close price, divided by latest close price to remove unit
+                # Used with MIN and MAX
+                fields += [WindowedQuantile(self.close, d, 0.8)/self.close for d in windows]
+                names += ["QTLU%d" % d for d in windows]
+            if use("QTLD"):
+                # The 20% quantile of past d day's close price, divided by latest close price to remove unit
+                fields += [WindowedQuantile(self.close, d, 0.2)/self.close for d in windows]
+                names += ["QTLD%d" % d for d in windows]
             if use("RANK"):
                 # Get the percentile of current close price in past d day's close price.
                 # Represent the current price level comparing to past N days, add additional information to moving average.
@@ -152,7 +152,7 @@ class AllData:
             if use("IMXD"):
                 # The time period between previous lowest-price date occur after highest price date.
                 # Large value suggest downward momemtum.
-                fields += [(TsArgMax(self.high, d)-TsArgMax(self.low, d))/d for d in windows]
+                fields += [(TsArgMax(self.high, d)-TsArgMin(self.low, d))/d for d in windows]
                 names += ["IMXD%d" % d for d in windows]
             if use("CORR"):
                 # The correlation between absolute close price and log scaled trading volume

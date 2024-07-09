@@ -1,6 +1,7 @@
 from .ReduceOp import ReduceAdd, ReduceMul, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax, ReduceDecayLinear, ReduceArgMin
 from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
 from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp, Exp, Log, Min, Max
+from .MiscOp import WindowedLinearRegression, WindowedLinearRegressionResiImpl, WindowedLinearRegressionRSqaureImpl, WindowedLinearRegressionSlopeImpl
 from collections import OrderedDict
 from typing import Union, List, Tuple
 import math
@@ -293,3 +294,40 @@ class Pow(CompositiveOp):
         with b:
             Exp(expo * Log(base))
             return b.ops
+
+
+class WindowedLinearRegressionBase(WindowedCompositiveOp):
+    def make_extract(self, v: OpBase) -> OpBase:
+        raise RuntimeError("Not implemented")
+    
+    def decompose(self) -> List[OpBase]:
+        b = Builder(self.get_parent())
+        window = self.attrs["window"]
+        with b:
+            v0 = WindowedLinearRegression(self.inputs[0], window)
+            v1 = self.make_extract(v0, self.inputs[0])
+        return b.ops
+
+class WindowedLinearRegressionRSqaure(WindowedLinearRegressionBase):
+    '''
+    Rsquare value of windowed linear regression. Implementation see
+    https://github.com/microsoft/qlib/blob/a7d5a9b500de5df053e32abf00f6a679546636eb/qlib/data/_libs/rolling.pyx#L137
+    '''
+    def make_extract(self, regr: OpBase, inp: OpBase) -> OpBase:
+        return WindowedLinearRegressionRSqaureImpl(regr)
+
+class WindowedLinearRegressionSlope(WindowedLinearRegressionBase):
+    '''
+    Slope value of windowed linear regression. Implementation see
+    https://github.com/microsoft/qlib/blob/a7d5a9b500de5df053e32abf00f6a679546636eb/qlib/data/_libs/rolling.pyx#L49
+    '''
+    def make_extract(self, regr: OpBase, inp: OpBase) -> OpBase:
+        return WindowedLinearRegressionSlopeImpl(regr)
+
+class WindowedLinearRegressionResi(WindowedLinearRegressionBase):
+    '''
+    Residuals of windowed linear regression. Implementation see
+    https://github.com/microsoft/qlib/blob/a7d5a9b500de5df053e32abf00f6a679546636eb/qlib/data/_libs/rolling.pyx#L91
+    '''
+    def make_extract(self, regr: OpBase, inp: OpBase) -> OpBase:
+        return WindowedLinearRegressionResiImpl(regr, inp)

@@ -31,6 +31,9 @@ jobs:
     - name: make
       working-directory: ./
       run: mkdir build && cd build && cmake .. && cmake --build . --target TestingTargets --config Release -- -j
+    - name: download data
+      working-directory: ./
+      run: wget https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz && wget https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz
     - name: test
       working-directory: ./
       run: PYTHONPATH="./build:." bash ./tests/tests.sh

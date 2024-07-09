@@ -269,11 +269,32 @@ cmake --build . --target KunTest
 
 Correctness test of Alpha101
 
-```
+```bash
+# current dir should be at the base directory of KunQuant
 python tests/test_alpha101.py
 ```
 
 The input data are randomly genereted data and the results are checked against a modified (corrected) version of [Pandas-based code](https://github.com/yli188/WorldQuant_alpha101_code/blob/master/101Alpha_code_1.py). Note that some of the factors like `alpha013` are very sensitive to numerical changes in the intermeidate results, because `rank` operators are used. The result may be very different after `rank` even if the input is very close. Hence, the tolerance of these factors will be high to avoid false positives.
+
+To test Alpha158, you need first download the input data and reference result files: [alpha158.npz](https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz) and [input.npz](https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz).
+
+Then run
+
+```bash
+# current dir should be at the base directory of KunQuant
+python tests/test_alpha158.py --inputs /PATH/TO/input.npz --ref /PATH/TO/alpha158.npz 
+```
+
+This script runs alpha158 with double precision mode in KunQuant. It feeds the library with predefined values from `input.npz` and check against the result with `alpha158.npz`, which is computed by `qlib`.
+
+To generate another Alpha158 result with another randomly generated input, you can run
+
+```bash
+# current dir should be at the base directory of KunQuant
+python ./tests/gen_alpha158.py --tmp /tmp/a158 --qlib /path/to/source/of/qlib --out /tmp
+```
+
+It will create the random input at `/tmp/input.npz` and result at `/tmp/alpha158.npz`
 
 ## Using C-style APIs
 

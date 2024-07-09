@@ -57,13 +57,16 @@ def _get_buffer_name(op: OpBase, idx: int) -> str:
         return f"temp_{idx}"
     raise RuntimeError("Bad buffer" + str(op))
 
-def _value_to_float(op: OpBase, dtype: str) -> str:
-    ret = str(op.attrs["value"])
+def _float_value_to_float(v: float, dtype: str) -> str:
+    ret = str(v)
     if '.' not in ret and 'e' not in ret:
         ret += '.'
     if dtype == "float":
         ret += 'f'
     return ret
+
+def _value_to_float(op: OpBase, dtype: str) -> str:
+    return _float_value_to_float(op.attrs["value"], dtype)
 
 vector_len = 8
 
@@ -186,19 +189,33 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         elif isinstance(op, BackRef):
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
-            funcname = "windowedRefStream" if stream_mode else "windowedRef"
+            funcname = "windowedRef"
             scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>({buf_name}, i);'))
+        elif isinstance(op, WindowedQuantile):
+            assert(op.get_parent() is None)
+            buf_name = _get_buffer_name(op.inputs[0], inp[0])
+            funcname = "windowedQuantile"
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>({buf_name}, i, {_float_value_to_float(op.attrs["q"], elem_type)});'))
         elif isinstance(op, FastWindowedSum):
+            if stream_mode: raise RuntimeError(f"Stream Mode does not support {op.__class__.__name__}")
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
             window = op.attrs["window"]
             toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"FastWindowedSum<{elem_type}, {simd_lanes}, {window}> sum_{idx};"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = sum_{idx}.step({buf_name}, v{inp[0]}, i);"))
         elif isinstance(op, ExpMovingAvg):
+            if stream_mode: raise RuntimeError(f"Stream Mode does not support {op.__class__.__name__}")
             assert(op.get_parent() is None)
             window = op.attrs["window"]
             toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"ExpMovingAvg<{elem_type}, {simd_lanes}, {window}> ema_{idx};"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = ema_{idx}.step(v{inp[0]}, i);"))
+        elif isinstance(op, WindowedLinearRegression):
+            if stream_mode: raise RuntimeError(f"Stream Mode does not support {op.__class__.__name__}")
+            assert(op.get_parent() is None)
+            buf_name = _get_buffer_name(op.inputs[0], inp[0])
+            window = op.attrs["window"]
+            toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"WindowedLinearRegression<{elem_type}, {simd_lanes}, {window}> linear_{idx};"))
+            scope.scope.append(_CppSingleLine(scope, f"const auto& v{idx} = linear_{idx}.step({buf_name}, v{inp[0]}, i);"))
         elif isinstance(op, Select):
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
         else:
