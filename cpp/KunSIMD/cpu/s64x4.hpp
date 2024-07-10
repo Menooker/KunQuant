@@ -68,9 +68,20 @@ INLINE vec_s64x4 operator-(vec_s64x4 const &a) {
     return _mm256_sub_epi64(_mm256_setzero_si256(), a.v);
 }
 
+#if defined(__AVX512DQ__) && defined(__AVX512VL__)
+
 INLINE vec_s64x4 operator*(vec_s64x4 const &a, vec_s64x4 const &b) {
     return _mm256_mullo_epi64(a.v, b.v);
 }
+
+INLINE vec_s64x4 sc_max(vec_s64x4 const &a, vec_s64x4 const &b) {
+    return _mm256_max_epi64(a.v, b.v);
+}
+INLINE vec_s64x4 sc_min(vec_s64x4 const &a, vec_s64x4 const &b) {
+    return _mm256_min_epi64(a.v, b.v);
+}
+
+#endif
 
 // INLINE vec_s64x4 operator/(vec_s64x4 const &a, vec_s64x4 const &b) {
 //     return _mm256_div_epi64(a.v, b.v);
@@ -124,12 +135,6 @@ INLINE vec_s64x4 logical_shr(vec_s64x4 const &a, vec_s64x4 const &b) {
 
 // operator /
 
-INLINE vec_s64x4 sc_max(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_max_epi64(a.v, b.v);
-}
-INLINE vec_s64x4 sc_min(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_min_epi64(a.v, b.v);
-}
 
 INLINE vec_s64x4 sc_abs(vec_s64x4 const &a) {
     return _mm256_abs_epi64(a.v);
