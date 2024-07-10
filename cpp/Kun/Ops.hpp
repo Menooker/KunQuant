@@ -39,6 +39,13 @@ struct InputSTs : DataSource<true> {
         return simd_t::load(&buf[(index - offset) * stride]);
     }
 
+    T getWindowLane(size_t index, size_t offset, size_t lane) {
+        if (index < offset) {
+            return NAN;
+        }
+        return buf[(index - offset) * stride + lane];
+    }
+
     simd_t getWindowUnordered(size_t index, size_t offset) {
         return getWindow(index, offset);
     }
@@ -67,6 +74,14 @@ struct InputTS : DataSource<true> {
         }
         return simd_t::load(getPtr(index - offset));
     }
+
+    T getWindowLane(size_t index, size_t offset, size_t lane) {
+        if (index < offset) {
+            return NAN;
+        }
+        return getPtr(index - offset)[lane];
+    }
+
     simd_t getWindowUnordered(size_t index, size_t offset) {
         return getWindow(index, offset);
     }
@@ -89,6 +104,14 @@ struct OutputSTs : DataSource<true> {
         }
         return simd_t::load(&buf[(index - offset) * stride]);
     }
+
+    T getWindowLane(size_t index, size_t offset, size_t lane) {
+        if (index < offset) {
+            return NAN;
+        }
+        return buf[(index - offset) * stride + lane];
+    }
+
     simd_t getWindowUnordered(size_t index, size_t offset) {
         return getWindow(index, offset);
     }
@@ -117,6 +140,14 @@ struct OutputTS : DataSource<true> {
         }
         return simd_t::load(getPtr(index - offset));
     }
+
+    T getWindowLane(size_t index, size_t offset, size_t lane) {
+        if (index < offset) {
+            return NAN;
+        }
+        return getPtr(index - offset)[lane];
+    }
+
     simd_t getWindowUnordered(size_t index, size_t offset) {
         return getWindow(index, offset);
     }
@@ -139,11 +170,21 @@ struct OutputWindow : DataSource<true> {
         pos += 1;
         pos = (pos >= window) ? 0 : pos;
     }
-    simd_t getWindow(size_t index, size_t offset) {
+
+    T *getPtr(size_t offset) {
         offset += 1;
         auto idx = pos >= offset ? (pos - offset) : (pos + window - offset);
-        return simd_t::load(&buf[idx * stride]);
+        return &buf[idx * stride];
     }
+
+    simd_t getWindow(size_t index, size_t offset) {
+        return simd_t::load(getPtr(offset));
+    }
+
+    T getWindowLane(size_t index, size_t offset, size_t lane) {
+        return getPtr(offset)[lane];
+    }
+
     simd_t getWindowUnordered(size_t index, size_t offset) {
         return simd_t::load(&buf[offset * stride]);
     }
@@ -175,6 +216,11 @@ struct StreamWindow : DataSource<true> {
     simd_t getWindow(size_t index, size_t offset) {
         return simd_t::load(getWindowPtr(index, offset));
     }
+
+    T getWindowLane(size_t index, size_t offset, size_t lane) {
+        return getWindowPtr(index, offset)[lane];
+    }
+
     simd_t step(size_t index) { return getWindow(index, 0); }
     simd_t getWindowUnordered(size_t index, size_t offset) {
         return simd_t::load(&buf[offset * stride]);
@@ -250,6 +296,82 @@ struct ExpMovingAvg {
     }
 };
 
+template <typename T, int stride, int window>
+struct WindowedLinearRegression {
+    using simd_t = kun_simd::vec<T, stride>;
+    using simd_int_t =
+        kun_simd::vec<typename kun_simd::fp_trait<T>::int_t, stride>;
+    simd_t i_sum = T(0);
+    simd_t x_sum = T(0);
+    simd_t x2_sum = T(0);
+    simd_t y_sum = T(0);
+    simd_t y2_sum = T(0);
+    simd_t xy_sum = T(0);
+    simd_int_t num_nans = window;
+
+    template <typename TInput>
+    const WindowedLinearRegression &step(TInput &input, simd_t cur,
+                                         size_t index) {
+        // implementation from
+        // https://github.com/microsoft/qlib/blob/a7d5a9b500de5df053e32abf00f6a679546636eb/qlib/data/_libs/rolling.pyx#L137
+        RequireWindow<TInput>{};
+        xy_sum = xy_sum - y_sum;
+        x2_sum = x2_sum + i_sum - T(2.0) * x_sum;
+        x_sum = x_sum - i_sum;
+        auto old = input.getWindow(index, window);
+        auto old_is_nan = sc_isnan(old);
+        auto new_is_nan = sc_isnan(cur);
+        i_sum = sc_select(old_is_nan, i_sum, i_sum - T(1));
+        y_sum = sc_select(old_is_nan, y_sum, y_sum - old);
+        y2_sum = sc_select(old_is_nan, y2_sum, y2_sum - old * old);
+        num_nans = num_nans -
+                   sc_select(kun_simd::bitcast<simd_int_t>(old_is_nan), 1, 0);
+        num_nans = num_nans +
+                   sc_select(kun_simd::bitcast<simd_int_t>(new_is_nan), 1, 0);
+
+        i_sum = sc_select(new_is_nan, i_sum, i_sum + T(1));
+        x_sum = sc_select(new_is_nan, x_sum, x_sum + T(window));
+        x2_sum =
+            sc_select(new_is_nan, x2_sum, x2_sum + (T(window) * T(window)));
+        y_sum = sc_select(new_is_nan, y_sum, y_sum + cur);
+        y2_sum = sc_select(new_is_nan, y2_sum, y2_sum + cur * cur);
+        xy_sum = sc_select(new_is_nan, xy_sum, xy_sum + T(window) * cur);
+        return *this;
+    }
+};
+
+template <typename T, int stride, int window>
+kun_simd::vec<T, stride> WindowedLinearRegressionRSqaureImpl(
+    const WindowedLinearRegression<T, stride, window> &v) {
+    auto N = kun_simd::fast_cast<kun_simd::vec<T, stride>>(window - v.num_nans);
+    auto R1 = (N * v.xy_sum - v.x_sum * v.y_sum);
+    R1 = R1 * R1;
+    auto R2 =
+        (N * v.x2_sum - v.x_sum * v.x_sum) * (N * v.y2_sum - v.y_sum * v.y_sum);
+    return R1 / R2;
+}
+
+template <typename T, int stride, int window>
+kun_simd::vec<T, stride> WindowedLinearRegressionSlopeImpl(
+    const WindowedLinearRegression<T, stride, window> &v) {
+    auto N = kun_simd::fast_cast<kun_simd::vec<T, stride>>(window - v.num_nans);
+    auto slope =
+        (N * v.xy_sum - v.x_sum * v.y_sum) / (N * v.x2_sum - v.x_sum * v.x_sum);
+    return slope;
+}
+
+template <typename T, int stride, int window>
+kun_simd::vec<T, stride> WindowedLinearRegressionResiImpl(
+    const WindowedLinearRegression<T, stride, window> &v,
+    kun_simd::vec<T, stride> val) {
+    auto N = kun_simd::fast_cast<kun_simd::vec<T, stride>>(window - v.num_nans);
+    auto slope = WindowedLinearRegressionSlopeImpl(v);
+    auto x_mean = v.x_sum / N;
+    auto y_mean = v.y_sum / N;
+    auto interp = y_mean - slope * x_mean;
+    return val - (slope * T(window) + interp);
+}
+
 template <typename T, int stride>
 struct ReduceAdd {
     using simd_t = kun_simd::vec<T, stride>;
@@ -297,6 +419,12 @@ struct ReduceDecayLinear {
     operator simd_t() { return v; }
 };
 
+template <typename T, int stride, int window, size_t streamwindow>
+kun_simd::vec<T, stride>
+windowedRef(StreamWindow<T, stride, streamwindow> &input, size_t index) {
+    return input.getWindow(index, window);
+}
+
 template <typename T, int stride, int window, typename TInput>
 kun_simd::vec<T, stride> windowedRef(TInput &input, size_t index) {
     RequireWindow<TInput>{};
@@ -304,12 +432,6 @@ kun_simd::vec<T, stride> windowedRef(TInput &input, size_t index) {
         return input.getWindow(index, window);
     }
     return NAN;
-}
-
-template <typename T, int stride, int window, typename TInput>
-kun_simd::vec<T, stride> windowedRefStream(TInput &input, size_t index) {
-    RequireWindow<TInput>{};
-    return input.getWindow(index, window);
 }
 
 template <typename T1, typename T2>

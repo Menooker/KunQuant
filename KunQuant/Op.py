@@ -71,6 +71,9 @@ def traverse_replace_map(op: 'OpBase', replace_map: Dict['OpBase', 'OpBase']) ->
 
 class OpBase:
     def __init__(self, inputs: List['OpBase'], attrs: Union[List[Tuple[str, object]], OrderedDict, None]) -> None:
+        for i in inputs:
+            if not isinstance(i, OpBase):
+                raise RuntimeError("Bad inputs, given " + str(type(i)))
         self.inputs = inputs
         self._parent_loop: 'ForeachBackWindow' = _tls.loop
         if attrs is not None:
@@ -348,6 +351,12 @@ class StatefulOpTrait:
     '''
     pass
 
+
+class GloablStatefulOpTrait(StatefulOpTrait):
+    '''
+    The ops that have an internal state, and the state is carried between different time steps
+    '''
+    pass
 
 class ReductionOp(OpBase, StatefulOpTrait):
     '''

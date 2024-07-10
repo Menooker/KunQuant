@@ -1,4 +1,5 @@
 from KunQuant.Op import OpBase, Output, Input, CrossSectionalOp, GraphSourceTrait, ConstantOp, ReductionOp
+from KunQuant.ops.MiscOp import WindowedLinearRegressionConsumerTrait
 from KunQuant.Stage import Function, OpInfo
 from KunQuant.ops import GenericPartition
 from typing import List, Dict, Set, Tuple
@@ -113,7 +114,7 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
 
         loop_score = 0
         # need to run the ops in the loop as soon as possible
-        if op.get_parent() is not None or isinstance(op, ReductionOp):
+        if op.get_parent() is not None or isinstance(op, ReductionOp) or isinstance(op, WindowedLinearRegressionConsumerTrait):
             loop_score = 1
 
         if connected_to_parti:

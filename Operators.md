@@ -268,6 +268,24 @@ class DecayLinear(WindowedCompositiveOp):
     weight[i] = (i+1) * step_size
     DecayLinear = sum([weight[i] for i in 0 to window])
     '''
+
+class WindowedLinearRegressionRSqaure(WindowedLinearRegressionBase):
+    '''
+    Rsquare value of windowed linear regression. Implementation see
+    https://github.com/microsoft/qlib/blob/a7d5a9b500de5df053e32abf00f6a679546636eb/qlib/data/_libs/rolling.pyx#L137
+    '''
+
+class WindowedLinearRegressionSlope(WindowedLinearRegressionBase):
+    '''
+    Slope value of windowed linear regression. Implementation see
+    https://github.com/microsoft/qlib/blob/a7d5a9b500de5df053e32abf00f6a679546636eb/qlib/data/_libs/rolling.pyx#L49
+    '''
+
+class WindowedLinearRegressionResi(WindowedLinearRegressionBase):
+    '''
+    Residuals of windowed linear regression. Implementation see
+    https://github.com/microsoft/qlib/blob/a7d5a9b500de5df053e32abf00f6a679546636eb/qlib/data/_libs/rolling.pyx#L91
+    '''
 ```
 
 Multiple operands windowed ops: 
@@ -340,7 +358,15 @@ class BackRef(OpBase, WindowedTrait):
     def __init__(self, v: OpBase, window: int) -> None:
         pass
 
-class ExpMovingAvg(OpBase, StatefulOpTrait):
+class WindowedQuantile(OpBase, WindowedTrait):
+    '''
+    Quantile in `window` rows ago.
+    Similar to pd.rolling(window).quantile(q, interpolation='linear')
+    '''
+    def __init__(self, v: OpBase, window: int, q: float) -> None:
+        pass
+
+class ExpMovingAvg(OpBase, GloablStatefulOpTrait):
     '''
     Exponential Moving Average (EMA)
     Similar to pd.DataFrame.ewm(span=window, adjust=False).mean()
@@ -489,7 +515,7 @@ class ReduceDecayLinear(ReductionOp):
 Ops defined in `KunQuant.ops.MiscOp`:
 
 ```python
-class FastWindowedSum(OpBase, WindowedTrait, StatefulOpTrait):
+class FastWindowedSum(OpBase, WindowedTrait, GloablStatefulOpTrait):
     '''
     Fast sum for windowed sum without reduction loop
     '''
@@ -498,4 +524,40 @@ class FastWindowedSum(OpBase, WindowedTrait, StatefulOpTrait):
 
     def required_input_window(self) -> int:
         pass
+
+class WindowedLinearRegression(OpBase, WindowedTrait, GloablStatefulOpTrait):
+    '''
+    Compute states of Windowed Linear Regression
+    '''
+    def __init__(self, v: OpBase, window: int) -> None:
+        pass
+
+    def required_input_window(self) -> int:
+        pass
+
+class WindowedLinearRegressionImplBase(OpBase):
+    def __init__(self, v: OpBase) -> None:
+        pass
+    
+    def verify(self, func: 'KunQuant.Stage.Function') -> None:
+        pass
+
+
+class WindowedLinearRegressionRSqaureImpl(OpBase):
+    '''
+    Compute RSqaure of Windowed Linear Regression
+    '''
+    pass
+
+class WindowedLinearRegressionSlopeImpl(OpBase):
+    '''
+    Compute RSqaure of Windowed Linear Regression
+    '''
+    pass
+
+class WindowedLinearRegressionResiImpl(OpBase):
+    '''
+    Compute RSqaure of Windowed Linear Regression
+    '''
+    pass
 ```
