@@ -54,7 +54,7 @@ INLINE vec_s32x8 fast_cast(vec_f32x8 v) {
     return cast<vec_s32x8>(v);
 }
 
-#ifndef __AVX512F__
+#if !defined(__AVX512DQ__) || !defined(__AVX512VL__)
 
 // https://stackoverflow.com/a/77376595
 // Only works for inputs in the range: [-2^51, 2^51]
