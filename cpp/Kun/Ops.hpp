@@ -470,7 +470,7 @@ struct ReduceArgMax {
     simd_t idx = 0;
     void step(simd_t input, size_t index) {
         auto is_nan = sc_isnan(v, input);
-        auto cmp = v < input;
+        auto cmp = v <= input;
         v = sc_select(cmp, input, v);
         v = sc_select(is_nan, NAN, v);
         idx = sc_select(cmp, T(index), idx);
@@ -486,7 +486,7 @@ struct ReduceArgMin {
     simd_t idx = 0;
     void step(simd_t input, size_t index) {
         auto is_nan = sc_isnan(v, input);
-        auto cmp = GreaterThan(v, input);
+        auto cmp = v >= input;
         v = sc_select(cmp, input, v);
         v = sc_select(is_nan, NAN, v);
         idx = sc_select(cmp, T(index), idx);
