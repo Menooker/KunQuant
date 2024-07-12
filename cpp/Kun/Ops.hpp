@@ -19,7 +19,7 @@ struct DataSource {
 struct dummy {};
 
 template <typename T1, typename T2, typename T3>
-inline T1 Select(T1 cond, T2 vtrue, T3 vfalse) {
+inline T2 Select(T1 cond, T2 vtrue, T3 vfalse) {
     return kun_simd::sc_select(cond, vtrue, vfalse);
 }
 
@@ -261,6 +261,8 @@ struct FastWindowedSum {
     using simd_t = kun_simd::vec<T, stride>;
     using simd_int_t =
         kun_simd::vec<typename kun_simd::fp_trait<T>::int_t, stride>;
+    using int_mask_t = typename simd_int_t::Masktype;
+    using float_mask_t = typename simd_t::Masktype;
     simd_t v = 0;
     simd_int_t num_nans = window;
     template <typename TInput>
@@ -273,12 +275,14 @@ struct FastWindowedSum {
         v = sc_select(old_is_nan, v, v - old);
         // v = new_is_nan? v : (v+cur)
         v = sc_select(new_is_nan, v, v + cur);
-        num_nans = num_nans -
-                   sc_select(kun_simd::bitcast<simd_int_t>(old_is_nan), 1, 0);
-        num_nans = num_nans +
-                   sc_select(kun_simd::bitcast<simd_int_t>(new_is_nan), 1, 0);
-        auto out_is_normal = kun_simd::bitcast<simd_t>(num_nans == 0);
-        return sc_select(out_is_normal, v, NAN);
+        num_nans =
+            num_nans - sc_select(kun_simd::bitcast<int_mask_t>(old_is_nan),
+                                 simd_int_t{1}, simd_int_t{0});
+        num_nans =
+            num_nans + sc_select(kun_simd::bitcast<int_mask_t>(new_is_nan),
+                                 simd_int_t{1}, simd_int_t{0});
+        auto out_is_normal = kun_simd::bitcast<float_mask_t>(num_nans == 0);
+        return sc_select(out_is_normal, v, simd_t{NAN});
     }
 };
 
@@ -550,6 +554,20 @@ inline auto Div(T1 a, T2 b) -> decltype(kun_simd::operator/(a, b)) {
     return kun_simd::operator/(a, b);
 }
 
+#ifdef __AVX512F__
+inline __mmask8 Or(__mmask8 a, __mmask8 b) { return a | b; }
+
+inline __mmask8 And(__mmask8 a, __mmask8 b) { return a & b; }
+
+inline __mmask8 Not(__mmask8 a) { return ~a; }
+
+inline __mmask16 Or(__mmask16 a, __mmask16 b) { return a | b; }
+
+inline __mmask16 And(__mmask16 a, __mmask16 b) { return a & b; }
+
+inline __mmask16 Not(__mmask16 a) { return ~a; }
+#endif
+
 template <typename T1, typename T2>
 inline auto Or(T1 a, T2 b) -> decltype(kun_simd::operator|(a, b)) {
     return kun_simd::operator|(a, b);
@@ -561,7 +579,7 @@ inline auto And(T1 a, T2 b) -> decltype(kun_simd::operator&(a, b)) {
 }
 
 template <typename T1>
-inline DecayVec_t<T1> Not(T1 a) {
+inline auto Not(T1 a) -> decltype(kun_simd::operator!(a)) {
     return kun_simd::operator!(a);
 }
 
@@ -578,8 +596,9 @@ inline kun_simd::vec<T, lanes> constVec(const T &v) {
 template <typename T1>
 inline DecayVec_t<T1> Sign(T1 v) {
     using namespace kun_simd;
+    using simd_t = DecayVec_t<T1>;
     auto is_nan = sc_isnan(v);
-    auto v1 = sc_select(is_nan, NAN, 1.0f);
+    auto v1 = sc_select(is_nan, simd_t{NAN}, simd_t{1.0f});
     v1 = sc_select(v < 0.0f, -1.0f, v1);
     v1 = sc_select(v == 0.0f, 0.0f, v1);
     return v1;

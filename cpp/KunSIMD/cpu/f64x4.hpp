@@ -33,6 +33,7 @@ struct alignas(32) vec<double, 4> {
         double raw[4];
     };
 
+    using Masktype = vec<double, 4>;
     using T = double;
     static constexpr int lanes = 4;
 
@@ -108,7 +109,7 @@ INLINE vec_f64x4 operator&(vec_f64x4 const &a, vec_f64x4 const &b) {
     return _mm256_and_pd(a, b);
 }
 INLINE vec_f64x4 operator!(vec_f64x4 a) {
-    return _mm256_xor_pd(a, _mm256_castsi256_pd(_mm256_set1_epi32(-1)));
+    return _mm256_xor_pd(a, _mm256_castsi256_pd(_mm256_set1_epi64x(-1)));
 }
 
 INLINE vec_f64x4 sc_fmadd(vec_f64x4 const &a, vec_f64x4 const &b,

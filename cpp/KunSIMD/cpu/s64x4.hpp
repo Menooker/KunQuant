@@ -29,6 +29,7 @@ public:
         int64_t raw[4];
     };
 
+    using Masktype = vec<int64_t, 4>;
     using T = int64_t;
     static constexpr int lanes = 4;
 

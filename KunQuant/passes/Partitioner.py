@@ -1,5 +1,5 @@
-from KunQuant.Op import OpBase, Output, Input, CrossSectionalOp, GraphSourceTrait, ConstantOp, ReductionOp
-from KunQuant.ops.MiscOp import WindowedLinearRegressionConsumerTrait
+from KunQuant.Op import OpBase, Output, Input, CrossSectionalOp, GraphSourceTrait, ConstantOp, ReductionOp, BoolOpTrait
+from KunQuant.ops.MiscOp import WindowedLinearRegressionConsumerTrait, WindowedLinearRegression
 from KunQuant.Stage import Function, OpInfo
 from KunQuant.ops import GenericPartition
 from typing import List, Dict, Set, Tuple
@@ -12,6 +12,27 @@ from collections import OrderedDict
 class _PartitionOpInfo:
     depender: Set[OpBase]
     pending_dep: Dict[OpBase, None]
+
+def _is_non_output_op(op: OpBase) -> bool:
+    '''
+    return true if the op cannot be at the edge of a partition as output
+    '''
+    if op.get_parent() is not None or isinstance(op, WindowedLinearRegression) or isinstance(op, BoolOpTrait):
+        return True
+    return False
+
+def _is_fast_select_op(op: OpBase) -> bool:
+    '''
+    return true if the op should be selected ASAP
+    '''
+    if isinstance(op, ReductionOp) or isinstance(op, WindowedLinearRegressionConsumerTrait) or _is_non_output_op(op):
+        return True
+    else:
+        # don't stop at boolean op
+        for inpt in op.inputs:
+            if isinstance(inpt, BoolOpTrait):
+                return True
+    return False
 
 @dataclass
 class _Partition:
@@ -47,7 +68,7 @@ class _Partition:
         for op in self.ops:
             if isinstance(op, GraphSourceTrait):
                 continue
-            is_in_loop = op.get_parent() is not None
+            is_in_loop = _is_non_output_op(op)
             for user in f.op_to_id[op].uses:
                 if user not in self.ops:
                     out[user] = is_in_loop or out.get(user, False)
@@ -114,7 +135,7 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
 
         loop_score = 0
         # need to run the ops in the loop as soon as possible
-        if op.get_parent() is not None or isinstance(op, ReductionOp) or isinstance(op, WindowedLinearRegressionConsumerTrait):
+        if _is_fast_select_op(op):
             loop_score = 1
 
         if connected_to_parti:

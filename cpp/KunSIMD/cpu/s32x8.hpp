@@ -28,6 +28,7 @@ public:
         __m256i v;
         int32_t raw[8];
     };
+    using Masktype = vec<int32_t, 8>;
     using T = int32_t;
     static constexpr int lanes = 8;
 
@@ -89,7 +90,7 @@ INLINE vec_s32x8 operator^(vec_s32x8 const &a, vec_s32x8 const &b) {
     return _mm256_xor_si256(a.v, b.v);
 }
 
-#ifdef __AVX512F__
+#ifdef __AVX512VL__
 INLINE __mmask8 operator!(vec_s32x8 const &a) {
     return _mm256_cmp_epi32_mask(a.v, _mm256_setzero_si256(), _MM_CMPINT_EQ);
 }
