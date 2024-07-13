@@ -159,6 +159,20 @@ def test_ema():
     expected = pd.DataFrame(inp).ewm(span=5, adjust=False).mean()
     np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)
 
+def test_argmin_issue19():
+    #https://github.com/Menooker/KunQuant/issues/19
+    modu = lib.getModule("test_argmin")
+    assert(modu)
+    inp = np.empty((6, 8),"float32")
+    data = [ 0.6898481863442985, 0.6992020600574415, 0.6992020600574417, 0.6968635916291558, 0.6968635916291558, 0.6968635916291558 ]
+    for i in range(6):
+        inp[i, :] = data[i]
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": inp}, 0, 6)
+    expected = pd.DataFrame(inp).rolling(5, min_periods=1).apply(lambda x: x.argmin() + 1, raw=True)
+    output = out["ou2"][4:]
+    np.testing.assert_allclose(output, expected[4:], rtol=1e-6, equal_nan=True)
+
 test_avg_stddev_TS()
 test_runtime()
 test_avg_stddev()
@@ -168,4 +182,5 @@ test_log("float32", "")
 test_log("float64", "64")
 test_pow()
 test_ema()
+test_argmin_issue19()
 print("done")
