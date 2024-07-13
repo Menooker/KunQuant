@@ -162,7 +162,7 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]});"))
         elif isinstance(op, ForeachBackWindow):
             window = op.attrs["window"]
-            the_for = _CppFor(scope, f"for(size_t idx_{idx} = 0;idx_{idx} < {window};idx_{idx}++) ")
+            the_for = _CppFor(scope, f"for(int idx_{idx} = {window - 1};idx_{idx} >= 0;idx_{idx}--) ")
             scope.scope.append(the_for)
             loop_to_cpp_loop[op] = the_for.body
         elif isinstance(op, IterValue):

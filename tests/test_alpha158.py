@@ -1,4 +1,3 @@
-import KunRunner as kr
 import numpy as np
 import sys
 import time
@@ -7,7 +6,7 @@ import argparse
 from typing import Dict
 
 sys.path.append("./build/Release" if os.name == "nt" else "./build")
-
+import KunRunner as kr
 
 num_stock = 8
 num_time = 260
@@ -69,3 +68,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     inp, ref = load(args.inputs, args.ref)
     test(inp, ref)
+    print("done")

@@ -169,9 +169,12 @@ def test_argmin_issue19():
         inp[i, :] = data[i]
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"a": inp}, 0, 6)
-    expected = pd.DataFrame(inp).rolling(5, min_periods=1).apply(lambda x: x.argmin() + 1, raw=True)
+    df = pd.DataFrame(inp)
+    expected =df.rolling(5, min_periods=1).apply(lambda x: x.argmin() + 1, raw=True)
     output = out["ou2"][4:]
     np.testing.assert_allclose(output, expected[4:], rtol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(out["tsmin"], df.rolling(5).min(), rtol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(out["tsrank"], df.rolling(5).rank(), rtol=1e-6, equal_nan=True)
 
 test_avg_stddev_TS()
 test_runtime()

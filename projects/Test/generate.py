@@ -49,6 +49,8 @@ def check_argmin():
     with builder:
         inp1 = Input("a")
         out2 = Output(TsArgMin(inp1, 5), "ou2")
+        Output(WindowedMin(inp1, 5), "tsmin")
+        Output(TsRank(inp1, 5), "tsrank")
     f = Function(builder.ops)
     src = compileit(f, "test_argmin", input_layout="TS", output_layout="TS")
     paths.append(sys.argv[1]+"/TestArgMin.cpp")
