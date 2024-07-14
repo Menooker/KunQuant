@@ -6,6 +6,7 @@ include_directories(${pybind11_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/cpp)
 
 option(KUN_AVX512 "Enable AVX512 instruction set" OFF)
 option(KUN_AVX512DQ "Enable AVX512DQ instruction set" OFF)
+option(KUN_AVX512VL "Enable AVX512VL instruction set" OFF)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fvisibility=hidden -fvisibility-inlines-hidden -mavx2 -mfma -pthread")
@@ -14,6 +15,9 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GN
     endif()
     if(KUN_AVX512DQ)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx512dq")
+    endif()
+    if(KUN_AVX512VL)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx512vl")
     endif()
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4251 /wd4200 /wd4305")

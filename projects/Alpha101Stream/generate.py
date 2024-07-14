@@ -18,8 +18,9 @@ def check_alpha101():
             Output(out, f.__name__)
             cnt += 1
     print("Total", cnt)
+    simd_len = 16 if sys.argv[2] == "avx512" else 8
     f = Function(builder.ops)
-    src = compileit(f, "alpha_101_stream", partition_factor=8, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
+    src = compileit(f, "alpha_101_stream", blocking_len=simd_len, partition_factor=8, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
     os.makedirs(sys.argv[1], exist_ok=True)
     with open(sys.argv[1]+"/Alpha101Stream.cpp", 'w') as f:
         f.write(src)

@@ -312,6 +312,8 @@ struct WindowedLinearRegression {
     simd_t y2_sum = T(0);
     simd_t xy_sum = T(0);
     simd_int_t num_nans = window;
+    using int_mask_t = typename simd_int_t::Masktype;
+    using float_mask_t = typename simd_t::Masktype;
 
     template <typename TInput>
     const WindowedLinearRegression &step(TInput &input, simd_t cur,
@@ -328,10 +330,12 @@ struct WindowedLinearRegression {
         i_sum = sc_select(old_is_nan, i_sum, i_sum - T(1));
         y_sum = sc_select(old_is_nan, y_sum, y_sum - old);
         y2_sum = sc_select(old_is_nan, y2_sum, y2_sum - old * old);
-        num_nans = num_nans -
-                   sc_select(kun_simd::bitcast<simd_int_t>(old_is_nan), 1, 0);
-        num_nans = num_nans +
-                   sc_select(kun_simd::bitcast<simd_int_t>(new_is_nan), 1, 0);
+        num_nans =
+            num_nans - sc_select(kun_simd::bitcast<int_mask_t>(old_is_nan),
+                                 simd_int_t{1}, simd_int_t{0});
+        num_nans =
+            num_nans + sc_select(kun_simd::bitcast<int_mask_t>(new_is_nan),
+                                 simd_int_t{1}, simd_int_t{0});
 
         i_sum = sc_select(new_is_nan, i_sum, i_sum + T(1));
         x_sum = sc_select(new_is_nan, x_sum, x_sum + T(window));
