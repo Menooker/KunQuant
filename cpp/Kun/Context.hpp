@@ -5,6 +5,7 @@
 #include <atomic>
 #include <memory>
 #include <stdlib.h>
+#include <stddef.h>
 
 namespace kun {
 

@@ -75,7 +75,7 @@ static const uint64_t VERSION = 0x64100002;
 
 void Buffer::alloc(size_t count, size_t use_count, size_t elem_size) {
     if (!ptr) {
-        ptr = (float *)kunAlignedAlloc(32, count * elem_size);
+        ptr = (float *)kunAlignedAlloc(64, count * elem_size);
         refcount = (int)use_count;
 #if CHECKED_PTR
         size = count * elem_size;
@@ -258,7 +258,7 @@ template <typename T>
 char *StreamBuffer<T>::make(size_t stock_count, size_t window_size,
                             size_t simd_len) {
     auto ret = kunAlignedAlloc(
-        32, StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
+        64, StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
     auto buf = (StreamBuffer *)ret;
     for (size_t i = 0; i < stock_count * window_size; i++) {
         buf->getBuffer()[i] = NAN;

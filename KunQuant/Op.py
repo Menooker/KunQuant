@@ -344,6 +344,11 @@ class IterValue(OpBase):
 
 _clazzBackWindow = ForeachBackWindow
 
+class BoolOpTrait:
+    '''
+    The ops that have boolean output type
+    '''
+    pass
 
 class StatefulOpTrait:
     '''

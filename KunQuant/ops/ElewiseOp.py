@@ -1,4 +1,4 @@
-from KunQuant.Op import UnaryElementwiseOp, BinaryElementwiseOp, OpBase
+from KunQuant.Op import UnaryElementwiseOp, BinaryElementwiseOp, OpBase, BoolOpTrait
 
 class BinaryConstOp(UnaryElementwiseOp):
     def __init__(self, inp: OpBase, v: float, swap: bool = False) -> None:
@@ -34,10 +34,10 @@ class Add(BinaryElementwiseOp):
 class Sub(BinaryElementwiseOp):
     pass
 
-class Or(BinaryElementwiseOp):
+class Or(BinaryElementwiseOp, BoolOpTrait):
     pass
 
-class And(BinaryElementwiseOp):
+class And(BinaryElementwiseOp, BoolOpTrait):
     pass
 
 class Max(BinaryElementwiseOp):
@@ -49,7 +49,7 @@ class Min(BinaryElementwiseOp):
 class Div(BinaryElementwiseOp):
     pass
 
-class CmpOp(BinaryElementwiseOp):
+class CmpOp(BinaryElementwiseOp, BoolOpTrait):
     pass
 
 class GreaterThan(CmpOp):
@@ -67,10 +67,10 @@ class LessEqual(CmpOp):
 class Equals(CmpOp):
     pass
 
-class GreaterThanConst(BinaryConstOp):
+class GreaterThanConst(BinaryConstOp, BoolOpTrait):
     pass
 
-class LessThanConst(BinaryConstOp):
+class LessThanConst(BinaryConstOp, BoolOpTrait):
     pass
 
 class Sqrt(UnaryElementwiseOp):
@@ -97,7 +97,7 @@ class Sign(UnaryElementwiseOp):
     '''
     pass
 
-class Not(UnaryElementwiseOp):
+class Not(UnaryElementwiseOp, BoolOpTrait):
     '''
     logical not
     '''
