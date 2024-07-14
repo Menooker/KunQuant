@@ -64,6 +64,18 @@ INLINE vec_s64x8 bitcast(vec_f64x8 v) {
 }
 #endif
 
+
+template <typename T1, typename T2>
+inline T1 bitcast(T2 v) {
+    static_assert(sizeof(T1) == sizeof(T2), "unmatched bitcast");
+    union {
+        T1 v1;
+        T2 v2;
+    } val;
+    val.v2 = v;
+    return val.v1;
+}
+
 template <typename T1, typename T2>
 T1 cast(T2 v);
 

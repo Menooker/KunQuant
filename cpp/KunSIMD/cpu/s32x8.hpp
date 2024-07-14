@@ -90,7 +90,7 @@ INLINE vec_s32x8 operator^(vec_s32x8 const &a, vec_s32x8 const &b) {
     return _mm256_xor_si256(a.v, b.v);
 }
 
-#ifdef __AVX512VL__
+#if 0
 INLINE __mmask8 operator!(vec_s32x8 const &a) {
     return _mm256_cmp_epi32_mask(a.v, _mm256_setzero_si256(), _MM_CMPINT_EQ);
 }
