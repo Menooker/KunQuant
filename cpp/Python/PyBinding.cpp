@@ -61,6 +61,7 @@ PYBIND11_MODULE(KunRunner, m) {
                                    }
                                    return "?";
                                })
+        .def_readonly("blocking_len", &kun::Module::blocking_len)
         .def("getOutputNames",
              [](kun::Module &mod) {
                  std::vector<std::string> ret;
