@@ -44,6 +44,19 @@ def check_ema():
     with open(paths[-1], 'w') as f:
         f.write(src)
 
+def check_argmin():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out2 = Output(TsArgMin(inp1, 5), "ou2")
+        Output(WindowedMin(inp1, 5), "tsmin")
+        Output(TsRank(inp1, 5), "tsrank")
+    f = Function(builder.ops)
+    src = compileit(f, "test_argmin", input_layout="TS", output_layout="TS")
+    paths.append(sys.argv[1]+"/TestArgMin.cpp")
+    with open(paths[-1], 'w') as f:
+        f.write(src)
+
 def check_rank():
     builder = Builder()
     with builder:
@@ -123,6 +136,7 @@ check_log("double", "64")
 check_pow()
 check_alpha101_double()
 check_ema()
+check_argmin()
 
 # with open(sys.argv[1]+"/generated.txt", 'w') as f:
 #     f.write(";".join(paths))

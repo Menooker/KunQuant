@@ -7,3 +7,4 @@ TestLog64.cpp
 TestPow.cpp
 Alpha101.cpp
 TestEMA.cpp
+TestArgMin.cpp

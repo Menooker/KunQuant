@@ -400,7 +400,9 @@ template <typename T, int stride>
 struct ReduceMin {
     using simd_t = kun_simd::vec<T, stride>;
     simd_t v = std::numeric_limits<T>::infinity();
-    void step(simd_t input, size_t index) { v = sc_min(v, input); }
+    void step(simd_t input, size_t index) {
+        v = sc_select(sc_isnan(v, input), NAN, sc_min(v, input));
+    }
     operator simd_t() { return v; }
 };
 
@@ -408,7 +410,9 @@ template <typename T, int stride>
 struct ReduceMax {
     using simd_t = kun_simd::vec<T, stride>;
     simd_t v = -std::numeric_limits<T>::infinity();
-    void step(simd_t input, size_t index) { v = sc_max(v, input); }
+    void step(simd_t input, size_t index) {
+        v = sc_select(sc_isnan(v, input), NAN, sc_max(v, input));
+    }
     operator simd_t() { return v; }
 };
 
@@ -418,11 +422,11 @@ struct ReduceDecayLinear {
     static constexpr T stepSize() {
         return 1.0 / ((1.0 + window) * window / 2);
     }
-    simd_t weight = window * stepSize();
+    simd_t weight = stepSize();
     simd_t v = 0;
     void step(simd_t input, size_t index) {
         v = sc_fmadd(input, weight, v);
-        weight = weight - stepSize();
+        weight = weight + stepSize();
     }
     operator simd_t() { return v; }
 };
@@ -494,7 +498,7 @@ struct ReduceArgMin {
     simd_t idx = 0;
     void step(simd_t input, size_t index) {
         auto is_nan = sc_isnan(v, input);
-        auto cmp = GreaterThan(v, input);
+        auto cmp = v > input;
         v = sc_select(cmp, input, v);
         v = sc_select(is_nan, NAN, v);
         idx = sc_select(cmp, T(index), idx);

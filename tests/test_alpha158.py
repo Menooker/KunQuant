@@ -68,3 +68,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     inp, ref = load(args.inputs, args.ref)
     test(inp, ref)
+    print("done")
