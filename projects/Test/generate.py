@@ -119,8 +119,9 @@ def check_alpha101_double():
             #     continue
             out = f(all_data)
             Output(out, f.__name__)
+    simd_len = 8 if sys.argv[2] == "avx512" else 4
     f = Function(builder.ops)
-    src = compileit(f, "alpha_101", input_layout="TS", output_layout="TS", dtype="double", options={"opt_reduce": True, "fast_log": True})
+    src = compileit(f, "alpha_101", blocking_len=simd_len, input_layout="TS", output_layout="TS", dtype="double", options={"opt_reduce": True, "fast_log": True})
     os.makedirs(sys.argv[1], exist_ok=True)
     with open(sys.argv[1]+"/Alpha101.cpp", 'w') as f:
         f.write(src)

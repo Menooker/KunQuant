@@ -31,7 +31,8 @@ def check_alpha158():
             Output(v, k)
     print("Total names: ", len(names))
     f = Function(builder.ops)
-    src = compileit(f, "alpha158", dtype='double', partition_factor=4, output_layout="TS", input_layout="TS", options={"opt_reduce": True, "fast_log": True})
+    simd_len = 8 if sys.argv[2] == "avx512" else 4
+    src = compileit(f, "alpha158", dtype='double', blocking_len=simd_len, partition_factor=4, output_layout="TS", input_layout="TS", options={"opt_reduce": True, "fast_log": True})
     os.makedirs(sys.argv[1], exist_ok=True)
     with open(sys.argv[1]+"/Alpha158.cpp", 'w') as f:
         f.write(src)

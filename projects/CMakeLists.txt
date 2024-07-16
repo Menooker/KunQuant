@@ -1,4 +1,9 @@
 
+if(KUN_AVX512)
+    set(AVX512ON "avx512")
+else()
+    set(AVX512ON "avx2")
+endif()
 file(GLOB PROJECTS LIST_DIRECTORIES true RELATIVE ${PROJECT_SOURCE_DIR}/projects ${PROJECT_SOURCE_DIR}/projects/*)
 FOREACH(subdir ${PROJECTS})
     if(IS_DIRECTORY ${PROJECT_SOURCE_DIR}/projects/${subdir})
@@ -12,7 +17,7 @@ FOREACH(subdir ${PROJECTS})
         # message("EXEC ${MODULE_DEPENDS_${subdir}}")
         add_custom_command(
             OUTPUT ${MODULE_DEPENDS_${subdir}}
-            COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${PROJECT_SOURCE_DIR} ${PYTHON_EXECUTABLE} ${PROJECT_SOURCE_DIR}/projects/${subdir}/generate.py ${CMAKE_CURRENT_BINARY_DIR}/${subdir}
+            COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${PROJECT_SOURCE_DIR} ${PYTHON_EXECUTABLE} ${PROJECT_SOURCE_DIR}/projects/${subdir}/generate.py ${CMAKE_CURRENT_BINARY_DIR}/${subdir} ${AVX512ON}
             DEPENDS ${PROJECT_SOURCE_DIR}/projects/${subdir}/generate.py ${PROJECT_SOURCE_DIR}/projects/${subdir}/list.txt
         )
         add_library(${subdir} SHARED ${MODULE_DEPENDS_${subdir}})

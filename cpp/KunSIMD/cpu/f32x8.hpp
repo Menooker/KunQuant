@@ -32,6 +32,7 @@ struct alignas(32) vec<float, 8> {
         __m256 v;
         float raw[8];
     };
+    using Masktype = vec<float, 8>;
 
     using T = float;
     static constexpr int lanes = 8;

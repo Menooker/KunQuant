@@ -49,8 +49,9 @@ g++=11.4.0
 * cmake
 * A working C++ compiler with C++11 support (e.g. clang, g++, msvc)
 * x86-64 CPU with at least AVX2-FMA instruction set
+* Optionally requires AVX512 on CPU for better performance
 
-**Important node**: Currently KunQuant only supports a multiple of 8 as the number of stocks as inputs. That is, you can only input 8, 16, 24, ..., etc. stocks in a batch.
+**Important node**: Currently KunQuant only supports a multiple of `{blocking_len}` as the number of stocks as inputs. For single-precision float type and AVX2 instruction set, `blocking_len=8`. That is, you can only input 8, 16, 24, ..., etc. stocks in a batch, if your code is compiled with AVX2 (without AVX512) and `float` datatype.
 
 ## Compiling and running Alpha101
 
@@ -176,7 +177,9 @@ for stockidx, data in enumerate(df):
         collected[colidx, stockidx, :] = mat
 ```
 
-Then an important step is to transpose the numpy array to shape `[features, stocks//8, time, 8]`. We split the axis of stocks into two axis `[stocks//8, 8]`. This step makes the memory layout of the numpy array match the SIMD length of AVX2, so that KunQuant can process the data in parallel in a single SIMD instruction.
+Then an important step is to transpose the numpy array to shape `[features, stocks//8, time, 8]`. We split the axis of stocks into two axis `[stocks//8, 8]`. This step makes the memory layout of the numpy array match the SIMD length of AVX2, so that KunQuant can process the data in parallel in a single SIMD instruction. Notes:
+ * the number `8` here is the `blocking_num` of the compiled code. It is decided by the SIMD lanes of the data type and the instruction set (AVX2 or AVX512). By default, the example code of `Alpha101` generates `float` dtype with AVX2. The register size of AVX2 is 256 bits, so the SIMD lanes of `float` should be 8.
+ * you can change the `projects/Alpha101/generate.py` to let the compiled code accept the simple matrix of `[features, time, stocks]` without the need of transposing in this step. See below [section](#Specifing Memory layouts and data types) for more details. Using `TS` layout may result slower execution of the factors.
 
 ```python
 # [features, stocks, time] => [features, stocks//8, 8, time] => [features, stocks//8, time, 8]
@@ -238,9 +241,23 @@ KunQuant is a tool for general expressions. You can further read [Customize.md](
 
 KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./Stream.md)
 
-## Specifing Memory layouts
+## Specifing Memory layouts and data types
 
 The developers can choose the memory layout when compiling KunQuant factor libraries. The memory layout decribes how the input/output matrix is organized. Currently, KunQuant supports `TS`, `STs` and `STREAM` as the memory layout. In `TS` layout, the input and output data is in plain `[num_time, num_stocks]` 2D matrix. In `STs` with `blocking_len = 8`, the data should be transformed to `[num_stocks//8, num_time, 8]` for better performance. The `STREAM` layout is for the streaming mode. You can choose the input/output layout independently in `compileit()` function of `generate.py`, by the parameters `compileit(..., input_layout="TS", output_layout="STs")` for example. By default, the input layout is `STs` and the output layout is `TS`. For more info of customizing the factor compilation, see [Customize.md](./Customize.md).
+
+KunQuant supports `float` and `double` data types. It can be selected by the `dtype` parameter of `compileit()` in your own `generate.py`.
+
+If CMake Option `-DKUN_AVX512` is `ON` (by default is `OFF`), the `blocking_len` for `dtype='float'` can be 8 or 16, and for `dtype='double'` can be 4 or 8. If `-DKUN_AVX512` is not specified or is `OFF`, the `blocking_len` for `dtype='float'` should only be 8, and for `dtype='double'` should be 4.
+
+## Enabling AVX512
+
+This project by default turns off AVX512, since this intruction set is not yet well adopted. If you are sure your CPU has AVX512, you can turn it on by adding cmake option `-DKUN_AVX512=ON` when running `cmake` command above. This will enable AVX512 features when compiling the KunQuant generated code. Some speed-up over `AVX2` mode are expected.
+
+In your customized project, you need to specify `blocking_len` parameter of in `compileit()` function of `generate.py` to enable AVX512. See above [section](#Specifing Memory layouts and data types). The example projects `Alpha101`, `Alpha101Stream`, `Alpha158` in `projects/` will detect if `-DKUN_AVX512=ON` and automatically set `blocking_len` to use AVX2 or AVX512. Please note that `blocking_len` will affect the `STs` format.
+
+There are some other CPU instruction sets that is optional for KunQuant. You can turn on `AVX512DQ` and `AVX512VL` to accelerate some parts of KunQuant-generated code. To enable them, add `-DKUN_AVX512DQ=ON` and `-DKUN_AVX512VL=ON` in cmake options respectively.
+
+To see if your CPU supports AVX512 (and `AVX512DQ` and `AVX512VL`), you can run command `lscpu` in Linux and check the outputs.
 
 ## Operator definitions
 

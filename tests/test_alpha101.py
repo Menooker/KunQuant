@@ -59,12 +59,13 @@ def gen_stock_data(low, high, stocks, num_time, stddev):
 
 
 
+def make_TS_STs(blocking_num):
+    def TS_STs(data: np.ndarray) -> np.ndarray:
+        return np.ascontiguousarray(data.reshape((-1, blocking_num, data.shape[1])).transpose((0, 2, 1)))
+    return TS_STs
 
-def ST_ST8t(data: np.ndarray) -> np.ndarray:
-    return np.ascontiguousarray(data.reshape((-1, 8, data.shape[1])).transpose((0, 2, 1)))
 
-
-def ST8t_ST(data: np.ndarray) -> np.ndarray:
+def STs_TS(data: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(data.transpose((0, 2, 1)).reshape((-1, data.shape[1])))
 
 def TS_ST(data: np.ndarray) -> np.ndarray:
@@ -79,7 +80,7 @@ def make_data_and_ref(num_stock, num_time, ischeck, input_ST8t, dtype="float32")
     dopen, dclose, dhigh, dlow, dvol, damount = gen_data.gen_stock_data2(0.5, 100, num_stock, num_time, 0.03 if num_time > 1000 else 0.05, dtype)
     end = time.time()
     print(f"DataGen takes: {end-start:.6f} seconds")
-    transpose_func = ST_ST8t if input_ST8t else ST_TS
+    transpose_func = make_TS_STs(input_ST8t) if input_ST8t else ST_TS
     my_input = {"high": transpose_func(dhigh), "low": transpose_func(dlow), "close": transpose_func(dclose), "open": transpose_func(dopen), "volume": transpose_func(dvol), "amount": transpose_func(damount)}
     ref = None
     if ischeck:
@@ -231,7 +232,7 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
         for idx, name in enumerate(outnames):
             outbuffers[name] = sharedbuf[idx]
     # print(ref.alpha001())
-    # blocked = ST_ST8t(inp)
+    # blocked = TS_STs(inp)
     
     start = time.time()
     out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
@@ -244,18 +245,19 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
         if layout == "TS":
             out[k] = TS_ST(out[k])
         else:
-            out[k] = ST8t_ST(out[k])
+            out[k] = STs_TS(out[k])
     return check_result(out, ref, outnames, start_window, num_stock, start_time, num_time)
 
 def main():
     lib = kr.Library.load("./build/projects/Release/Alpha101.dll" if os.name == "nt" else "./build/projects/libAlpha101.so")
     modu = lib.getModule("alpha_101")
     start_window = modu.getOutputUnreliableCount()
+    blocking_num = modu.blocking_len
     # print(start_window)
     num_stock = 64
     num_time = 260
     is_check = True
-    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, True)
+    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, blocking_num)
     executor = kr.createSingleThreadExecutor()
     done = True
     done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
@@ -296,7 +298,7 @@ def streammain():
     num_stock = 64
     num_time = 220
     is_check = True
-    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, False)
+    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, 0)
     executor = kr.createSingleThreadExecutor()
     done = True
     done = done & test_stream(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check)
@@ -320,7 +322,7 @@ def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, isc
         for idx, name in enumerate(outnames):
             outbuffers[name] = sharedbuf[idx]
     # print(ref.alpha001())
-    # blocked = ST_ST8t(inp)
+    # blocked = TS_STs(inp)
     
     start = time.time()
     out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
@@ -333,7 +335,7 @@ def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, isc
         if layout == "TS":
             out[k] = TS_ST(out[k])
         else:
-            out[k] = ST8t_ST(out[k])
+            out[k] = STs_TS(out[k])
     return check_result(out, ref, outnames, start_window, num_stock, start_time, num_time)
 
 def main64():
@@ -343,7 +345,7 @@ def main64():
     num_stock = 64
     num_time = 260
     is_check = True
-    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, False, "float64")
+    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, 0, "float64")
     executor = kr.createSingleThreadExecutor()
     done = True
     done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
