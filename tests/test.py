@@ -265,6 +265,66 @@ v5 = Output@{name:ou1}(v4)
 v6 = LessThan@(v1,v0)
 v7 = Output@{name:ou1}(v6)''')
 
+
+def check_mergeLoop():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inp2 = Input("b")
+        loopa1 = ForeachBackWindow(inp1, 10)
+        builder.loop = loopa1
+        vara1 = IterValue(loopa1, inp1)
+        builder.loop = None
+        reducea1 = ReduceAdd(vara1)
+
+        loopa2 = ForeachBackWindow(inp1, 20)
+        builder.loop = loopa2
+        vara2 = IterValue(loopa2, inp1)
+        builder.loop = None
+        reducea2 = ReduceMax(vara2)
+
+        loopa3 = ForeachBackWindow(inp1, 20)
+        builder.loop = loopa3
+        vara3 = IterValue(loopa3, inp1)
+        builder.loop = None
+        reducea3 = ReduceMin(vara3)
+
+        loopa4 = ForeachBackWindow(inp1, 32)
+        builder.loop = loopa4
+        vara4 = IterValue(loopa4, inp1)
+        builder.loop = None
+        reducea4 = ReduceMin(vara4)
+
+        loopb = ForeachBackWindow(inp2, 32)
+        builder.loop = loopb
+        varb = IterValue(loopb, inp2)
+        builder.loop = None
+        reduceb = ReduceMin(varb)
+
+        out2 = Output(reducea1 + reducea2 + reducea3 + reducea4 + reduceb, "ou1")
+    f = Function(builder.ops)
+    merge_loops(f)
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = ForeachBackWindow@{window:32,segment_end:20}(v0)
+v2 = IterValue@(v1,v0) in v1
+v3 = ReduceMin@(v2)
+v4 = ForeachBackWindow@{window:20,copy_prev_body:True,segment_end:10}(v0)
+v5 = IterValue@(v4,v0) in v4
+v6 = ReduceMax@(v5)
+v7 = ReduceMin@(v5)
+v8 = ForeachBackWindow@{window:10,copy_prev_body:True}(v0)
+v9 = IterValue@(v8,v0) in v8
+v10 = ReduceAdd@(v9)
+v11 = Input@{name:b}()
+v12 = ForeachBackWindow@{window:32}(v11)
+v13 = IterValue@(v12,v11) in v12
+v14 = ReduceMin@(v13)
+v15 = Add@(v10,v6)
+v16 = Add@(v15,v7)
+v17 = Add@(v16,v3)
+v18 = Add@(v17,v14)
+v19 = Output@{name:ou1}(v18)''')
+
 if __name__ == "__main__":
     check_window()
     check_simple()
@@ -275,3 +335,4 @@ if __name__ == "__main__":
     check_opt_sum()
     check_fold_window()
     check_div_cmp()
+    check_mergeLoop()

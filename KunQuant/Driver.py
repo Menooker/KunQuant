@@ -30,6 +30,7 @@ def post_optimize(impl: List[Function], options: dict)->Dict[str, int]:
     for f in impl:
         temp_window_elim(f, options)
         infer_input_window(f, window_result)
+        merge_loops(f, options)
     return window_result
 
 @dataclass

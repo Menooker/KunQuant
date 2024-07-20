@@ -124,6 +124,7 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
     top_body = top_for.body
     cur_body = top_body
     loop_to_cpp_loop: Dict[ForeachBackWindow, _CppScope] = {None: top_body}
+    prev_for = None
     for op in f.ops:
         idx = f.get_op_idx(op)
         inp = [f.get_op_idx(inpv) for inpv in op.inputs]
@@ -162,13 +163,19 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {thename}(v{inp[0]});"))
         elif isinstance(op, ForeachBackWindow):
             window = op.attrs["window"]
-            the_for = _CppFor(scope, f"for(int idx_{idx} = {window - 1};idx_{idx} >= 0;idx_{idx}--) ")
+            seg_end = op.attrs.get("segment_end", 0)
+            copy_prev_body = op.attrs.get("copy_prev_body", False)
+            the_for = _CppFor(scope, f"for(int iter = {window - 1};iter >= {seg_end};iter--) ")
+            if copy_prev_body:
+                for line in prev_for.body.scope:
+                    the_for.body.scope.append(_CppSingleLine(the_for.body, line.line))
             scope.scope.append(the_for)
             loop_to_cpp_loop[op] = the_for.body
+            prev_for = the_for
         elif isinstance(op, IterValue):
             loop = op.inputs[0]
             buf_name = _get_buffer_name(op.inputs[1], inp[1])
-            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {buf_name}.getWindow(i, idx_{f.get_op_idx(loop)});"))
+            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {buf_name}.getWindow(i, iter);"))
         elif isinstance(op, ReductionOp):
             thename = op.__class__.__name__
             if isinstance(op, ReduceDecayLinear):
@@ -185,7 +192,7 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             init_val = "" if len(op.inputs) == 1 else f"v{inp[1]}"
             loop_parent.scope.insert(loop_parent.scope.index(loop), _CppSingleLine(loop_parent, f"{thename} v{idx}{{{init_val}}};"))
             # insert a step in the for-loop
-            loop_body.scope.append(_CppSingleLine(loop_body, f"v{idx}.step(v{inp[0]}, idx_{loop_var_idx});"))
+            loop_body.scope.append(_CppSingleLine(loop_body, f"v{idx}.step(v{inp[0]}, iter);"))
         elif isinstance(op, BackRef):
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
