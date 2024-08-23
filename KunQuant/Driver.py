@@ -86,6 +86,8 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
         raise RuntimeError("Currently opt_reduce in stream mode is not supported.")
     if stream_mode and allow_unaligned is None:
         allow_unaligned = False
+    elif allow_unaligned is None:
+        allow_unaligned = True
     if allow_unaligned and stream_mode:
         raise RuntimeError("Currently allow_unaligned in stream mode is not supported.")
 
