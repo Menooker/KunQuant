@@ -88,7 +88,7 @@ INLINE vec_s64x4 sc_abs(vec_s64x4 const &a) {
 #endif
 
 INLINE vec_s64x4 operator>(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_cmpgt_epi32(a.v, b.v);
+    return _mm256_cmpgt_epi64(a.v, b.v);
 }
 // INLINE vec_s64x4 operator/(vec_s64x4 const &a, vec_s64x4 const &b) {
 //     return _mm256_div_epi64(a.v, b.v);

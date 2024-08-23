@@ -1,7 +1,7 @@
 from KunQuant.passes import *
 from KunQuant.Stage import Function
 from KunQuant.Op import Input, Output, OpBase, CrossSectionalOp
-from typing import Dict, List
+from typing import Dict, List, Union
 import typing
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -65,7 +65,7 @@ def _deprecation_check(name: str, argname: str) -> str:
         return "STs"
     return name
 
-def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "float", blocking_len = None, input_layout = "STs", output_layout = "STs", allow_unaligned = True, options = {}):
+def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "float", blocking_len = None, input_layout = "STs", output_layout = "STs", allow_unaligned: Union[bool, None] = None, options = {}):
     input_layout = _deprecation_check(input_layout, "input_layout")
     output_layout = _deprecation_check(output_layout, "input_layout")
     if dtype not in ["float", "double"]:
@@ -84,7 +84,9 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
 
     if stream_mode and options.get("opt_reduce", False):
         raise RuntimeError("Currently opt_reduce in stream mode is not supported.")
-    if allow_unaligned and (output_layout == "STREAM"):
+    if stream_mode and allow_unaligned is None:
+        allow_unaligned = False
+    if allow_unaligned and stream_mode:
         raise RuntimeError("Currently allow_unaligned in stream mode is not supported.")
 
     input_name_to_idx: Dict[str, int] = dict()

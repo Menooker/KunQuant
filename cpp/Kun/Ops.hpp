@@ -32,7 +32,7 @@ struct InputSTs : DataSource<true> {
         : buf{base + stock_idx * total_time * stride + start * stride} {}
     simd_t step(size_t index) { return simd_t::load(&buf[index * stride]); }
     simd_t step(size_t index, const typename simd_t::Masktype &mask) {
-        return simd_t::masked_load(getPtr(index), mask);
+        return simd_t::masked_load(&buf[index * stride], mask);
     }
 
     simd_t getWindow(size_t index, size_t offset) {

@@ -57,7 +57,7 @@ struct KUN_API Executor {
     virtual ~Executor() = default;
 };
 
-#define CHECKED_PTR 0
+#define CHECKED_PTR 1
 struct Buffer {
     union {
         void* __restrict raw;
