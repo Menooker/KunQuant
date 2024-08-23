@@ -250,4 +250,13 @@ INLINE vec_s64x8 cast(vec_f64x8 v) {
     return _mm512_add_epi64(_mm512_slli_epi64(v_hi.v, 32), v_lo);
 }
 #endif
+
+INLINE vec_f32x8::Masktype vec_f32x8::make_mask(int N) {
+    return bitcast<vec_f32x8::Masktype>(vec_s32x8{N} > vec_s32x8{0,1,2,3,4,5,6,7});
+}
+
+INLINE vec_f64x4::Masktype vec_f64x4::make_mask(int N) {
+    return bitcast<vec_f64x4::Masktype>(vec_s64x4{N} > vec_s64x4{0,1,2,3});
+}
+
 } // namespace kun_simd

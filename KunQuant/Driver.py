@@ -7,7 +7,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from KunQuant.passes import Util as PassUtil
 
-required_version = "0x64100002"
+required_version = "0x64100003"
 
 def optimize(f: Function, options: dict)->Dict[str, int]:
     if PassUtil.debug_mode:
@@ -65,7 +65,7 @@ def _deprecation_check(name: str, argname: str) -> str:
         return "STs"
     return name
 
-def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "float", blocking_len = None, input_layout = "STs", output_layout = "STs", options = {}):
+def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "float", blocking_len = None, input_layout = "STs", output_layout = "STs", allow_unaligned = True, options = {}):
     input_layout = _deprecation_check(input_layout, "input_layout")
     output_layout = _deprecation_check(output_layout, "input_layout")
     if dtype not in ["float", "double"]:
@@ -84,6 +84,9 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
 
     if stream_mode and options.get("opt_reduce", False):
         raise RuntimeError("Currently opt_reduce in stream mode is not supported.")
+    if allow_unaligned and (output_layout == "STREAM"):
+        raise RuntimeError("Currently allow_unaligned in stream mode is not supported.")
+
     input_name_to_idx: Dict[str, int] = dict()
     buffer_names: List[_Buffer] = []
     partitions: typing.OrderedDict[str, _Partition] = OrderedDict()
@@ -152,7 +155,7 @@ using namespace kun::ops;
         def query_temp_buf_id(tempname: str, window: int) -> int:
             input_windows[tempname] = window
             return insert_name_str(tempname, "TEMP").idx
-        src = codegen_cpp(func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows, dtype, blocking_len)
+        src = codegen_cpp(func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows, dtype, blocking_len, not allow_unaligned)
         impl_src.append(src)
         newparti = _Partition(func.name, len(partitions), pins, pouts)
         if len(func.ops) == 3 and isinstance(func.ops[1], CrossSectionalOp):
@@ -212,6 +215,7 @@ using namespace kun::ops;
     MemoryLayout::{input_layout},
     MemoryLayout::{output_layout},
     {blocking_len},
-    Datatype::{dty}
+    Datatype::{dty},
+    {"0" if allow_unaligned else "1"}
 }};''')
     return "\n\n".join(impl_src)

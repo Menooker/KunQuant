@@ -51,6 +51,14 @@ struct alignas(32) vec<float, 8> {
     static INLINE void store_aligned(vec v, float *p) {
         _mm256_store_ps(p, v.v);
     }
+    static INLINE vec masked_load(const float *p, Masktype mask) {
+        return _mm256_maskload_ps(p, _mm256_castps_si256(mask));
+    }
+    static INLINE void masked_store(vec v, float *p, Masktype mask) {
+        _mm256_maskstore_ps(p, _mm256_castps_si256(mask), v.v);
+    }
+
+    static Masktype make_mask(int N);
 
     operator __m256() const { return v; }
 };
@@ -149,11 +157,11 @@ INLINE vec_f32x8 sc_abs(vec_f32x8 const &a) {
     return _mm256_andnot_ps(_mm256_set1_ps(-0.0f), a.v);
 }
 
-inline vec_f32x8 sc_isnan(vec_f32x8 v1, vec_f32x8 v2) {
+INLINE vec_f32x8 sc_isnan(vec_f32x8 v1, vec_f32x8 v2) {
     return _mm256_cmp_ps(v1.v, v2.v, _CMP_UNORD_Q);
 }
 
-inline vec_f32x8 sc_isnan(vec_f32x8 v1) {
+INLINE vec_f32x8 sc_isnan(vec_f32x8 v1) {
     return _mm256_cmp_ps(v1.v, v1.v, _CMP_UNORD_Q);
 }
 

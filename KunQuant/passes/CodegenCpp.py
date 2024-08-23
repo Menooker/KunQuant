@@ -70,7 +70,7 @@ def _value_to_float(op: OpBase, dtype: str) -> str:
 
 vector_len = 8
 
-def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int], elem_type: str, simd_lanes: int) -> str:
+def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int], elem_type: str, simd_lanes: int, aligned: bool) -> str:
     if len(f.ops) == 3 and isinstance(f.ops[1], CrossSectionalOp):
         return f'''static auto stage_{f.name} = {f.ops[1].__class__.__name__}Stocks<Mapper{f.ops[0].attrs["layout"]}<{elem_type}, {simd_lanes}>, Mapper{f.ops[2].attrs["layout"]}<{elem_type}, {simd_lanes}>>;'''
     header = f'''static void stage_{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
@@ -92,7 +92,9 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             buffer_type[inp] = f"Input{layout}<{elem_type}, {simd_lanes}>"
             code = f"Input{layout}<{elem_type}, {simd_lanes}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr{ptrname}, __stock_idx, __ctx->stock_count, {total_str}, {start_str}}};"
         toplevel.scope.append(_CppSingleLine(toplevel, code))
-
+    if not aligned:
+        toplevel.scope.append(_CppSingleLine(toplevel, f'''auto todo_count = __ctx->stock_count - __stock_idx  * {simd_lanes};'''))
+        toplevel.scope.append(_CppSingleLine(toplevel, f'''auto mask = kun_simd::vec<{elem_type}, {simd_lanes}>::make_mask(todo_count > {simd_lanes} ? {simd_lanes} : todo_count);'''))
     for idx, (outp, is_tmp) in enumerate(outputs):
         name = outp.attrs["name"]
         layout = outp.attrs["layout"]
@@ -131,10 +133,18 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         scope = loop_to_cpp_loop[op.get_parent()]
         if isinstance(op, Input):
             name = op.attrs["name"]
-            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = buf_{name}.step(i);"))
+            if not aligned:
+                mask_str = ", mask"
+            else:
+                mask_str = ""
+            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = buf_{name}.step(i{mask_str});"))
         elif isinstance(op, Output):
             name = op.attrs["name"]
-            scope.scope.append(_CppSingleLine(scope, f"buf_{name}.store(i, v{inp[0]});"))
+            if not aligned:
+                mask_str = ", mask"
+            else:
+                mask_str = ""
+            scope.scope.append(_CppSingleLine(scope, f"buf_{name}.store(i, v{inp[0]}{mask_str});"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = v{inp[0]};"))
         elif isinstance(op, WindowedTempOutput):
             scope.scope.append(_CppSingleLine(scope, f"temp_{idx}.store(i, v{inp[0]});"))

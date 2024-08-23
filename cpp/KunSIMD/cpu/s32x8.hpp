@@ -120,6 +120,9 @@ INLINE vec_s32x8 sc_select(
 INLINE vec_s32x8 operator==(vec_s32x8 const &a, vec_s32x8 const &b) {
     return _mm256_cmpeq_epi32(a, b);
 }
+INLINE vec_s32x8 operator>(vec_s32x8 const &a, vec_s32x8 const &b) {
+    return _mm256_cmpgt_epi32(a.v, b.v);
+}
 #endif
 
 namespace {
