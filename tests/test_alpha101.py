@@ -234,10 +234,19 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
     # print(ref.alpha001())
     # blocked = TS_STs(inp)
     
-    start = time.time()
-    out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
-    end = time.time()
-    print(f"Exec takes: {end-start:.6f} seconds")
+    if not ischeck:
+        out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
+        start = time.time()
+        for _ in range(20):
+            out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers, skip_check = True)
+        end = time.time()
+        tdiff = (end-start)/20
+    else:
+        start = time.time()
+        out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
+        end = time.time()
+        tdiff = end-start
+    print(f"Exec takes: {tdiff:.6f} seconds")
     if not ischeck:
         return True
     # print(out)
@@ -323,11 +332,19 @@ def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, isc
             outbuffers[name] = sharedbuf[idx]
     # print(ref.alpha001())
     # blocked = TS_STs(inp)
-    
-    start = time.time()
-    out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
-    end = time.time()
-    print(f"Exec takes: {end-start:.6f} seconds")
+    if not ischeck:
+        out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
+        start = time.time()
+        for _ in range(20):
+            out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers, skip_check = True)
+        end = time.time()
+        tdiff = (end-start)/20
+    else:
+        start = time.time()
+        out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
+        end = time.time()
+        tdiff = end-start
+    print(f"Exec takes: {tdiff:.6f} seconds")
     if not ischeck:
         return True
     # print(out)
@@ -348,10 +365,10 @@ def main64():
     my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, 0, "float64")
     executor = kr.createSingleThreadExecutor()
     done = True
-    done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
-    done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
+    done = done & test64(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    done = done & test64(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
     executor = kr.createMultiThreadExecutor(4)
-    done = done & test(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    done = done & test64(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
     print("OK", done)
     if not done:
         exit(1)
