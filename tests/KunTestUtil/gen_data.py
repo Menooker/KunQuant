@@ -1,5 +1,24 @@
 import numpy as np
 
+def aligned_copy(v: np.ndarray) -> np.ndarray:
+    alloc_size = v.nbytes
+    pointer = v.__array_interface__['data'][0]
+    rem = pointer % 64
+    if rem == 0:
+        return v
+    newbase = np.empty((alloc_size + 64, 0), dtype=np.uint8)
+    pointer = newbase.__array_interface__['data'][0]
+    rem = pointer % 64
+    if rem == 0:
+        offset = 0
+    else:
+        offset = 64  -  rem
+    ret = newbase[offset:offset+alloc_size].view(v.dtype).reshape(v.shape)
+    ret[:] = v
+    return ret
+
+
+
 def gen_stock_data2(low, high, stocks, num_time, stddev, dtype):
     xopen = np.random.uniform(low, high, size = (stocks, 1)).astype(dtype)
     # xvol = np.random.uniform(5, 5.2, size = (stocks, 1)).astype(dtype)

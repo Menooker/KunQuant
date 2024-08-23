@@ -91,7 +91,7 @@ PYBIND11_MODULE(KunRunner, m) {
         "runGraph",
         [](std::shared_ptr<kun::Executor> exec, const kun::Module *mod,
            const py::dict inputs, size_t cur_time, size_t length,
-           const py::object outputs) {
+           const py::object outputs, bool skip_check) {
             std::unordered_map<std::string, float *> bufs;
             py::ssize_t known_S = 0;
             py::ssize_t known_T = 0;
@@ -100,6 +100,23 @@ PYBIND11_MODULE(KunRunner, m) {
                 auto name = py::cast<std::string>(kv.first);
                 auto buf_obj = py::cast<py::buffer>(kv.second);
                 auto info = buf_obj.request();
+                bufs[name] = (float *)info.ptr;
+                if (skip_check) {
+                    if (known_S == 0) {
+                        if (mod->input_layout == kun::MemoryLayout::STs) {
+                            auto S = info.shape[0];
+                            auto T = info.shape[1];
+                            known_S = S;
+                            known_T = T;
+                        } else if (mod->input_layout == kun::MemoryLayout::TS) {
+                            auto S = info.shape[1];
+                            auto T = info.shape[0];
+                            known_S = S / simd_len;
+                            known_T = T;
+                        }
+                    }
+                    continue;
+                }
                 if (mod->dtype == kun::Datatype::Float) {
                     if (info.format != py::format_descriptor<float>::format())
                         throw std::runtime_error("Expecting float buffer at " +
@@ -139,7 +156,6 @@ PYBIND11_MODULE(KunRunner, m) {
                 } else {
                     throw std::runtime_error("Unknown layout at " + name);
                 }
-                bufs[name] = (float *)info.ptr;
             }
             if ((py::ssize_t)length > known_T) {
                 throw std::runtime_error("Bad parameter: length");
@@ -157,20 +173,12 @@ PYBIND11_MODULE(KunRunner, m) {
                     py::array outbuffer;
                     if (!outputs.is_none() && outputs.contains(buf.name)) {
                         py::array v;
-                        if (mod->dtype == kun::Datatype::Float) {
-                            outbuffer =
-                                outputs[buf.name]
-                                    .cast<py::array_t<float,
-                                                      py::array::c_style>>();
-                        } else {
-                            outbuffer =
-                                outputs[buf.name]
-                                    .cast<py::array_t<double,
-                                                      py::array::c_style>>();
+                        outbuffer = outputs[buf.name].cast<py::buffer>();
+                        auto info = outbuffer.request(true);
+                        if (!skip_check) {
+                            expectContiguousShape(mod->dtype, info, buf.name,
+                                                  *expected_out_shape);
                         }
-                        auto info = outbuffer.request();
-                        expectContiguousShape(mod->dtype, info, buf.name,
-                                              *expected_out_shape);
                         bufs[buf.name] = (float *)info.ptr;
                     } else {
                         if (mod->dtype == kun::Datatype::Float) {
@@ -190,7 +198,8 @@ PYBIND11_MODULE(KunRunner, m) {
             return ret;
         },
         py::arg("exec"), py::arg("mod"), py::arg("inputs"), py::arg("cur_time"),
-        py::arg("length"), py::arg("outputs") = py::dict());
+        py::arg("length"), py::arg("outputs") = py::dict(),
+        py::arg("skip_check") = false);
 
     py::class_<kun::StreamContext>(m, "StreamContext")
         .def(py::init<std::shared_ptr<kun::Executor>, const kun::Module *,
