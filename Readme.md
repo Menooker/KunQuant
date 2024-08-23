@@ -15,9 +15,10 @@ A typical workload of designing and running financial factors with KunQuant will
 
 Experiments show that KunQuant-generated code can be more than 170x faster than naive implementation based on Pandas. We ran Alpha001~Alpha101 with [Pandas-based code](https://github.com/yli188/WorldQuant_alpha101_code/blob/master/101Alpha_code_1.py) and our optimized code. See results below:
 
-| Pandas-based  |  KunQuant 1-thread  |  KunQuant  4-threads |
-|---|---|---|
-| 6.138s |  0.115s  |  0.035s  |
+| Datatype | Pandas-based  |  KunQuant 1-thread  |  KunQuant  4-threads |
+|---|---|---|---|
+| Single precision (STs layout) | 6.138s |  0.083s  |  0.027s  |
+| Double precision (TS layout) | 6.332s |  0.120s  |  0.031s  |
 
 The data was collected on 4-core Intel i7-7700HQ CPU, running synthetic data of 64 stocks with 260 rows of data in single precision float point data type. Environment:
 
@@ -258,6 +259,8 @@ In your customized project, you need to specify `blocking_len` parameter of in `
 There are some other CPU instruction sets that is optional for KunQuant. You can turn on `AVX512DQ` and `AVX512VL` to accelerate some parts of KunQuant-generated code. To enable them, add `-DKUN_AVX512DQ=ON` and `-DKUN_AVX512VL=ON` in cmake options respectively.
 
 To see if your CPU supports AVX512 (and `AVX512DQ` and `AVX512VL`), you can run command `lscpu` in Linux and check the outputs.
+
+Enabling AVX512 will slightly improve the performance, if it is supported by the CPU. Experiments only shows ~1% performance gain for 16-threads of AVX512 on Icelake, testing on double-precision Alpha101, with 128 stocks and time length of 12000. A single thread running the same task shows 5% performance gain on AVX512.
 
 ## Operator definitions
 
