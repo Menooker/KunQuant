@@ -48,7 +48,7 @@ void KUN_TEMPLATE_EXPORT RankStocks(RuntimeStage *stage, size_t time_idx,
                 auto pos = std::equal_range(data.begin(), data.end(), in);
                 auto start = pos.first - data.begin();
                 auto end = pos.second - data.begin();
-                out = ((start + end - 1) / 2.0f + 1.0f) / data.size();
+                out = ((start + end - 1) / T{2.0} + T{1.0}) / data.size();
             } else {
                 out = NAN;
             }
