@@ -52,7 +52,7 @@ struct alignas(64) vec<float, 16> {
     static INLINE vec masked_load(const float *p, Masktype mask) {
         return _mm512_mask_loadu_ps(vec{0}, mask, p);
     }
-    static INLINE void masked_store(vec v, double *p, Masktype mask) {
+    static INLINE void masked_store(vec v, float *p, Masktype mask) {
         _mm512_mask_storeu_ps(p, mask, v.v);
     }
 
