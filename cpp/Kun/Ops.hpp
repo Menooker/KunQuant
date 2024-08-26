@@ -31,9 +31,6 @@ struct InputSTs : DataSource<true> {
              size_t start)
         : buf{base + stock_idx * total_time * stride + start * stride} {}
     simd_t step(size_t index) { return simd_t::load(&buf[index * stride]); }
-    simd_t step(size_t index, const typename simd_t::Masktype &mask) {
-        return simd_t::masked_load(&buf[index * stride], mask);
-    }
 
     simd_t getWindow(size_t index, size_t offset) {
         if (index < offset) {
@@ -103,11 +100,6 @@ struct OutputSTs : DataSource<true> {
     void store(size_t index, const simd_t &v) {
         simd_t::store(v, &buf[index * stride]);
     }
-    void store(size_t index, const simd_t &v,
-               const typename simd_t::Masktype &mask) {
-        simd_t::masked_store(v, &buf[index * stride], mask);
-    }
-
     simd_t getWindow(size_t index, size_t offset) {
         if (index < offset) {
             return NAN;

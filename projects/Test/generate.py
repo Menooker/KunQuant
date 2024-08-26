@@ -77,7 +77,7 @@ def check_rank2():
         v3 = Add(v2, v1)
         Output(v3, "out")
     f = Function(builder.ops)
-    src = compileit(f, "test_rank2")
+    src = compileit(f, "test_rank2", input_layout="TS", output_layout="TS")
     paths.append(sys.argv[1]+"/TestRank2.cpp")
     with open(paths[-1], 'w') as f:
         f.write(src)
@@ -126,6 +126,18 @@ def check_alpha101_double():
     with open(sys.argv[1]+"/Alpha101.cpp", 'w') as f:
         f.write(src)
 
+def check_aligned():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out2 = Output(Rank(inp1) *2, "ou2")
+    f = Function(builder.ops)
+    src = compileit(f, "test_aligned", input_layout="TS", output_layout="TS", allow_unaligned = False)
+    paths.append(sys.argv[1]+"/TestAligned.cpp")
+    with open(paths[-1], 'w') as f:
+        f.write(src)
+
+
 os.makedirs(sys.argv[1], exist_ok=True)
 check_1()
 check_TS()
@@ -137,6 +149,7 @@ check_pow()
 check_alpha101_double()
 check_ema()
 check_argmin()
+check_aligned()
 
 # with open(sys.argv[1]+"/generated.txt", 'w') as f:
 #     f.write(";".join(paths))

@@ -133,14 +133,14 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         scope = loop_to_cpp_loop[op.get_parent()]
         if isinstance(op, Input):
             name = op.attrs["name"]
-            if not aligned:
+            if not aligned and op.attrs["layout"] == "TS":
                 mask_str = ", mask"
             else:
                 mask_str = ""
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = buf_{name}.step(i{mask_str});"))
         elif isinstance(op, Output):
             name = op.attrs["name"]
-            if not aligned:
+            if not aligned and op.attrs["layout"] == "TS":
                 mask_str = ", mask"
             else:
                 mask_str = ""

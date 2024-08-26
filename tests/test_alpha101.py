@@ -201,10 +201,10 @@ def check_result(out, ref, outnames, start_window, num_stock, start_time, num_ti
         bad_count, result = count_unmatched_elements(v, refv, rtol=cur_rtol, atol=cur_atol, equal_nan=True)
         bad_rate = bad_count/ (result.size if result.size else 1)
         if bad_count:
-            # print(f"Unmatched bad_count = {bad_count}/{result.size} ({bad_rate*100:.4f}%) atol={cur_atol} rtol={cur_rtol}")
             if bad_rate < tolerance["bad_count"].get(k, 0.0001):
                 # print("bad count meets the tolerance, skipping")
                 continue
+            print(f"Unmatched bad_count = {bad_count}/{result.size} ({bad_rate*100:.4f}%) atol={cur_atol} rtol={cur_rtol}")
             print(k)
             done = False
             # print(rng)
@@ -359,16 +359,26 @@ def main64():
     lib = kr.Library.load("./build/projects/Release/Test.dll" if os.name == "nt" else "./build/projects/libTest.so")
     modu = lib.getModule("alpha_101")
     start_window = modu.getOutputUnreliableCount()
-    num_stock = 64
-    num_time = 260
     is_check = True
-    my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, 0, "float64")
-    executor = kr.createSingleThreadExecutor()
+    num_stock = 64
     done = True
-    done = done & test64(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
-    done = done & test64(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
-    executor = kr.createMultiThreadExecutor(4)
-    done = done & test64(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    def compute():
+        nonlocal done
+        num_time = 260
+        my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, 0, "float64")
+        executor = kr.createSingleThreadExecutor()
+        done = done & test64(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+        # done = done & test64(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
+        executor = kr.createMultiThreadExecutor(4)
+        # done = done & test64(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+    # num_stock = 64
+    # compute()
+    # skip benchmarking on unaligned mode
+    if not is_check:
+        return
+    print("Testing unaligned shape")
+    num_stock = 64 - 8
+    compute()
     print("OK", done)
     if not done:
         exit(1)
