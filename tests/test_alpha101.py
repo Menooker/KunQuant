@@ -185,7 +185,9 @@ tolerance = {
     # the tolerance count for non 2^N count of stocks
     "bad_count_unaligned": {
         "alpha013": 0.001,
-        "alpha029": 0.035,
+        # log(X) will lose the ordering of values. x1=2.9499999999999997 x2=2.9500000000000001
+        # and log(x1)==log(x2). alpha029 has rank(log(X))
+        "alpha029": 0.04,
         "alpha034": 0.001,
         "alpha062": 0.005,
         "alpha074": 0.089,
