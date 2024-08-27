@@ -1,10 +1,10 @@
+#include "f32x16.hpp"
 #include "f32x8.hpp"
 #include "f64x4.hpp"
+#include "f64x8.hpp"
+#include "s32x16.hpp"
 #include "s32x8.hpp"
 #include "s64x4.hpp"
-#include "s32x16.hpp"
-#include "f32x16.hpp"
-#include "f64x8.hpp"
 #include "s64x8.hpp"
 
 namespace kun_simd {
@@ -63,7 +63,6 @@ INLINE vec_s64x8 bitcast(vec_f64x8 v) {
     return _mm512_castpd_si512(v.v);
 }
 #endif
-
 
 template <typename T1, typename T2>
 inline T1 bitcast(T2 v) {
@@ -128,7 +127,6 @@ INLINE vec_s32x16 fast_cast(vec_f32x16 v) {
 
 /////// end of f32 <==> s32
 
-
 /////// start of f64x4 <==> s64x4
 #if !defined(__AVX512DQ__) || !defined(__AVX512VL__)
 
@@ -192,7 +190,6 @@ INLINE vec_f64x4 fast_cast(vec_s64x4 v) {
 
 /////// end of f64x4 <==> s64x4
 
-
 /////// end of f64x8 <==> s64x8 with AVX512DQ
 #if defined(__AVX512F__) && defined(__AVX512DQ__)
 template <>
@@ -250,4 +247,14 @@ INLINE vec_s64x8 cast(vec_f64x8 v) {
     return _mm512_add_epi64(_mm512_slli_epi64(v_hi.v, 32), v_lo);
 }
 #endif
+
+INLINE vec_f32x8::Masktype vec_f32x8::make_mask(int N) {
+    return bitcast<vec_f32x8::Masktype>(vec_s32x8{N} >
+                                        vec_s32x8{0, 1, 2, 3, 4, 5, 6, 7});
+}
+
+INLINE vec_f64x4::Masktype vec_f64x4::make_mask(int N) {
+    return bitcast<vec_f64x4::Masktype>(vec_s64x4{N} > vec_s64x4{0, 1, 2, 3});
+}
+
 } // namespace kun_simd

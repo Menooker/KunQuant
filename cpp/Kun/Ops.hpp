@@ -67,6 +67,9 @@ struct InputTS : DataSource<true> {
     }
 
     simd_t step(size_t index) { return simd_t::load(getPtr(index)); }
+    simd_t step(size_t index, const typename simd_t::Masktype &mask) {
+        return simd_t::masked_load(getPtr(index), mask);
+    }
 
     simd_t getWindow(size_t index, size_t offset) {
         if (index < offset) {
@@ -97,7 +100,6 @@ struct OutputSTs : DataSource<true> {
     void store(size_t index, const simd_t &v) {
         simd_t::store(v, &buf[index * stride]);
     }
-
     simd_t getWindow(size_t index, size_t offset) {
         if (index < offset) {
             return NAN;
@@ -132,6 +134,10 @@ struct OutputTS : DataSource<true> {
     }
     void store(size_t index, const simd_t &v) {
         simd_t::store(v, getPtr(index));
+    }
+    void store(size_t index, const simd_t &v,
+               const typename simd_t::Masktype &mask) {
+        simd_t::masked_store(v, getPtr(index), mask);
     }
 
     simd_t getWindow(size_t index, size_t offset) {
@@ -256,6 +262,27 @@ struct RequireWindow {
 using kun_simd::sc_isnan;
 using kun_simd::sc_select;
 
+template <typename T, int stride>
+INLINE kun_simd::vec<T, stride>
+kahanAdd(typename kun_simd::vec<T, stride>::Masktype isnan_small,
+         kun_simd::vec<T, stride> sum, kun_simd::vec<T, stride> small,
+         kun_simd::vec<T, stride> &compensation) {
+    auto y = small - compensation;
+    auto t = sum + y;
+    compensation = sc_select(isnan_small, compensation, t - sum - y);
+    return t;
+}
+
+template <typename T, int stride>
+INLINE kun_simd::vec<T, stride>
+kahanAdd(kun_simd::vec<T, stride> sum, kun_simd::vec<T, stride> small,
+         kun_simd::vec<T, stride> &compensation) {
+    auto y = small - compensation;
+    auto t = sum + y;
+    compensation = t - sum - y;
+    return t;
+}
+
 template <typename T, int stride, int window>
 struct FastWindowedSum {
     using simd_t = kun_simd::vec<T, stride>;
@@ -264,6 +291,8 @@ struct FastWindowedSum {
     using int_mask_t = typename simd_int_t::Masktype;
     using float_mask_t = typename simd_t::Masktype;
     simd_t v = 0;
+    simd_t compensationAdd = 0;
+    simd_t compensationSub = 0;
     simd_int_t num_nans = window;
     template <typename TInput>
     simd_t step(TInput &input, simd_t cur, size_t index) {
@@ -272,9 +301,11 @@ struct FastWindowedSum {
         auto old_is_nan = sc_isnan(old);
         auto new_is_nan = sc_isnan(cur);
         // v = old_is_nan? v : (v-old)
-        v = sc_select(old_is_nan, v, v - old);
+        v = sc_select(old_is_nan, v,
+                      kahanAdd(old_is_nan, v, 0 - old, compensationSub));
         // v = new_is_nan? v : (v+cur)
-        v = sc_select(new_is_nan, v, v + cur);
+        v = sc_select(new_is_nan, v,
+                      kahanAdd(new_is_nan, v, cur, compensationAdd));
         num_nans =
             num_nans - sc_select(kun_simd::bitcast<int_mask_t>(old_is_nan),
                                  simd_int_t{1}, simd_int_t{0});
@@ -384,7 +415,10 @@ template <typename T, int stride>
 struct ReduceAdd {
     using simd_t = kun_simd::vec<T, stride>;
     simd_t v = 0;
-    void step(simd_t input, size_t index) { v = v + input; }
+    simd_t compensation = 0;
+    void step(simd_t input, size_t index) {
+        v = kahanAdd(v, input, compensation);
+    }
     operator simd_t() { return v; }
 };
 

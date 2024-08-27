@@ -20,7 +20,7 @@ static void expectContiguousShape(kun::Datatype dtype,
         throw std::runtime_error(std::string("Expecting double buffer at ") +
                                  name);
     }
-    // ST8t layout
+    // ST8s layout
     if (info.ndim != shape.size() || info.shape != shape) {
         throw std::runtime_error(std::string("Bad shape at ") + name);
     }
@@ -91,10 +91,11 @@ PYBIND11_MODULE(KunRunner, m) {
         "runGraph",
         [](std::shared_ptr<kun::Executor> exec, const kun::Module *mod,
            const py::dict inputs, size_t cur_time, size_t length,
-           const py::object outputs, bool skip_check) {
+           const py::object outputs, bool skip_check, py::ssize_t num_stocks) {
             std::unordered_map<std::string, float *> bufs;
             py::ssize_t known_S = 0;
             py::ssize_t known_T = 0;
+            py::ssize_t knownNumStocks = 0;
             py::ssize_t simd_len = mod->blocking_len;
             for (auto kv : inputs) {
                 auto name = py::cast<std::string>(kv.first);
@@ -136,6 +137,7 @@ PYBIND11_MODULE(KunRunner, m) {
                     if (known_S == 0) {
                         known_S = S;
                         known_T = T;
+                        knownNumStocks = known_S * simd_len;
                     }
                     expectContiguousShape(
                         mod->dtype, info, name.c_str(),
@@ -150,22 +152,46 @@ PYBIND11_MODULE(KunRunner, m) {
                     if (known_S == 0) {
                         known_S = S / simd_len;
                         known_T = T;
+                        knownNumStocks = S;
+                        if (mod->aligned) {
+                            if (knownNumStocks % simd_len != 0) {
+                                throw std::runtime_error("Bad shape at " +
+                                                         name);
+                            }
+                        }
                     }
                     expectContiguousShape(mod->dtype, info, name.c_str(),
-                                          {known_T, known_S * simd_len});
+                                          {known_T, knownNumStocks});
                 } else {
                     throw std::runtime_error("Unknown layout at " + name);
                 }
             }
-            if ((py::ssize_t)length > known_T) {
-                throw std::runtime_error("Bad parameter: length");
+            if (num_stocks < 0) {
+                num_stocks = knownNumStocks;
+            }
+            if (!skip_check) {
+                if ((py::ssize_t)length > known_T) {
+                    throw std::runtime_error("Bad parameter: length");
+                }
+                if (mod->input_layout == kun::MemoryLayout::STs) {
+                    if (num_stocks > knownNumStocks ||
+                        knownNumStocks <= knownNumStocks - simd_len) {
+                        throw std::runtime_error(
+                            "num_stocks does not match the shape of inputs");
+                    }
+                } else {
+                    if (num_stocks != knownNumStocks) {
+                        throw std::runtime_error(
+                            "num_stocks does not match the shape of inputs");
+                    }
+                }
             }
             py::dict ret{};
             py::array::ShapeContainer expected_out_shape;
             if (mod->output_layout == kun::MemoryLayout::STs) {
                 expected_out_shape = {known_S, (py::ssize_t)length, simd_len};
             } else {
-                expected_out_shape = {(py::ssize_t)length, known_S * simd_len};
+                expected_out_shape = {(py::ssize_t)length, num_stocks};
             }
             for (size_t i = 0; i < mod->num_buffers; i++) {
                 auto &buf = mod->buffers[i];
@@ -193,13 +219,13 @@ PYBIND11_MODULE(KunRunner, m) {
                     ret[buf.name] = outbuffer;
                 }
             }
-            kun::runGraph(exec, mod, bufs, known_S * simd_len, known_T,
-                          cur_time, length);
+            kun::runGraph(exec, mod, bufs, num_stocks, known_T, cur_time,
+                          length);
             return ret;
         },
         py::arg("exec"), py::arg("mod"), py::arg("inputs"), py::arg("cur_time"),
         py::arg("length"), py::arg("outputs") = py::dict(),
-        py::arg("skip_check") = false);
+        py::arg("skip_check") = false, py::arg("num_stocks") = -1);
 
     py::class_<kun::StreamContext>(m, "StreamContext")
         .def(py::init<std::shared_ptr<kun::Executor>, const kun::Module *,

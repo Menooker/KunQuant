@@ -71,7 +71,7 @@ void checkedDealloc(void *ptr, size_t sz) {
 #endif
 
 namespace kun {
-static const uint64_t VERSION = 0x64100002;
+static const uint64_t VERSION = 0x64100003;
 
 void Buffer::alloc(size_t count, size_t use_count, size_t elem_size) {
     if (!ptr) {
@@ -195,7 +195,7 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
     Context ctx{std::move(rtlbuffers),
                 {},
                 exec,
-                num_stocks * length,
+                divideAndCeil(num_stocks, m->blocking_len) * m->blocking_len * length,
                 num_stocks,
                 total_time,
                 cur_time,

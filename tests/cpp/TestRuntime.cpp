@@ -88,7 +88,7 @@ Stage *stage2_dep[] = {&stages[2]};
 } // namespace
 
 KUN_EXPORT Module testRuntimeModule{
-    0x64100002,
+    0x64100003,
     arraySize(stages),
     stages,
     arraySize(buffers),

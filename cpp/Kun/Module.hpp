@@ -22,6 +22,7 @@ struct Module {
     MemoryLayout output_layout;
     size_t blocking_len;
     Datatype dtype;
+    size_t aligned;
 };
 
 struct Library {

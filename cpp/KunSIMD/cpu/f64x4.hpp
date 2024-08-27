@@ -50,7 +50,14 @@ struct alignas(32) vec<double, 4> {
     static INLINE void store_aligned(vec v, double *p) {
         _mm256_store_pd(p, v.v);
     }
+    static INLINE vec masked_load(const double *p, Masktype mask) {
+        return _mm256_maskload_pd(p, _mm256_castpd_si256(mask));
+    }
+    static INLINE void masked_store(vec v, double *p, Masktype mask) {
+        _mm256_maskstore_pd(p, _mm256_castpd_si256(mask), v.v);
+    }
 
+    static Masktype make_mask(int N);
     operator __m256d() const { return v; }
 };
 

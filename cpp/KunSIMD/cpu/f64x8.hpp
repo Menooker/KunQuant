@@ -33,7 +33,16 @@ struct alignas(64) vec<double, 8> {
     static INLINE void store_aligned(vec v, double *p) {
         _mm512_store_pd(p, v.v);
     }
+    static INLINE vec masked_load(const double *p, Masktype mask) {
+        return _mm512_mask_loadu_pd(vec{0}, mask, p);
+    }
+    static INLINE void masked_store(vec v, double *p, Masktype mask) {
+        _mm512_mask_storeu_pd(p, mask, v.v);
+    }
 
+    static INLINE Masktype make_mask(int N) {
+        return (Masktype(1) << Masktype(N)) - Masktype(1);
+    }
     operator __m512d() const { return v; }
 };
 
