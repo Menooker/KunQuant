@@ -52,7 +52,7 @@ g++=11.4.0
 * x86-64 CPU with at least AVX2-FMA instruction set
 * Optionally requires AVX512 on CPU for better performance
 
-**Important node**: Currently KunQuant only supports a multiple of `{blocking_len}` as the number of stocks as inputs. For single-precision float type and AVX2 instruction set, `blocking_len=8`. That is, you can only input 8, 16, 24, ..., etc. stocks in a batch, if your code is compiled with AVX2 (without AVX512) and `float` datatype.
+**Important node**: For better performance compared with Pandas, KunQuant suggests to use a multiple of `{blocking_len}` as the number of stocks in inputs. For single-precision float type and AVX2 instruction set, `blocking_len=8`. That is, you are suggested to input 8, 16, 24, ..., etc. stocks in a batch, if your code is compiled with AVX2 (without AVX512) and `float` datatype. Other numbers of stocks **are supported**, with lower execution performance.
 
 ## Compiling and running Alpha101
 

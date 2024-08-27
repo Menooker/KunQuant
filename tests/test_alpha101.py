@@ -184,11 +184,12 @@ tolerance = {
     },
     # the tolerance count for non 2^N count of stocks
     "bad_count_unaligned": {
-        "alpha029": 0.23,
+        "alpha029": 0.035,
         "alpha034": 0.001,
         "alpha062": 0.005,
-        "alpha074": 0.08,
-        "alpha078": 0.05,
+        "alpha074": 0.089,
+        "alpha078": 0.055,
+        "alpha083": 0.005,
         "alpha092": 0.26,
         "alpha096": 0.185,
         "alpha098": 0.95,

@@ -236,5 +236,5 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
         elif isinstance(op, Select):
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
         else:
-            raise RuntimeError("Cannot generate " + str(op))
+            raise RuntimeError(f"Cannot generate {op} of function {f}")
     return header + str(toplevel)

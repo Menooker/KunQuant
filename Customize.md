@@ -148,3 +148,12 @@ Note that `MyLib` corresponds to the directory name in `projects/`, and `"my_lib
 You can check the script in `projects/` for more examples using KunQuant to convert expressions to C++ source code file.
 
 More reading on operators provided by KunQuant: See [Operators.md](./Operators.md)
+
+## Performance tuning
+
+There are some configurable options of function `compileit(...)` above that may improve the performance (and maybe at the cost of accuracy).
+
+ * Input and output memory layout: `compileit(input_layout=?, output_layout=?)`. This affects how data are arranged in memory. Usually `STs` layout is faster than `TS` but may require some additional memory movement when you call the factor library.
+ * Partition factor: `compileit(partition_factor=some_int)`. A larger Partition factor will put more computations in a single generated function in C++. Enlarging Partition factor may reduce the overhead of thread-scheduling and eliminate some of the temp buffers. However, if the factor is too high, the generated C++ code will suffer from register-spilling.
+ * Blocking len: `compileit(blocking_len=some_int)`. It selects AVX2 or AVX512 instruction sets. Using AVX512 might have some slight performance gain over AVX2.
+ * Unaligned stock number: `compileit(allow_unaligned=some_bool)`. By default `True`. When `allow_unaligned` is set to false, the generated C++ code will assume the number of stocks to be aligned with the SIMD length (e.g., 8 float32 on AVX2). This will slightly improve the performance.

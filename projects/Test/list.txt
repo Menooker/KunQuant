@@ -9,3 +9,4 @@ Alpha101.cpp
 TestEMA.cpp
 TestArgMin.cpp
 TestAligned.cpp
+TestRank029.cpp

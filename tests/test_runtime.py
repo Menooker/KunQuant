@@ -91,20 +91,49 @@ def test_rank2():
     modu = lib.getModule("test_rank2")
     assert(modu)
     def compute(stocks):
-        inp = np.random.rand(stocks, 20).astype("float32")
+        inp = np.random.rand(stocks, 200).astype("float64")
         df = pd.DataFrame(inp.transpose())
         # print(df)
         df = df + df
         expected = (df.rank(pct=True, axis = 1) + df).to_numpy().transpose()
         blocked = np.ascontiguousarray(inp.transpose())
         executor = kr.createSingleThreadExecutor()
-        out = kr.runGraph(executor, modu, {"a": blocked}, 0, 20)
+        out = kr.runGraph(executor, modu, {"a": blocked}, 0, 200)
         output = out["out"].transpose()
         # print(expected[:,0])
         # print(output[:,0])
-        np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)
+        np.testing.assert_allclose(output, expected, rtol=0, atol=0, equal_nan=True)
     compute(24)
     # test unaligned
+    compute(20)
+
+def test_rank029():
+    modu = lib.getModule("test_rank_alpha029")
+    assert(modu)
+    def rank(df):
+        """
+        Cross sectional rank
+        :param df: a pandas DataFrame.
+        :return: a pandas DataFrame with rank along columns.
+        """
+        #return df.rank(axis=1, pct=True)
+        return df.rank(axis=1, pct=True)
+    def compute(stocks):
+        inp = np.random.rand(stocks, 300).astype("float64")
+        df = pd.DataFrame(inp.transpose())
+        inner = rank(rank(-1 * rank(df))).rolling(5).sum()
+        expected = rank(inner)
+        inner = inner.to_numpy().transpose()
+        expected = expected.to_numpy().transpose()
+        blocked = np.ascontiguousarray(inp.transpose())
+        executor = kr.createSingleThreadExecutor()
+        out = kr.runGraph(executor, modu, {"a": blocked}, 0, 300)
+        output1 = out["ou1"].transpose()
+        output2 = out["ou2"].transpose()
+        np.set_printoptions(precision=60)
+        # check that they are exactly the same
+        np.testing.assert_allclose(output1, inner, rtol=0, atol=0, equal_nan=True)
+        np.testing.assert_allclose(output2, expected, rtol=0, atol=0, equal_nan=True)
     compute(20)
 
 def test_log(dtype, name):
@@ -214,4 +243,5 @@ test_pow()
 test_ema()
 test_argmin_issue19()
 test_aligned()
+test_rank029()
 print("done")
