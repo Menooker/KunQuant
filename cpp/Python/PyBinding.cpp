@@ -42,6 +42,7 @@ static void expectContiguousShape(kun::Datatype dtype,
 }
 
 PYBIND11_MODULE(KunRunner, m) {
+    m.attr("__name__") = "KunQuant.runner.KunRunner";
     m.doc() = R"(Code Runner for KunQuant generated code)";
 
     py::class_<kun::Executor, std::shared_ptr<kun::Executor>>(m, "Executor");

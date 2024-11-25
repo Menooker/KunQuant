@@ -2,7 +2,7 @@ import os
 import subprocess
 import tempfile
 from typing import List, Tuple
-import KunRunner
+import KunQuant.runner.KunRunner as KunRunner
 from KunQuant.Driver import compileit as driver_compileit
 from KunQuant.Stage import Function
 from KunQuant.passes import Util

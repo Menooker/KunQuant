@@ -6,11 +6,12 @@ import os
 from KunQuant.jit import cfake
 from KunQuant.Op import Input, Output, Builder
 from KunQuant.Stage import Function
+import KunQuant.runner
 
-base_dir = "./build/Release/projects" if os.name == "nt" else "./build/projects"
+base_dir = KunQuant.runner.example_projects_path
 base_dir2 = "./build/Release/" if os.name == "nt" else "./build/"
-sys.path.append(base_dir2)
-import KunRunner as kr
+# sys.path.append(base_dir2)
+from  KunQuant.runner import KunRunner as kr
 
 
 def test_cfake():
@@ -31,6 +32,7 @@ def test_cfake():
 # inp = np.ndarray((3, 100, 8), dtype="float32")
 
 lib = kr.Library.load(base_dir+"/Test.dll" if os.name == "nt" else base_dir+"/libTest.so")
+print(base_dir)
 print(lib)
 
 

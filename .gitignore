@@ -3,3 +3,5 @@
 build/*
 tests/cpp/generated/*
 projects/*
+KunQuant.egg-info/*
+*.so
