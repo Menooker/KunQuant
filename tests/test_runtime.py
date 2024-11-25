@@ -3,12 +3,30 @@ import pandas as pd
 import sys
 import warnings
 import os
+from KunQuant.jit import cfake
+from KunQuant.Op import Input, Output, Builder
+from KunQuant.Stage import Function
 
 base_dir = "./build/Release/projects" if os.name == "nt" else "./build/projects"
 base_dir2 = "./build/Release/" if os.name == "nt" else "./build/"
 sys.path.append(base_dir2)
 import KunRunner as kr
 
+
+def test_cfake():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inp2 = Input("b")
+        Output(inp1 * inp2 + 10, "out")
+    f = Function(builder.ops)
+    lib, mod = cfake.compileit(f, "test1", input_layout="TS", output_layout="TS")
+
+    inp = np.random.rand(10, 24).astype("float32")
+    inp2 = np.random.rand(10, 24).astype("float32")
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, mod, {"a": inp, "b": inp2}, 0, 10)
+    np.testing.assert_allclose(inp * inp2 + 10, out["out"])
 
 # inp = np.ndarray((3, 100, 8), dtype="float32")
 
@@ -244,4 +262,5 @@ test_ema()
 test_argmin_issue19()
 test_aligned()
 test_rank029()
+test_cfake()
 print("done")
