@@ -204,11 +204,17 @@ def test_ema():
     modu = lib.getModule("test_ema")
     assert(modu)
     inp = np.random.rand(20, 24).astype("float32")
+    inp[5,:] = np.nan
+    def ExpMovingAvg(v: pd.DataFrame):
+        return v.ewm(span=5, adjust=False, ignore_na=True).mean()
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
     output = out["ou2"]
-    expected = pd.DataFrame(inp).ewm(span=5, adjust=False).mean()
-    np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)
+    df = pd.DataFrame(inp)
+    expected = ExpMovingAvg(df)
+    expected2 = ExpMovingAvg(ExpMovingAvg(ExpMovingAvg(df.shift(1))))
+    np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)    
+    np.testing.assert_allclose(out["gh_issue_26"], expected2, rtol=1e-6, equal_nan=True)
 
 def test_argmin_issue19():
     #https://github.com/Menooker/KunQuant/issues/19
