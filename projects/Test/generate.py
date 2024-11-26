@@ -38,6 +38,7 @@ def check_ema():
     with builder:
         inp1 = Input("a")
         out2 = Output(ExpMovingAvg(inp1, 5), "ou2")
+        Output(ExpMovingAvg(ExpMovingAvg(ExpMovingAvg(BackRef(inp1, 1), 5), 5), 5), "gh_issue_26")
     f = Function(builder.ops)
     src = compileit(f, "test_ema", input_layout="TS", output_layout="TS")
     paths.append(sys.argv[1]+"/TestEMA.cpp")

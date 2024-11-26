@@ -369,7 +369,7 @@ class WindowedQuantile(OpBase, WindowedTrait):
 class ExpMovingAvg(OpBase, GloablStatefulOpTrait):
     '''
     Exponential Moving Average (EMA)
-    Similar to pd.DataFrame.ewm(span=window, adjust=False).mean()
+    Similar to pd.DataFrame.ewm(span=window, adjust=False, ignore_na=True).mean()
     '''
     def __init__(self, v: OpBase, window: int) -> None:
         pass
