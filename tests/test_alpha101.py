@@ -6,7 +6,7 @@ import time
 import os
 
 sys.path.append("./build/Release" if os.name == "nt" else "./build")
-import KunRunner as kr
+from KunQuant.runner import KunRunner as kr
 
 def count_unmatched_elements(arr1: np.ndarray, arr2: np.ndarray, atol=1e-8, rtol=1e-5, equal_nan=False):
     # Check if arrays have the same shape

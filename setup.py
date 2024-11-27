@@ -11,7 +11,6 @@ class CMakeBuildExtension(build_ext):
         ext_dir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
         build_temp = os.path.abspath(self.build_temp)
         os.makedirs(build_temp, exist_ok=True)
-        print("EXT", ext_dir)
         # Run CMake
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={ext_dir}",
