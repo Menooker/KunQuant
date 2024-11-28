@@ -1,11 +1,11 @@
 import os
-from platform import machine
 import subprocess
 import tempfile
 from typing import List, Tuple, Union
 from collections.abc import Callable
 import KunQuant.runner.KunRunner as KunRunner
 from KunQuant.Driver import compileit as driver_compileit
+from KunQuant.Driver import KunCompilerConfig
 from KunQuant.Stage import Function
 from KunQuant.passes import Util
 import timeit
@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 _cpp_root = os.path.join(os.path.dirname(__file__), "..", "..", "cpp")
 _include_path = [_cpp_root]
+_runtime_path = os.path.dirname(KunRunner.getRuntimePath())
 
 
 FunctionList = List[Tuple[str, str]]
@@ -64,21 +65,14 @@ class CppCompilerConfig:
                 ret.append("-mavx512vl")
             return ret
 
-@dataclass
-class KunCompilerConfig:
-    partition_factor:int = 3
-    dtype:str = "float"
-    blocking_len: int = None
-    input_layout:str = "STs"
-    output_layout:str = "STs"
-    allow_unaligned: Union[bool, None] = None
-    options = dict()
 
 def call_cpp_compiler(path: List[str], module_name: str, compiler: str, options: List[str], tempdir: str, outext: str) -> str:
     outpath = os.path.join(tempdir, f"{module_name}.{outext}")
     if Util.jit_debug_mode:
         print("[KUN_JIT] temp jit files:", path, outpath)
     cmd = [compiler] + options + path + ["-o", outpath]
+    if Util.jit_debug_mode:
+        print("[KUN_JIT] cmd:", cmd)
     subprocess.check_call(cmd, shell=False)
     return outpath
 
@@ -98,7 +92,7 @@ class _fake_temp:
     def __exit__(self, exception_type, exception_value, exception_traceback):
         pass
 
-def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compiler_config: CppCompilerConfig, tempdir: str = None, keep_files: bool = False) -> List[KunRunner.Library]:
+def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compiler_config: CppCompilerConfig, tempdir: str = None, keep_files: bool = False) -> KunRunner.Library:
     lib = None
     src: List[Tuple[str, str]] = []
     if keep_files and not tempdir:
@@ -115,7 +109,7 @@ def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compi
                 return call_cpp_compiler_src(src, name, compiler_config.compiler, ["-std=c++11", f"-O{compiler_config.opt_level}", "-c", "-fPIC", "-fvisibility=hidden", "-fvisibility-inlines-hidden"] + compiler_config.build_machine_flags() + [f"-I{v}" for v in _include_path], tmpdirname, compiler_config.obj_ext)
   
             libs = compiler_config.for_each(src, foreach_func)
-            finallib = call_cpp_compiler(libs, libname, compiler_config.compiler, ["-shared"], tmpdirname, compiler_config.dll_ext)
+            finallib = call_cpp_compiler(libs + ["-l", "KunRuntime"], libname, compiler_config.compiler, ["-shared", "-L", _runtime_path], tmpdirname, compiler_config.dll_ext)
             lib = KunRunner.Library.load(finallib)
         
     if Util.jit_debug_mode:

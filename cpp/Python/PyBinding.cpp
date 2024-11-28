@@ -1,6 +1,8 @@
 #include <Kun/Context.hpp>
 #include <Kun/Module.hpp>
 #include <Kun/RunGraph.hpp>
+#include <KunSIMD/cpu/Table.hpp>
+#include <dlfcn.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -48,7 +50,17 @@ PYBIND11_MODULE(KunRunner, m) {
     py::class_<kun::Executor, std::shared_ptr<kun::Executor>>(m, "Executor");
     m.def("createSingleThreadExecutor", &kun::createSingleThreadExecutor);
     m.def("createMultiThreadExecutor", &kun::createMultiThreadExecutor);
-
+    m.def("getRuntimePath", []() -> std::string {
+#ifdef _WIN32
+        // fix-me: add impl
+        throw std::runtime_error("get_dyn_lib_path");
+#else
+    // On Windows, use GetMappedFileNameW
+    Dl_info info;
+    if (dladdr(&kun_simd::LogLookupTable<float>::logr_table, &info)) { return info.dli_fname; }
+#endif
+        return std::string();
+    });
     py::class_<kun::Module>(m, "Module")
         .def_property_readonly("output_layout",
                                [](kun::Module &mod) {
