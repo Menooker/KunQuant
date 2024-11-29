@@ -59,6 +59,4 @@ endif()
 
 message(STATUS "PYTHON_EXECUTABLE = ${PYTHON_EXECUTABLE}")
 
-add_subdirectory(projects)
-
 add_custom_target(TestingTargets DEPENDS Alpha101 Alpha158 Alpha101Stream KunCApiTest KunTest KunRunner Test)

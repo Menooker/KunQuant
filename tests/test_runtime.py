@@ -327,22 +327,6 @@ def test_pow(lib):
 
 ####################################
 
-def check_alpha101_double():
-    builder = Builder()
-    with builder:
-        all_data = AllData(low=Input("low"),high=Input("high"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
-        for f in all_alpha:
-            # if f.__name__ != "alpha043" and f.__name__ != "alpha039":
-            #     continue
-            out = f(all_data)
-            Output(out, f.__name__)
-    simd_len = 8 if sys.argv[2] == "avx512" else 4
-    f = Function(builder.ops)
-    src = compileit(f, "alpha_101", blocking_len=simd_len, input_layout="TS", output_layout="TS", dtype="double", options={"opt_reduce": True, "fast_log": True})
-    os.makedirs(sys.argv[1], exist_ok=True)
-    with open(sys.argv[1]+"/Alpha101.cpp", 'w') as f:
-        f.write(src)
-
 def check_aligned():
     builder = Builder()
     with builder:
@@ -392,7 +376,7 @@ lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
 
 test_cfake()
 test_avg_stddev_TS(lib)
-test_runtime(sys.argv[1])
+test_runtime(os.path.join(cfake.get_runtime_path(), "libKunTest.so"))
 test_avg_stddev(lib)
 test_rank(lib)
 test_rank2(lib)

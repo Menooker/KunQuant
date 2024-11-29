@@ -17,8 +17,11 @@ class CMakeBuildExtension(build_ext):
             f"-DPYTHON_EXECUTABLE={os.sys.executable}",
             "-DCMAKE_BUILD_TYPE=Release",
         ]
+        build_args = ["cmake", "--build", "."]
+        if os.environ["KUN_BUILD_TESTS"] != "":
+            build_args += ["--target", "TestingTargets"]
         subprocess.check_call(["cmake", os.path.join(ext.sourcedir, "..")] + cmake_args, cwd=build_temp)
-        subprocess.check_call(["cmake", "--build", ".", "--", "-j"], cwd=build_temp)
+        subprocess.check_call(build_args + ["--", "-j"], cwd=build_temp)
 
 class CMakeExtension(Extension):
     def __init__(self, name, path, sourcedir=""):

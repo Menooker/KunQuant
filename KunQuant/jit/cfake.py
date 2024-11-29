@@ -21,6 +21,9 @@ _runtime_path = os.path.dirname(KunRunner.getRuntimePath())
 FunctionList = List[Tuple[str, str]]
 CallableOnFunction = Callable[[Tuple[str, str]], List[str]]
 
+def get_runtime_path() -> str:
+    return _runtime_path
+
 def single_thread_compile(lst: FunctionList, func: CallableOnFunction) -> List[str]:
     return [func(f) for f in lst]
 
