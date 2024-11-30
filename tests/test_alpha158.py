@@ -43,7 +43,7 @@ def check_alpha158(avx512, keep, tempdir):
         machine = cfake.X64CPUFlags(avx512=True, avx512dq=True, avx512vl=True)
     else:
         machine = cfake.NativeCPUFlags()
-    return cfake.compileit(target, "testalpha158", cfake.CppCompilerConfig(machine=machine), tempdir=tempdir, keep_files=keep)
+    return cfake.compileit(target, "testalpha158", cfake.CppCompilerConfig(machine=machine), tempdir=tempdir, keep_files=keep, load=not avx512)
 
 
 num_stock = 8

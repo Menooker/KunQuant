@@ -18,7 +18,7 @@ class CMakeBuildExtension(build_ext):
             "-DCMAKE_BUILD_TYPE=Release",
         ]
         build_args = ["cmake", "--build", "."]
-        if os.environ["KUN_BUILD_TESTS"] != "":
+        if "KUN_BUILD_TESTS" in  os.environ and os.environ["KUN_BUILD_TESTS"] != "":
             build_args += ["--target", "TestingTargets"]
         subprocess.check_call(["cmake", os.path.join(ext.sourcedir, "..")] + cmake_args, cwd=build_temp)
         subprocess.check_call(build_args + ["--", "-j"], cwd=build_temp)
@@ -28,7 +28,6 @@ class CMakeExtension(Extension):
         super().__init__(name, sources=[])
         self.sourcedir = os.path.abspath(sourcedir)
         self.path = path
-
 
 setup(
     name="KunQuant",

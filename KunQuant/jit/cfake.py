@@ -96,7 +96,7 @@ class _fake_temp:
     def __exit__(self, exception_type, exception_value, exception_traceback):
         pass
 
-def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compiler_config: CppCompilerConfig, tempdir: str = None, keep_files: bool = False) -> KunRunner.Library:
+def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compiler_config: CppCompilerConfig, tempdir: str = None, keep_files: bool = False, load: bool = True) -> Union[KunRunner.Library, str]:
     lib = None
     src: List[Tuple[str, str]] = []
     if keep_files and not tempdir:
@@ -114,7 +114,10 @@ def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compi
   
             libs = compiler_config.for_each(src, foreach_func)
             finallib = call_cpp_compiler(libs + ["-l", "KunRuntime"], libname, compiler_config.compiler, ["-shared", "-L", _runtime_path], tmpdirname, compiler_config.dll_ext)
-            lib = KunRunner.Library.load(finallib)
+            if load:
+                lib = KunRunner.Library.load(finallib)
+            else:
+                lib = finallib
         
     if Util.jit_debug_mode:
         print("[KUN_JIT] Source generation takes ", timeit.timeit(kuncompile, number=1), "s")
