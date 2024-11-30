@@ -29,23 +29,6 @@ def test_cfake():
     out = kr.runGraph(executor, mod, {"a": inp, "b": inp2}, 0, 10)
     np.testing.assert_allclose(inp * inp2 + 10, out["out"])
 
-def test_cfake():
-    builder = Builder()
-    with builder:
-        inp1 = Input("a")
-        inp2 = Input("b")
-        Output(inp1 * inp2 + 10, "out")
-    f = Function(builder.ops)
-    lib, mod = cfake.compileit(f, "test1", input_layout="TS", output_layout="TS")
-
-    inp = np.random.rand(10, 24).astype("float32")
-    inp2 = np.random.rand(10, 24).astype("float32")
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, mod, {"a": inp, "b": inp2}, 0, 10)
-    np.testing.assert_allclose(inp * inp2 + 10, out["out"])
-
-# inp = np.ndarray((3, 100, 8), dtype="float32")
-
 def test_runtime(libpath):
     lib2 = kr.Library.load(libpath)
     inp = np.random.rand(3, 10, 8).astype("float32")
