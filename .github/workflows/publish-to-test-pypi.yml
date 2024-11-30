@@ -30,7 +30,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         python -m pip install auditwheel
-        auditwheel repair dist/*.whl -w dist/
+        auditwheel repair dist/*.whl -w dist/ --plat manylinux_2_38_x86_64
     - name: Store the distribution packages
       uses: actions/upload-artifact@v4
       with:
