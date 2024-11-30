@@ -48,13 +48,6 @@ def check_alpha101_stream(avx):
     f = Function(builder.ops)
     return "alpha_101_stream", f, KunCompilerConfig(blocking_len=simd_len, partition_factor=8, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
  
-avx_flag = sys.argv[1]
-funclist = [check_alpha101(avx_flag),
-    check_alpha101_double(avx_flag),
-    check_alpha101_stream(avx_flag)]
-lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
-
-
 def count_unmatched_elements(arr1: np.ndarray, arr2: np.ndarray, atol=1e-8, rtol=1e-5, equal_nan=False):
     # Check if arrays have the same shape
     if arr1.shape != arr2.shape:
@@ -432,6 +425,24 @@ def main(is64: bool, is_check: bool):
     print("OK", done)
     if not done:
         exit(1)
+
+action = sys.argv[1]
+def do_compile(avx, keep, tempdir):
+    funclist = [check_alpha101(avx),
+        check_alpha101_double(avx),
+        check_alpha101_stream(avx)]
+    if avx == "avx512":
+        machine = cfake.X64CPUFlags(avx512=True, avx512dq=True, avx512vl=True)
+    else:
+        machine = cfake.NativeCPUFlags()
+    return cfake.compileit(funclist, "test", cfake.CppCompilerConfig(machine=machine), tempdir=tempdir, keep_files=keep)
+if action == "compile_avx512":
+    do_compile("avx512", True, "./build")
+    exit(0)
+elif action == "run_avx512":
+    lib = kr.Library.load(os.path.join("./build/test", "test.so"))
+else:
+    lib = do_compile("avx", False, None)
 
 print("Check f64 batch")
 main(True, True)

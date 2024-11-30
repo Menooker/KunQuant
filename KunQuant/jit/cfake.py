@@ -59,7 +59,7 @@ class CppCompilerConfig:
         if isinstance(self.machine, NativeCPUFlags):
             return ["-march=native"]
         else:
-            ret = ["-favx2", "-mfma"]
+            ret = ["-mavx2", "-mfma"]
             if self.machine.avx512:
                 ret.append("-mavx512f")
             if self.machine.avx512dq:
@@ -88,7 +88,7 @@ def call_cpp_compiler_src(source: str, module_name: str, compiler: str, options:
 class _fake_temp:
     def __init__(self, dir) -> None:
         self.dir = dir
-        os.makedirs(dir)
+        os.makedirs(dir, exist_ok=True)
 
     def __enter__(self):
         return self.dir

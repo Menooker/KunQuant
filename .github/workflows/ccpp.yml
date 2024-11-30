@@ -31,26 +31,6 @@ jobs:
         python-version: '3.9'
         cache: 'pip' # caching pip dependencies
     - run: pip install -r .github/workflows/requirements.txt
-    - name: make
-      working-directory: ./
-      run: KUN_BUILD_TESTS=1 pip install . -v
-    - name: download data
-      working-directory: ./
-      run: wget -nv -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz && wget -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz
-    - name: test
-      working-directory: ./
-      run: bash ./tests/tests.sh
-  test-linux-avx512:
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v3
-      with:
-        submodules: recursive
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.9'
-        cache: 'pip' # caching pip dependencies
-    - run: pip install -r .github/workflows/requirements.txt
     - name: Cache SDE
       id: cache-intel-sde
       uses: actions/cache@v4
@@ -70,4 +50,4 @@ jobs:
       run: wget -nv -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz && wget -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz
     - name: test
       working-directory: ./
-      run: PATH="$PATH:./sde-external-9.38.0-2024-04-18-lin/" bash ./tests/tests_avx512.sh
+      run: PATH="$PATH:./sde-external-9.38.0-2024-04-18-lin/" bash ./tests/tests.sh
