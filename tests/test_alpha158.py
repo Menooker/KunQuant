@@ -12,7 +12,7 @@ from KunQuant.Stage import Function
 from KunQuant.predefined.Alpha158 import AllData
 
 
-def check_alpha158(avx512):
+def check_alpha158(avx512, keep, tempdir):
     builder = Builder()
     with builder:
         pack_158 = AllData(low=Input("low"), high=Input("high"), close=Input(
@@ -39,7 +39,11 @@ def check_alpha158(avx512):
     simd_len = 8 if avx512 else 4
     target = [("alpha158", f, KunCompilerConfig(dtype='double', blocking_len=simd_len, partition_factor=4,
                output_layout="TS", input_layout="TS", options={"opt_reduce": True, "fast_log": True}))]
-    return cfake.compileit(target, "test", cfake.CppCompilerConfig())
+    if avx512:
+        machine = cfake.X64CPUFlags(avx512=True, avx512dq=True, avx512vl=True)
+    else:
+        machine = cfake.NativeCPUFlags()
+    return cfake.compileit(target, "testalpha158", cfake.CppCompilerConfig(machine=machine), tempdir=tempdir, keep_files=keep)
 
 
 num_stock = 8
@@ -98,10 +102,16 @@ if __name__ == "__main__":
                         help="The path to the input npz file")
     parser.add_argument("--ref", required=True, type=str,
                         help="The path to the reference output npz file")
-    parser.add_argument("--avx512", action="store_true", default=False,
+    parser.add_argument("--action", required=True, type=str,
                         help="The path to the reference output npz file")
     args = parser.parse_args()
-    lib = check_alpha158(args.avx512)
+    if args.action == "compile_avx512":
+        check_alpha158(True, True, "./build")
+        exit(0)
+    elif args.action == "run_avx512":
+        lib = kr.Library.load(os.path.join("./build/testalpha158", "testalpha158.so"))
+    else:
+        lib = check_alpha158(False, False, None)
     inp, ref = load(args.inputs, args.ref)
     test(lib, inp, ref)
     print("done")
