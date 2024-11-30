@@ -29,6 +29,7 @@ jobs:
     - name: Repair wheel for manylinux (Linux only)
       if: runner.os == 'Linux'
       run: |
+        sudo apt install --upgrade patchelf
         python -m pip install auditwheel
         auditwheel repair dist/*.whl -w dist/ --plat manylinux_2_38_x86_64
     - name: Store the distribution packages
