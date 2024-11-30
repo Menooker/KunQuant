@@ -51,7 +51,7 @@ target_link_libraries(KunTest KunRunner)
 file(GLOB_RECURSE KunCApiTestSrc ${PROJECT_SOURCE_DIR}/tests/capi/*.cpp)
 add_executable(KunCApiTest EXCLUDE_FROM_ALL ${KunCApiTestSrc})
 target_link_libraries(KunCApiTest KunRuntime)
-add_dependencies(KunCApiTest KunTest Alpha101Stream)
+add_dependencies(KunCApiTest KunTest)
 
 if(NOT DEFINED PYTHON_EXECUTABLE)
     set(PYTHON_EXECUTABLE ${Python_EXECUTABLE})
