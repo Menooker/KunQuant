@@ -88,6 +88,7 @@ def call_cpp_compiler_src(source: str, module_name: str, compiler: str, options:
 class _fake_temp:
     def __init__(self, dir) -> None:
         self.dir = dir
+        os.makedirs(dir)
 
     def __enter__(self):
         return self.dir
@@ -105,8 +106,8 @@ def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compi
             src.append((name, driver_compileit(f, name, **dataclasses.asdict(cfg))))
     def dowork():
         nonlocal lib      
-        tempclass = _fake_temp if keep_files else tempfile.TemporaryDirectory 
-        with tempclass(dir=tempdir) as tmpdirname:
+        tempclass = _fake_temp(dir=os.path.join(tempdir, libname)) if keep_files else tempfile.TemporaryDirectory(dir=tempdir)
+        with tempclass as tmpdirname:
             def foreach_func(named_src):
                 name, src = named_src
                 return call_cpp_compiler_src(src, name, compiler_config.compiler, ["-std=c++11", f"-O{compiler_config.opt_level}", "-c", "-fPIC", "-fvisibility=hidden", "-fvisibility-inlines-hidden"] + compiler_config.build_machine_flags() + [f"-I{v}" for v in _include_path], tmpdirname, compiler_config.obj_ext)
