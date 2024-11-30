@@ -5,7 +5,7 @@ python tests/test2.py
 echo "KunQuant runtime tests"
 python tests/test_runtime.py
 echo "KunQuant alpha101 tests"
-python tests/test_alpha101.py
+python tests/test_alpha101.py avx2
 echo "KunQuant alpha158 tests"
 python ./tests/test_alpha158.py --inputs /tmp/input.npz --ref /tmp/alpha158.npz 
 echo "KunQuant CAPI tests"
