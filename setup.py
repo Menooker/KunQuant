@@ -3,7 +3,7 @@ import subprocess
 from setuptools import setup, find_packages
 from setuptools.command.build_ext import build_ext
 from setuptools.extension import Extension
-import subprocess
+import datetime
 
 
 class CMakeBuildExtension(build_ext):
@@ -31,7 +31,7 @@ class CMakeExtension(Extension):
         self.path = path
 
 if os.environ.get("KUN_USE_GIT_VERSION", "0") != '0':
-    git_ver = "+git" + subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()[:8]
+    git_ver = "." + datetime.datetime.now().strftime("%Y%m%d")
 else:
     git_ver = ""
 
