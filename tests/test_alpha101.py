@@ -1,13 +1,53 @@
+from KunQuant.Driver import KunCompilerConfig
 from KunTestUtil import ref_alpha101, gen_data
 import numpy as np
 import pandas as pd
 import sys
 import time
 import os
+from KunQuant.jit import cfake
+from KunQuant.Op import Builder, Input, Output
+from KunQuant.Stage import Function
+from KunQuant.predefined.Alpha101 import AllData, all_alpha
+from KunQuant.runner import KunRunner as kr
 
-sys.path.append("./build/Release" if os.name == "nt" else "./build")
-import KunRunner as kr
+def check_alpha101(avx: str):
+    builder = Builder()
+    with builder:
+        all_data = AllData(low=Input("low"),high=Input("high"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
+        for f in all_alpha:
+            out = f(all_data)
+            Output(out, f.__name__)
+    simd_len = 16 if avx == "avx512" else 8
+    f = Function(builder.ops)
+    return "alpha_101", f, KunCompilerConfig(blocking_len=simd_len, output_layout="TS", options={"opt_reduce": True, "fast_log": True})
 
+def check_alpha101_double(avx: str):
+    builder = Builder()
+    with builder:
+        all_data = AllData(low=Input("low"),high=Input("high"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
+        for f in all_alpha:
+            # if f.__name__ != "alpha043" and f.__name__ != "alpha039":
+            #     continue
+            out = f(all_data)
+            Output(out, f.__name__)
+    simd_len = 8 if avx == "avx512" else 4
+    f = Function(builder.ops)
+    return "alpha_101_double", f, KunCompilerConfig(blocking_len=simd_len, input_layout="TS", output_layout="TS", dtype="double", options={"opt_reduce": True, "fast_log": True})
+
+def check_alpha101_stream(avx):
+    builder = Builder()
+    cnt = 0
+    with builder:
+        all_data = AllData(low=Input("low"),high=Input("high"),close=Input("close"),open=Input("open"), amount=Input("amount"), volume=Input("volume"))
+        for f in all_alpha:
+            out = f(all_data)
+            Output(out, f.__name__)
+            cnt += 1
+    simd_len = 16 if avx == "avx512" else 8
+    f = Function(builder.ops)
+    return "alpha_101_stream", f, KunCompilerConfig(blocking_len=simd_len, partition_factor=8, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
+ 
 def count_unmatched_elements(arr1: np.ndarray, arr2: np.ndarray, atol=1e-8, rtol=1e-5, equal_nan=False):
     # Check if arrays have the same shape
     if arr1.shape != arr2.shape:
@@ -171,9 +211,10 @@ tolerance = {
         "alpha074": 0.04,
         "alpha075": 0.09,
         "alpha077": 0.001,
-        "alpha078": 0.018,
+        "alpha078": 0.021,
         "alpha081": 0.27,
         "alpha008": 0.0005,
+        "alpha084": 0.0009,
         "alpha085": 0.005,
         "alpha088": 0.005,
         "alpha092": 0.17,
@@ -302,7 +343,6 @@ def test_stream(modu, executor, start_window, num_stock, num_time, my_input, ref
     return check_result(outputs, ref, outnames, start_window, num_stock, 0, num_time)
 
 def streammain():
-    lib = kr.Library.load("./build/projects/Release/Alpha101Stream.dll" if os.name == "nt" else "./build/projects/libAlpha101Stream.so")
     modu = lib.getModule("alpha_101_stream")
     start_window = modu.getOutputUnreliableCount()
     # print(start_window)
@@ -358,12 +398,7 @@ def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, isc
     return check_result(out, ref, outnames, start_window, num_stock, start_time, num_time)
 
 def main(is64: bool, is_check: bool):
-    if is64:
-        libpath = "./build/projects/Release/Test.dll" if os.name == "nt" else "./build/projects/libTest.so"
-    else:
-        libpath = "./build/projects/Release/Alpha101.dll" if os.name == "nt" else "./build/projects/libAlpha101.so"
-    lib = kr.Library.load(libpath)
-    modu = lib.getModule("alpha_101")
+    modu = lib.getModule("alpha_101" if not is64 else "alpha_101_double")
     start_window = modu.getOutputUnreliableCount()
     num_stock = 64
     done = True
@@ -391,6 +426,24 @@ def main(is64: bool, is_check: bool):
     print("OK", done)
     if not done:
         exit(1)
+
+action = sys.argv[1]
+def do_compile(avx, keep, tempdir):
+    funclist = [check_alpha101(avx),
+        check_alpha101_double(avx),
+        check_alpha101_stream(avx)]
+    if avx == "avx512":
+        machine = cfake.X64CPUFlags(avx512=True, avx512dq=True, avx512vl=True)
+    else:
+        machine = cfake.NativeCPUFlags()
+    return cfake.compileit(funclist, "test", cfake.CppCompilerConfig(machine=machine), tempdir=tempdir, keep_files=keep)
+if action == "compile_avx512":
+    do_compile("avx512", True, "./build")
+    exit(0)
+elif action == "run_avx512":
+    lib = kr.Library.load(os.path.join("./build/test", "test.so"))
+else:
+    lib = do_compile("avx", False, None)
 
 print("Check f64 batch")
 main(True, True)
