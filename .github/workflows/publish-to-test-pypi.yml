@@ -32,6 +32,7 @@ jobs:
         sudo apt install --upgrade patchelf
         python -m pip install auditwheel
         auditwheel repair dist/*.whl -w dist/ --plat manylinux_2_38_x86_64
+        rm dist/*linux_x86_64.whl
     - name: Store the distribution packages
       uses: actions/upload-artifact@v4
       with:
