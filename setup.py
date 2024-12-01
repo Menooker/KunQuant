@@ -30,7 +30,7 @@ class CMakeExtension(Extension):
         self.sourcedir = os.path.abspath(sourcedir)
         self.path = path
 
-if "KUN_USE_GIT_VERSION" in os.environ:
+if os.environ.get("KUN_USE_GIT_VERSION", "0") != '0':
     git_ver = "+git" + subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()[:8]
 else:
     git_ver = ""

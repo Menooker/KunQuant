@@ -28,7 +28,7 @@ jobs:
         build
         --user
     - name: Build a binary wheel and a source tarball
-      run: python3 -m build --wheel
+      run: KUN_USE_GIT_VERSION=${{ startsWith(github.ref, 'refs/tags/') && '0' || '1' }} python3 -m build --wheel
     - name: Repair wheel for manylinux (Linux only)
       if: runner.os == 'Linux'
       run: |
