@@ -3,6 +3,7 @@ import subprocess
 from setuptools import setup, find_packages
 from setuptools.command.build_ext import build_ext
 from setuptools.extension import Extension
+import subprocess
 
 
 class CMakeBuildExtension(build_ext):
@@ -29,9 +30,14 @@ class CMakeExtension(Extension):
         self.sourcedir = os.path.abspath(sourcedir)
         self.path = path
 
+if "KUN_USE_GIT_VERSION" in os.environ:
+    git_ver = "+git" + subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()[:8]
+else:
+    git_ver = ""
+
 setup(
     name="KunQuant",
-    version="0.1.0",
+    version="0.1.0" + git_ver,
     description="A compiler, optimizer and executor for financial expressions and factors",
     long_description=open("Readme.md").read(),
     long_description_content_type="text/markdown",
