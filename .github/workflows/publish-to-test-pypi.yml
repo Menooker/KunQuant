@@ -9,10 +9,10 @@ on:
 jobs:
   build:
     name: Build distribution 📦
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
     steps:
     - uses: actions/checkout@v4
@@ -30,13 +30,6 @@ jobs:
         --user
     - name: Build a binary wheel and a source tarball
       run: KUN_USE_GIT_VERSION=${{ startsWith(github.ref, 'refs/tags/') && '0' || '1' }} python3 -m build --wheel
-    - name: Repair wheel for manylinux (Linux only)
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt install --upgrade patchelf
-        python -m pip install auditwheel
-        auditwheel repair dist/*.whl -w dist/ --plat manylinux_2_38_x86_64
-        rm dist/*linux_x86_64.whl
     - name: Store the distribution packages
       uses: actions/upload-artifact@v4
       with:
@@ -51,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
     environment:
       name: pypi
       url: https://pypi.org/p/KunQuant  # Replace <package-name> with your PyPI project name
@@ -63,6 +56,13 @@ jobs:
       with:
         name: python-package-distributions${{ matrix.python-version }}
         path: dist/
+    - name: Repair wheel for manylinux (Linux only)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt install --upgrade patchelf
+        python -m pip install auditwheel
+        auditwheel repair dist/*.whl -w dist/ --plat manylinux_2_31_x86_64
+        rm dist/*linux_x86_64.whl
     - name: Publish distribution 📦 to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
   publish-to-testpypi:
@@ -72,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
     environment:
       name: testpypi
       url: https://test.pypi.org/p/KunQuant
@@ -84,6 +84,13 @@ jobs:
       with:
         name: python-package-distributions${{ matrix.python-version }}
         path: dist/
+    - name: Repair wheel for manylinux (Linux only)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt install --upgrade patchelf
+        python -m pip install auditwheel
+        auditwheel repair dist/*.whl -w dist/ --plat manylinux_2_31_x86_64
+        rm dist/*linux_x86_64.whl
     - name: Publish distribution 📦 to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
