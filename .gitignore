@@ -6,3 +6,5 @@ projects/*
 KunQuant.egg-info/*
 *.so
 dist/*
+*.pyd
+*.dll
