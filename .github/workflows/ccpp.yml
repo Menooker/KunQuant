@@ -75,6 +75,7 @@ jobs:
     - name: Basic test
       working-directory: ./
       run: |
+        $env:KUN_DEBUG_JIT=1
         python tests/test.py
         python tests/test2.py
         python tests/test_runtime.py
