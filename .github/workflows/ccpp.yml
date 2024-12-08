@@ -52,7 +52,7 @@ jobs:
       working-directory: ./
       run: PATH="$PATH:./sde-external-9.38.0-2024-04-18-lin/" bash ./tests/tests.sh
   test-windows:
-    runs-on: window-2022
+    runs-on: windows-2022
     steps:
     - uses: actions/checkout@v3
       with:
