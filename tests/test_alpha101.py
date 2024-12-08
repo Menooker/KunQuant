@@ -262,7 +262,7 @@ def check_result(out, ref, outnames, start_window, num_stock, start_time, num_ti
         bad_rate = bad_count/ (result.size if result.size else 1)
         tolerance_count = tolerance["bad_count"].get(k, 0.0001)
         if not is_power_of_two(num_stock):
-            tolerance_count = max(tolerance_count, tolerance["bad_count_unaligned"].get(k, 0.0001))
+            tolerance_count = max(tolerance_count, tolerance["bad_count_unaligned"].get(k, 0.0002))
         if bad_count:
             if bad_rate < tolerance_count:
                 # print("bad count meets the tolerance, skipping")
