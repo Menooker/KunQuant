@@ -119,7 +119,9 @@ def call_cpp_compiler(cmd: List[str], outpath: str) -> str:
         print("[KUN_JIT] temp jit files:", outpath)
     if Util.jit_debug_mode:
         print("[KUN_JIT] cmd:", cmd)
-    subprocess.check_call(cmd, shell=False, env=get_compiler_env())
+    subprocess.check_call(cmd, shell=False, env=get_compiler_env(), stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            creationflags=(subprocess.CREATE_NO_WINDOW if _win32 else 0))
     return outpath
 
 def call_cpp_compiler_src(source: str, module_name: str, compiler: CppCompilerConfig, tempdir: str) -> str:
