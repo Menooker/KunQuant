@@ -105,7 +105,7 @@ _config = {
 class CppCompilerConfig:
     opt_level: int = 3
     machine: Union[NativeCPUFlags, X64CPUFlags] = NativeCPUFlags()
-    for_each: Callable[[FunctionList, CallableOnFunction], List[str]] = multi_thread_compile
+    for_each: Callable[[FunctionList, CallableOnFunction], List[str]] = single_thread_compile
     other_flags : Tuple[str] = ()
     compiler: str = _config[_os_name][0]
     obj_ext: str = _config[_os_name][1]
