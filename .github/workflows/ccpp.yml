@@ -72,11 +72,12 @@ jobs:
       run: |
         Invoke-WebRequest https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz -OutFile alpha158.npz
         Invoke-WebRequest https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz -OutFile input.npz
+    - name: Add msbuild to PATH
+      uses: microsoft/setup-msbuild@v2
     - name: Basic test
       working-directory: ./
       run: |
         $env:KUN_DEBUG_JIT=1
-        ls "C:\Program Files (x86)\Windows Kits\10\include\wdf\ucrt"
         python tests/test.py
         python tests/test2.py
         python tests/test_runtime.py
