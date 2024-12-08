@@ -8,3 +8,4 @@ KunQuant.egg-info/*
 dist/*
 *.pyd
 *.dll
+*.lib

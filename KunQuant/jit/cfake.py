@@ -1,22 +1,27 @@
 import os
+import platform
 import subprocess
 import tempfile
-from typing import List, Tuple, Union
+from typing import List, Literal, Tuple, Union
 from collections.abc import Callable
 import KunQuant.runner.KunRunner as KunRunner
 from KunQuant.Driver import compileit as driver_compileit
 from KunQuant.Driver import KunCompilerConfig
 from KunQuant.Stage import Function
 from KunQuant.passes import Util
+from KunQuant.jit.env import get_compiler_env, get_msvc_compiler_dir
 import timeit
 import dataclasses
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
+import shutil
 
 _cpp_root = os.path.join(os.path.dirname(__file__), "..", "..", "cpp")
 _include_path = [_cpp_root]
 _runtime_path = os.path.dirname(KunRunner.getRuntimePath())
 
+_os_name = platform.system()
+_win32 = _os_name == "Windows"
 
 FunctionList = List[Tuple[str, str]]
 CallableOnFunction = Callable[[Tuple[str, str]], List[str]]
@@ -45,56 +50,97 @@ class X64CPUFlags:
 class NativeCPUFlags:
     pass
 
+class MSVCCommandLineBuilder:
+    @staticmethod
+    def build_compile_options(cfg: 'CppCompilerConfig', srcpath: str, outpath: str) -> List[str]:
+        cmd = [cfg.compiler, "/c", "/EHsc", f"/O{min(cfg.opt_level, 2)}", "/wd4251", "/wd4200", "/wd4305", srcpath] + [f"/I{v}" for v in _include_path]
+        if isinstance(cfg.machine, NativeCPUFlags):
+            # todo: should use native cpu flags
+            cmd.append("/arch:AVX2")
+        else:
+            if cfg.machine.avx512 or cfg.machine.avx512dq or cfg.machine.avx512vl:
+                cmd.append("/arch:AVX512")
+            cmd.append("/arch:AVX2")
+        cmd.append(f"/Fo{outpath}")
+        return cmd
+
+    @staticmethod
+    def build_link_options(cfg: 'CppCompilerConfig', paths: List[str], outpath: str) -> List[str]:
+        cmd = [cfg.compiler, "/LD", "KunRuntime.lib"]
+        cmd += paths
+        cmd.append(f"/Fo{outpath}")
+        cmd += ["/link", f'/LIBPATH:"{_runtime_path}"']
+        return cmd
+
+class GCCCommandLineBuilder:
+    @staticmethod
+    def build_compile_options(cfg: 'CppCompilerConfig', srcpath: str, outpath: str) -> List[str]:
+        cmd = ["-std=c++11", f"-O{cfg.opt_level}", "-c", "-fPIC", "-fvisibility=hidden", "-fvisibility-inlines-hidden"]
+        if isinstance(cfg.machine, NativeCPUFlags):
+            cmd += ["-march=native"]
+        else:
+            cmd += ["-mavx2", "-mfma"]
+            if cfg.machine.avx512:
+                cmd.append("-mavx512f")
+            if cfg.machine.avx512dq:
+                cmd.append("-mavx512dq")
+            if cfg.machine.avx512vl:
+                cmd.append("-mavx512vl")
+        cmd += [f"-I{v}" for v in _include_path]
+        cmd += [srcpath, "-o", outpath]
+        return cmd
+
+    @staticmethod
+    def build_link_options(cfg: 'CppCompilerConfig', paths: List[str], outpath: str) -> List[str]:
+        return [cfg.compiler] + paths + ["-l", "KunRuntime", "-shared", "-L", _runtime_path, "-o", outpath]
+
+_config = {
+    "Windows": ("cl.exe", "obj", "dll", MSVCCommandLineBuilder),
+    "Linux": ("g++", "o", "so", GCCCommandLineBuilder)
+}
 @dataclass
 class CppCompilerConfig:
     opt_level: int = 3
     machine: Union[NativeCPUFlags, X64CPUFlags] = NativeCPUFlags()
     for_each: Callable[[FunctionList, CallableOnFunction], List[str]] = multi_thread_compile
     other_flags : Tuple[str] = ()
-    compiler: str = "g++"
-    obj_ext: str = "o"
-    dll_ext: str = "so"
-
-    def build_machine_flags(self) -> List[str]:
-        if isinstance(self.machine, NativeCPUFlags):
-            return ["-march=native"]
-        else:
-            ret = ["-mavx2", "-mfma"]
-            if self.machine.avx512:
-                ret.append("-mavx512f")
-            if self.machine.avx512dq:
-                ret.append("-mavx512dq")
-            if self.machine.avx512vl:
-                ret.append("-mavx512vl")
-            return ret
+    compiler: str = _config[_os_name][0]
+    obj_ext: str = _config[_os_name][1]
+    dll_ext: str = _config[_os_name][2]
+    builder = _config[_os_name][3]
 
 
-def call_cpp_compiler(path: List[str], module_name: str, compiler: str, options: List[str], tempdir: str, outext: str) -> str:
-    outpath = os.path.join(tempdir, f"{module_name}.{outext}")
+
+def call_cpp_compiler(cmd: List[str], outpath: str) -> str:
     if Util.jit_debug_mode:
-        print("[KUN_JIT] temp jit files:", path, outpath)
-    cmd = [compiler] + options + path + ["-o", outpath]
+        print("[KUN_JIT] temp jit files:", outpath)
     if Util.jit_debug_mode:
         print("[KUN_JIT] cmd:", cmd)
-    subprocess.check_call(cmd, shell=False)
+    subprocess.check_call(cmd, shell=False, env=get_compiler_env())
     return outpath
 
-def call_cpp_compiler_src(source: str, module_name: str, compiler: str, options: List[str], tempdir: str, outext: str) -> str:
+def call_cpp_compiler_src(source: str, module_name: str, compiler: CppCompilerConfig, tempdir: str) -> str:
     inpath = os.path.join(tempdir, f"{module_name}.cpp")
+    outpath = os.path.join(tempdir, f"{module_name}.{compiler.obj_ext}")
     with open(inpath, 'w') as f:
         f.write(source)
-    return call_cpp_compiler([inpath], module_name, compiler, options, tempdir, outext)
+    return call_cpp_compiler( compiler.builder.build_compile_options(compiler, inpath, outpath), outpath)
 
 class _fake_temp:
-    def __init__(self, dir) -> None:
-        self.dir = dir
-        os.makedirs(dir, exist_ok=True)
+    def __init__(self, dir: str, module_name: str, keep_files: bool) -> None:
+        if dir is None:
+            self.dir = tempfile.mkdtemp(dir=dir)
+        else:
+            self.dir = os.path.join(dir, module_name)
+            os.makedirs(dir, exist_ok=True)
+        self.keep_files = keep_files or _win32
 
     def __enter__(self):
         return self.dir
 
     def __exit__(self, exception_type, exception_value, exception_traceback):
-        pass
+        if not self.keep_files:
+            shutil.rmtree(self.dir)
 
 def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compiler_config: CppCompilerConfig, tempdir: str = None, keep_files: bool = False, load: bool = True) -> Union[KunRunner.Library, str]:
     lib = None
@@ -105,17 +151,19 @@ def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compi
         for name, f, cfg in func:
             src.append((name, driver_compileit(f, name, **dataclasses.asdict(cfg))))
     def dowork():
-        nonlocal lib      
-        tempclass = _fake_temp(dir=os.path.join(tempdir, libname)) if keep_files else tempfile.TemporaryDirectory(dir=tempdir)
-        with tempclass as tmpdirname:
+        nonlocal lib
+        with _fake_temp(tempdir, libname, keep_files) as tmpdirname:
             def foreach_func(named_src):
                 name, src = named_src
-                return call_cpp_compiler_src(src, name, compiler_config.compiler, ["-std=c++11", f"-O{compiler_config.opt_level}", "-c", "-fPIC", "-fvisibility=hidden", "-fvisibility-inlines-hidden"] + compiler_config.build_machine_flags() + [f"-I{v}" for v in _include_path], tmpdirname, compiler_config.obj_ext)
+                return call_cpp_compiler_src(src, name, compiler_config, tmpdirname)
   
             libs = compiler_config.for_each(src, foreach_func)
-            finallib = call_cpp_compiler(libs + ["-l", "KunRuntime"], libname, compiler_config.compiler, ["-shared", "-L", _runtime_path], tmpdirname, compiler_config.dll_ext)
+            finallib = os.path.join(tmpdirname, f"{libname}.{compiler_config.dll_ext}")
+            finallib = call_cpp_compiler(compiler_config.builder.build_link_options(compiler_config, libs, finallib), finallib)
             if load:
                 lib = KunRunner.Library.load(finallib)
+                if _win32 and not keep_files:
+                    lib.setCleanup(lambda: shutil.rmtree(tmpdirname))
             else:
                 lib = finallib
         

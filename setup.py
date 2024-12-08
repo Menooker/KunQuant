@@ -48,10 +48,11 @@ class CMakeBuildExtension(build_ext):
         subprocess.check_call(build_args, cwd=build_temp)
         if devbuild:
             print("Copy dll files")
-            ext_table = {"Windows": "*.dll", "Linux": "*.so"}
-            for file in glob.glob(os.path.join(ext_dir, ext_table[platform.system()])):
-                print("copy from debug:", file)
-                shutil.copy(file, os.path.join(".", "KunQuant", "runner"))
+            ext_table = {"Windows": ["*.dll", "*.lib"], "Linux": ["*.so"]}
+            for fn in ext_table[platform.system()]:
+                for file in glob.glob(os.path.join(ext_dir, fn)):
+                    print("copy from debug:", file)
+                    shutil.copy(file, os.path.join(".", "KunQuant", "runner"))
 
 class CMakeExtension(Extension):
     def __init__(self, name, path, sourcedir=""):

@@ -118,6 +118,11 @@ PYBIND11_MODULE(KunRunner, m) {
         });
     py::class_<kun::Library, std::shared_ptr<kun::Library>>(m, "Library")
         .def_static("load", &kun::Library::load)
+        .def("setCleanup", [](kun::Library& v, py::function f) {
+            v.dtor = [f](kun::Library* v) {
+                f();
+            };
+        })
         .def("getModule", &kun::Library::getModule,
              py::return_value_policy::reference);
     m.def(
