@@ -85,7 +85,6 @@ def get_compiler_env():
     env = os.environ
     if _win32:
         extra_path, includes, libs = get_msvc_compiler_dir()
-        print(extra_path, includes, libs)
         if extra_path is not None:
             path = extra_path + os.pathsep + os.environ.get('PATH', '')
             env = copy.deepcopy(env)

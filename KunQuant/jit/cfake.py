@@ -2,7 +2,7 @@ import os
 import platform
 import subprocess
 import tempfile
-from typing import List, Literal, Tuple, Union
+from typing import List, Tuple, Union
 from collections.abc import Callable
 import KunQuant.runner.KunRunner as KunRunner
 from KunQuant.Driver import compileit as driver_compileit
@@ -78,7 +78,7 @@ class MSVCCommandLineBuilder:
 class GCCCommandLineBuilder:
     @staticmethod
     def build_compile_options(cfg: 'CppCompilerConfig', srcpath: str, outpath: str) -> List[str]:
-        cmd = ["-std=c++11", f"-O{cfg.opt_level}", "-c", "-fPIC", "-fvisibility=hidden", "-fvisibility-inlines-hidden"]
+        cmd = [cfg.compiler, "-std=c++11", f"-O{cfg.opt_level}", "-c", "-fPIC", "-fvisibility=hidden", "-fvisibility-inlines-hidden"]
         if isinstance(cfg.machine, NativeCPUFlags):
             cmd += ["-march=native"]
         else:
