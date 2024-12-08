@@ -76,6 +76,7 @@ jobs:
       working-directory: ./
       run: |
         $env:KUN_DEBUG_JIT=1
+        ls "C:\Program Files (x86)\Windows Kits\10\include\wdf\ucrt"
         python tests/test.py
         python tests/test2.py
         python tests/test_runtime.py
