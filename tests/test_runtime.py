@@ -22,12 +22,17 @@ def test_cfake():
         Output(inp1 * inp2 + 10, "out")
     f = Function(builder.ops)
     lib = cfake.compileit([("test1", f, cfake.KunCompilerConfig(input_layout="TS", output_layout="TS"))], "cfaketest", cfake.CppCompilerConfig())
+    print("1")
     mod = lib.getModule("test1")
+    print("2")
     inp = np.random.rand(10, 24).astype("float32")
     inp2 = np.random.rand(10, 24).astype("float32")
+    print("3")
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, mod, {"a": inp, "b": inp2}, 0, 10)
+    print("4")
     np.testing.assert_allclose(inp * inp2 + 10, out["out"])
+    print("5")
 
 def test_runtime(libpath):
     lib2 = kr.Library.load(libpath)
