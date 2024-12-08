@@ -62,7 +62,7 @@ jobs:
     - name: Download all the dists
       uses: actions/download-artifact@v4
       with:
-        name: python-package-distributions-${{ matrix.os }}${{ matrix.python-version }}
+        name: python-package-distributions-ubuntu-20.04${{ matrix.python-version }}
         path: dist/
     - name: Repair wheel for manylinux (Linux only)
       if: runner.os == 'Linux'
@@ -90,7 +90,7 @@ jobs:
     - name: Download all the dists
       uses: actions/download-artifact@v4
       with:
-        name: python-package-distributions-${{ matrix.os }}${{ matrix.python-version }}
+        name: python-package-distributions-ubuntu-20.04${{ matrix.python-version }}
         path: dist/
     - name: Repair wheel for manylinux (Linux only)
       if: runner.os == 'Linux'
@@ -102,7 +102,7 @@ jobs:
     - name: Download all windows the dists
       uses: actions/download-artifact@v4
       with:
-        name: python-package-distributions-Windows${{ matrix.python-version }}
+        name: python-package-distributions-windows-2022${{ matrix.python-version }}
         path: dist/
     - name: Publish distribution 📦 to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
