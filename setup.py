@@ -27,6 +27,10 @@ class CMakeBuildExtension(build_ext):
             "-DCMAKE_BUILD_TYPE=Release"
         ]
         build_args = ["cmake", "--build", "."]
+        devbuild = False
+        if "KUN_BUILD_TESTS" in os.environ and os.environ["KUN_BUILD_TESTS"] != "":
+            devbuild = True
+            build_args += ["--target", "TestingTargets"]
         if is_windows:
             cmake_args += [f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={ext_dir}",
                 f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={ext_dir}",
@@ -38,9 +42,6 @@ class CMakeBuildExtension(build_ext):
             build_args += ["--config", "Release"]
         else:
             build_args += ["--", "-j"]
-        devbuild = False
-        if "KUN_BUILD_TESTS" in os.environ and os.environ["KUN_BUILD_TESTS"] != "":
-            devbuild = True
 
         if "PLAT" in os.environ:
             del os.environ["PLAT"]

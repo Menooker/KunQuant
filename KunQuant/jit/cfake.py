@@ -26,6 +26,9 @@ _win32 = _os_name == "Windows"
 FunctionList = List[Tuple[str, str]]
 CallableOnFunction = Callable[[Tuple[str, str]], List[str]]
 
+def is_windows():
+    return _win32
+
 def get_runtime_path() -> str:
     return _runtime_path
 
@@ -53,7 +56,7 @@ class NativeCPUFlags:
 class MSVCCommandLineBuilder:
     @staticmethod
     def build_compile_options(cfg: 'CppCompilerConfig', srcpath: str, outpath: str) -> List[str]:
-        cmd = [cfg.compiler, "/c", "/EHsc", f"/O{min(cfg.opt_level, 2)}", "/wd4251", "/wd4200", "/wd4305", srcpath] + [f"/I{v}" for v in _include_path]
+        cmd = [cfg.compiler, "/nologo", "/c", "/EHsc", f"/O{min(cfg.opt_level, 2)}", "/wd4251", "/wd4200", "/wd4305", srcpath] + [f"/I{v}" for v in _include_path]
         if isinstance(cfg.machine, NativeCPUFlags):
             # todo: should use native cpu flags
             cmd.append("/arch:AVX2")
@@ -66,9 +69,9 @@ class MSVCCommandLineBuilder:
 
     @staticmethod
     def build_link_options(cfg: 'CppCompilerConfig', paths: List[str], outpath: str) -> List[str]:
-        cmd = [cfg.compiler, "/LD", "KunRuntime.lib"]
+        cmd = [cfg.compiler, "/nologo", "/LD", "KunRuntime.lib"]
         cmd += paths
-        cmd.append(f"/Fo{outpath}")
+        cmd.append(f"/Fe{outpath}")
         cmd += ["/link", f'/LIBPATH:"{_runtime_path}"']
         return cmd
 
@@ -132,7 +135,7 @@ class _fake_temp:
             self.dir = tempfile.mkdtemp(dir=dir)
         else:
             self.dir = os.path.join(dir, module_name)
-            os.makedirs(dir, exist_ok=True)
+            os.makedirs(self.dir, exist_ok=True)
         self.keep_files = keep_files or _win32
 
     def __enter__(self):
@@ -163,7 +166,11 @@ def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compi
             if load:
                 lib = KunRunner.Library.load(finallib)
                 if _win32 and not keep_files:
-                    lib.setCleanup(lambda: shutil.rmtree(tmpdirname))
+                    def cleanup():
+                        if Util.jit_debug_mode:
+                            print("Cleanup temp dir", tmpdirname)
+                        shutil.rmtree(tmpdirname)
+                    lib.setCleanup(cleanup)
             else:
                 lib = finallib
         
