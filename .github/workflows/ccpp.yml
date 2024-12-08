@@ -66,7 +66,7 @@ jobs:
       working-directory: ./
       run: |
         $env:KUN_BUILD_TESTS=1
-        pip install . -v
+        pip install -e . -v
     - name: download data
       working-directory: ./
       run: |

@@ -9,7 +9,7 @@ def _safe_cast(val):
 
 
 debug_mode = _safe_cast(os.environ.get("KUN_DEBUG", "0"))
-jit_debug_mode = True #_safe_cast(os.environ.get("KUN_DEBUG_JIT", ""))
+jit_debug_mode = _safe_cast(os.environ.get("KUN_DEBUG_JIT", ""))
 
 
 def kun_pass(p):
