@@ -73,7 +73,7 @@ jobs:
         Invoke-WebRequest https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz -OutFile alpha158.npz
         Invoke-WebRequest https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz -OutFile input.npz
     - name: Add msbuild to PATH
-      uses: microsoft/setup-msbuild@v2
+      uses: ilammy/msvc-dev-cmd@v1
     - name: Basic test
       working-directory: ./
       run: |
