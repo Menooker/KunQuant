@@ -3,7 +3,11 @@ import platform
 import subprocess
 import tempfile
 from typing import List, Tuple, Union
-from collections.abc import Callable
+import sys
+if sys.version_info[1] < 9:
+    from typing import Callable
+else:
+    from collections.abc import Callable
 import KunQuant.runner.KunRunner as KunRunner
 from KunQuant.Driver import compileit as driver_compileit
 from KunQuant.Driver import KunCompilerConfig
