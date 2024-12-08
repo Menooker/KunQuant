@@ -2,7 +2,11 @@
 #include <Kun/Module.hpp>
 #include <Kun/RunGraph.hpp>
 #include <KunSIMD/cpu/Table.hpp>
+#ifdef _WIN32
+#include <Windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -52,8 +56,24 @@ PYBIND11_MODULE(KunRunner, m) {
     m.def("createMultiThreadExecutor", &kun::createMultiThreadExecutor);
     m.def("getRuntimePath", []() -> std::string {
 #ifdef _WIN32
-        // fix-me: add impl
-        throw std::runtime_error("get_dyn_lib_path");
+    char path[MAX_PATH];
+    HMODULE hm = NULL;
+
+    if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | 
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR) &kun_simd::LogLookupTable<float>::logr_table, &hm) == 0) {
+        int ret = GetLastError();
+        fprintf(stderr, "GetModuleHandle failed, error = %d\n", ret);
+        return std::string();
+        // Return or however you want to handle an error.
+    }
+    if (GetModuleFileName(hm, path, sizeof(path)) == 0) {
+        int ret = GetLastError();
+        fprintf(stderr, "GetModuleFileName failed, error = %d\n", ret);
+        return std::string();
+        // Return or however you want to handle an error.
+    }
+    return path;
 #else
     // On Windows, use GetMappedFileNameW
     Dl_info info;
@@ -98,6 +118,11 @@ PYBIND11_MODULE(KunRunner, m) {
         });
     py::class_<kun::Library, std::shared_ptr<kun::Library>>(m, "Library")
         .def_static("load", &kun::Library::load)
+        .def("setCleanup", [](kun::Library& v, py::function f) {
+            v.dtor = [f](kun::Library* v) {
+                f();
+            };
+        })
         .def("getModule", &kun::Library::getModule,
              py::return_value_policy::reference);
     m.def(

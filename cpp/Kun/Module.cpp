@@ -28,6 +28,8 @@ std::shared_ptr<Library> Library::load(const char *filename) {
 Library::~Library() {
     if (handle) {
         FreeLibrary((HMODULE)handle);
+        if(dtor)
+            dtor(this);
     }
 }
 #else

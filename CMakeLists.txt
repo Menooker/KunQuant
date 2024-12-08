@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 3.5)
 add_subdirectory(3rdparty/pybind11)
 include_directories(${pybind11_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/cpp)
 
+set(CMAKE_INSTALL_RPATH "\$ORIGIN")
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+
 option(KUN_AVX512 "Enable AVX512 instruction set" OFF)
 option(KUN_AVX512DQ "Enable AVX512DQ instruction set" OFF)
 option(KUN_AVX512VL "Enable AVX512VL instruction set" OFF)

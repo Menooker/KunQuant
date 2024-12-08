@@ -51,3 +51,39 @@ jobs:
     - name: test
       working-directory: ./
       run: PATH="$PATH:./sde-external-9.38.0-2024-04-18-lin/" bash ./tests/tests.sh
+  test-windows:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+        cache: 'pip' # caching pip dependencies
+    - run: pip install -r .github/workflows/requirements.txt
+    - name: make
+      working-directory: ./
+      run: |
+        $env:KUN_BUILD_TESTS=1
+        pip install -e . -v
+    - name: download data
+      working-directory: ./
+      run: |
+        Invoke-WebRequest https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz -OutFile alpha158.npz
+        Invoke-WebRequest https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz -OutFile input.npz
+    - name: Add msbuild to PATH
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64
+    - name: Basic test
+      working-directory: ./
+      run: |
+        $env:KUN_DEBUG_JIT=1
+        python tests/test.py
+        python tests/test2.py
+        python tests/test_runtime.py
+    - name: Alpha158 test
+      working-directory: ./
+      run: |
+        python ./tests/test_alpha158.py --inputs ./input.npz --ref ./alpha158.npz --action run_avx2

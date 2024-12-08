@@ -374,7 +374,9 @@ lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
 
 test_cfake()
 test_avg_stddev_TS(lib)
-test_runtime(os.path.join(cfake.get_runtime_path(), "libKunTest.so"))
+kun_test_dll = os.path.join(cfake.get_runtime_path(), "KunTest.dll" if cfake.is_windows() else "libKunTest.so")
+if os.path.exists(kun_test_dll):
+    test_runtime(kun_test_dll)
 test_avg_stddev(lib)
 test_rank(lib)
 test_rank2(lib)
