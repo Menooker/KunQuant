@@ -9,9 +9,10 @@ on:
 jobs:
   build:
     name: Build distribution 📦
-    runs-on: ubuntu-20.04
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-20.04, windows-2022]
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
     steps:
@@ -28,12 +29,18 @@ jobs:
         pip install
         build
         --user
-    - name: Build a binary wheel and a source tarball
+    - name: Build a binary wheel and a source tarball (linux)
+      if: runner.os == 'Linux'
       run: KUN_USE_GIT_VERSION=${{ startsWith(github.ref, 'refs/tags/') && '0' || '1' }} python3 -m build --wheel
+    - name: Build a binary wheel and a source tarball (windows)
+      if: runner.os == 'Windows'
+      run: |
+        $env:KUN_USE_GIT_VERSION=${{ startsWith(github.ref, 'refs/tags/') && '0' || '1' }}
+        python3 -m build --wheel
     - name: Store the distribution packages
       uses: actions/upload-artifact@v4
       with:
-        name: python-package-distributions${{ matrix.python-version }}
+        name: python-package-distributions-${{ matrix.os }}${{ matrix.python-version }}
         path: dist/
   publish-to-pypi:
     name: >-
@@ -54,7 +61,7 @@ jobs:
     - name: Download all the dists
       uses: actions/download-artifact@v4
       with:
-        name: python-package-distributions${{ matrix.python-version }}
+        name: python-package-distributions-${{ matrix.os }}${{ matrix.python-version }}
         path: dist/
     - name: Repair wheel for manylinux (Linux only)
       if: runner.os == 'Linux'
@@ -82,7 +89,7 @@ jobs:
     - name: Download all the dists
       uses: actions/download-artifact@v4
       with:
-        name: python-package-distributions${{ matrix.python-version }}
+        name: python-package-distributions-${{ matrix.os }}${{ matrix.python-version }}
         path: dist/
     - name: Repair wheel for manylinux (Linux only)
       if: runner.os == 'Linux'
@@ -91,6 +98,11 @@ jobs:
         python -m pip install auditwheel
         auditwheel repair dist/*.whl -w dist/ --plat manylinux_2_31_x86_64
         rm dist/*linux_x86_64.whl
+    - name: Download all windows the dists
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions-Windows${{ matrix.python-version }}
+        path: dist/
     - name: Publish distribution 📦 to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
