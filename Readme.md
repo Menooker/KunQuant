@@ -60,10 +60,10 @@ First, import KunQuant and necessary modules
 
 ```python
 from KunQuant.jit import cfake
+from KunQuant.Driver import KunCompilerConfig
 from KunQuant.Op import Builder, Input, Output
 from KunQuant.Stage import Function
 from KunQuant.predefined import Alpha101
-from KunQuant.Driver import KunCompilerConfig
 from KunQuant.runner import KunRunner as kr
 ```
 
@@ -105,7 +105,7 @@ lib = cfake.compileit([("alpha101", f, KunCompilerConfig(input_layout="TS", outp
 modu = lib.getModule("alpha101")
 ```
 
-We will explain the function `cfake.compileit` later. Let's continue to see how to use the compiled `lib`.
+We will explain the function `cfake.compileit` in [Customize.md](./Customize.md). Let's continue to see how to use the compiled `lib`.
 
 Load your stock data. In this example, load from local pandas files. We assume the open, close, high, low, volumn and amount data for different stocks are stored in different files.
 
@@ -215,102 +215,20 @@ out = kr.runGraph(executor, modu, input_dict, 0, num_time, out_dict)
 
 Note that the executors are reusable. A multithread executor is actually a thread pool inside. If you want to run on multiple batches of data, you don’t need to create new executors for each batch.
 
-## Save the compilation result as a shared library
-
-Like the example above for alpha001, and by default, the compiled factor library is stored in a temp dir and will be automatically cleaned up. You can choose to keep the compilation result files (C++ source code, object files and the shared library), if
- * your factors does not change and you want to save the compilation time by caching the factor library
- * or, you want to use the compilation result in another machine/ programming language (like C/Go/Rust)
-
-In the above alpha101 example, you can run 
-
-```python
-cfake.compileit([("alpha101", f, KunCompilerConfig(input_layout="TS", output_layout="TS"))], "your_lib_name", cfake.CppCompilerConfig(), tempdir="/path/to/a/dir", keep_files=keep, load=False)
-```
-
-This will create a directory `/path/to/a/dir/your_lib_name`, and the generated C++ file will be at `your_lib_name.cpp` and the shared library file will be at `your_lib_name.{so,dll}` in the directory.
-
-In another process, you can load the library and get the module via
-
-```python
-from KunQuant.runner import KunRunner as kr
-lib = kr.Library.load("/path/to/a/dir/your_lib_name/your_lib_name.so")
-modu = lib.getModule("alpha101")
-```
-
-And use the `modu` object just like in the above example.
-
-## Compiler options
-
-The key function of KunQuant is `cfake.compileit`. Its signature is
-
-```python
-def compileit(func: List[Tuple[str, Function, KunCompilerConfig]], libname: str, compiler_config: CppCompilerConfig, tempdir: str | None = None, keep_files: bool = False, load: bool = True) -> KunQuant.runner.KunRunner.Library | str
-```
-
-This function compiles a list of tuples `(module_name, function, config)`. By default, KunQuant will use multi-threading to compile this list of modules in parallel. The compiled modules (in C++ object files) will be linked into a shared library named by `libname`. If parameter `load` is true, the function returns the loaded library of the compilation result. Otherwise, it returns the path of the library.
-
-Each module has a `KunCompilerConfig` of configurations like `layout`, `datatype`, SIMD length (will discuss below):
-
-```python
-@dataclass
-class KunCompilerConfig:
-    partition_factor : int = 3
-    dtype:str = "float"
-    blocking_len: int = None
-    input_layout:str = "STs"
-    output_layout:str = "STs"
-    allow_unaligned: Union[bool, None] = None
-    options: dict = field(default_factory=dict)
-```
-
-The `CppCompilerConfig` controls how KunQuant calls the C++ compiler. To choose the non-default compiler, you can pass `CppCompilerConfig(compiler="/path/to/your/C++/compiler")` to `cfake.compileit`. You can also enable/disable AVX512 by this config class.
 
 ## Customized factors
 
-KunQuant is a tool for general expressions. You can further read [Customize.md](./Customize.md) for how you can compile your own customized factors.
-
-## Specifing Memory layouts and data types and enabling AVX512
-
-### Enabling AVX512 and choosing blocking_len
-
-This project by default turns off AVX512, since this intruction set is not yet well adopted. If you are sure your CPU has AVX512, you can turn it on by passing `machine = cfake.X64CPUFlags(avx512=True)` when creating `cfake.CppCompilerConfig(machine=...)`. This will enable AVX512 features when compiling the KunQuant generated code. Some speed-up over `AVX2` mode are expected.
-
-In your customized project, you need to specify `blocking_len` parameter of in `KunCompilerConfig` to enable AVX512. Please note that `blocking_len` will affect the `STs` format (see below section).
-
-There are some other CPU instruction sets that is optional for KunQuant. You can turn on `AVX512DQ` and `AVX512VL` to accelerate some parts of KunQuant-generated code. To enable them, add `avx512dq=True`, `avx512vl=True` in `cfake.X64CPUFlags(...)` respectively.
-
-To see if your CPU supports AVX512 (and `AVX512DQ` and `AVX512VL`), you can run command `lscpu` in Linux and check the outputs.
-
-Enabling AVX512 will slightly improve the performance, if it is supported by the CPU. Experiments only shows ~1% performance gain for 16-threads of AVX512 on Icelake, testing on double-precision Alpha101, with 128 stocks and time length of 12000. A single thread running the same task shows 5% performance gain on AVX512.
-
-### Memory layouts
-
-The developers can choose the memory layout when compiling KunQuant factor libraries. The memory layout decribes how the input/output matrix is organized. Currently, KunQuant supports `TS`, `STs` and `STREAM` as the memory layout. In `TS` layout, the input and output data is in plain `[num_time, num_stocks]` 2D matrix. In `STs` with `blocking_len = 8`, the data should be transformed to `[num_stocks//8, num_time, 8]` for better performance. The `STREAM` layout is for the streaming mode. You can choose the input/output layout independently in `KunCompilerConfig`, by the parameters `KunCompilerConfig(..., input_layout="TS", output_layout="STs")` for example. By default, the input layout is `STs` and the output layout is `TS`. For more info of customizing the factor compilation, see [Customize.md](./Customize.md).
-
-For the alpha101 example above, to use `STs` for input, replace the compilation code with
-
-```python
-lib = cfake.compileit([("alpha101", f, KunCompilerConfig(input_layout="STs", output_layout="TS"))], "out_first_lib", cfake.CppCompilerConfig())
-```
-
-And you need to transpose the numpy array to shape `[features, stocks//8, time, 8]`, we split the axis of stocks into two axis `[stocks//8, 8]`. This step makes the memory layout of the numpy array match the SIMD length of AVX2, so that KunQuant can process the data in parallel in a single SIMD instruction. Notes:
- * the number `8` here is the `blocking_num` of the compiled code. It is decided by the SIMD lanes of the data type and the instruction set (AVX2 or AVX512). By default, the example code of `Alpha101` generates `float` dtype with AVX2. The register size of AVX2 is 256 bits, so the SIMD lanes of `float` should be 8.
- * you can change the `projects/Alpha101/generate.py` to let the compiled code accept the simple matrix of `[features, time, stocks]` without the need of transposing in this step. See below [section](#Specifing Memory layouts and data types) for more details. Using `TS` layout may result slower execution of the factors.
-
-```python
-# [features, stocks, time] => [features, stocks//8, 8, time] => [features, stocks//8, time, 8]
-transposed = collected.reshape((collected.shape[0], -1, 8, collected.shape[2])).transpose((0, 1, 3, 2))
-transposed = np.ascontiguousarray(transposed)
-```
-
-### Specifing data types
-
-KunQuant supports `float` and `double` data types. It can be selected by the `dtype` parameter of `KunCompilerConfig(...)`.
-
-If AVX512 `ON` (by default is `OFF`), the `blocking_len` for `dtype='float'` can be 8 or 16, and for `dtype='double'` can be 4 or 8. If `AVX512` is `OFF`, the `blocking_len` for `dtype='float'` should only be 8, and for `dtype='double'` should be 4.
+KunQuant is a tool for general expressions. You can further read [Customize.md](./Customize.md) for how you can compile your own customized factors. This document also provides infomation on
+ * building and keeping the compilation result for later use
+ * Loading existing compiled factor library
+ * enabling AVX512
+ * select data types (float/double)
+ * Memory layout
 
 
 ## Build from source and developing tips
+
+This section is for developer who would like to build KunQuant from source, instead of installing via pip.
 
 ### Dependency
 
@@ -355,6 +273,11 @@ pip install -e .
 ## Streaming mode
 
 KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./Stream.md)
+
+
+## Using C-style APIs
+
+KunQuant provides C-style APIs to call the generated factor code in shared libraries. See [CAPI.md](./CAPI.md)
 
 
 ## Operator definitions
@@ -411,9 +334,6 @@ python ./tests/gen_alpha158.py --tmp /tmp/a158 --qlib /path/to/source/of/qlib --
 
 It will create the random input at `/tmp/input.npz` and result at `/tmp/alpha158.npz`
 
-## Using C-style APIs
-
-KunQuant provides C-style APIs to call the generated factor code in shared libraries. See [CAPI.md](./CAPI.md)
 
 ## Acknowledgement
 
@@ -422,3 +342,5 @@ The implementation and testing code for Alpha101 is based on https://github.com/
 The implementation code for Alpha158 is based on https://github.com/microsoft/qlib/blob/main/qlib/contrib/data/handler.py. Licensed under the MIT License.
 
 The AVX vector operators at `cpp/KunSIMD/cpu` was developed based on [x86simd](https://github.com/oneapi-src/oneDNN/tree/main/src/graph/backend/graph_compiler/core/src/runtime/kernel_include/x86simd) as a component of GraphCompiler, a backend of oneDNN Graph API. Licensed under the Apache License, Version 2.0 (the "License").
+
+The MSVC environment configuration was originated from cupy, Licensed under the MIT License: https://github.com/cupy/cupy/blob/main/cupy/cuda/compiler.py
