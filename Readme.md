@@ -4,14 +4,8 @@
 
 KunQuant is a optimizer, code generator and executor for financial expressions and factors, e.g. `(close - open) /((high - low) + 0.001)`. The initial aim of it is to generate efficient implementation code for [Alpha101](https://arxiv.org/pdf/1601.00991) of WorldQuant and [Alpha158](https://github.com/microsoft/qlib/blob/main/examples/benchmarks/README.md) of Qlib. Some existing implementations of Alpha101 is straightforward but too simple. Hence we are developing KunQuant to provide optimizated code on a batch of general customized factors.
 
-This project has mainly two parts: `KunQuant` and `KunRunner`. KunQuant is an optimizer & code generator written in Python. It takes a batch of financial expressions as the input and it generates highly optimized C++ code for computing these expressions. KunRunner is a supporting runtime library and Python wrapper to load and run the generated C++ code from KunQuant.
+This project has mainly two parts: `KunQuant` and `KunRunner`. KunQuant is an optimizer & code generator written in Python. It takes a batch of financial expressions as the input and it generates highly optimized C++ code for computing these expressions. KunRunner is a supporting runtime library and Python wrapper to load and run the generated C++ code from KunQuant. Startring from version `0.1.0`, KunQuant no longer depends on `cmake` to run the generated factor code. Users can use pure Python interfaces to build and run factors.
 
-A typical workload of designing and running financial factors with KunQuant will be
-
-1. Write the factors with `KunQuant` Python library
-2. Use `KunQuant` to optimize the factors and transform them into C++ source code
-3. Use `cmake` to compile the generated code
-4. Load the genereted binary via `KunRunner` in Python code
 
 Experiments show that KunQuant-generated code can be more than 170x faster than naive implementation based on Pandas. We ran Alpha001~Alpha101 with [Pandas-based code](https://github.com/yli188/WorldQuant_alpha101_code/blob/master/101Alpha_code_1.py) and our optimized code. See results below:
 
@@ -36,6 +30,9 @@ g++=11.4.0
  * Double and single precision float point data type
  * TS or STs memory layout as input/output in batch mode
  * Python/C/C++ interfaces to call the factor computation functions
+ * Only x86 CPU are supported
+
+**Important node**: For better performance compared with Pandas, KunQuant suggests to use a multiple of `{blocking_len}` as the number of stocks in inputs. For single-precision float type and AVX2 instruction set, `blocking_len=8`. That is, you are suggested to input 8, 16, 24, ..., etc. stocks in a batch, if your code is compiled with AVX2 (without AVX512) and `float` datatype. Other numbers of stocks **are supported**, with lower execution performance.
 
 ## Why KunQuant is fast
 
@@ -43,84 +40,72 @@ g++=11.4.0
  * Redundant computation among factors are eliminated: Think what we can do with `sum(x)`, `avg(x)`, `stddev(x)`? The result of `sum(x)` is needed by all these factors. KunQuant also automatically finds if a internal result of a factor is used by other factors and try to reuse the results.
  * Temp buffers are minimized by operator-fusion. For a factor like `(a+b)/2`, pandas and numpy will first compute the result of `(a+b)` and collect all the result in a buffer. Then, `/2` opeator is applied on each element of the temp buffer of `(a+b)`. This will result in large memory usage and bandwidth. KunQuant will generate C++ code to compute `(a[i]+b[i])/2` in the same loop, to avoid the need to access and allocate temp memory.
 
-## Dependency
+## Installing KunQuant
 
-* pybind11 (automatically cloned via git as a submodule)
-* Python (3.7+ with f-string and dataclass support)
-* cmake
-* A working C++ compiler with C++11 support (e.g. clang, g++, msvc)
-* x86-64 CPU with at least AVX2-FMA instruction set
-* Optionally requires AVX512 on CPU for better performance
+Install a released version:
 
-**Important node**: For better performance compared with Pandas, KunQuant suggests to use a multiple of `{blocking_len}` as the number of stocks in inputs. For single-precision float type and AVX2 instruction set, `blocking_len=8`. That is, you are suggested to input 8, 16, 24, ..., etc. stocks in a batch, if your code is compiled with AVX2 (without AVX512) and `float` datatype. Other numbers of stocks **are supported**, with lower execution performance.
+`pip install KunQuant`
 
-## Compiling and running Alpha101
+Or install the latest version on `main` branch
+
+`pip install -i https://testpypi.python.org/pypi KunQuant`
+
+KunQuant supports Windows (MSVC needs to be installed) and Linux (g++ or clang needs to be installed). Please make sure a working C++ compiler with C++11 support is properly installed and configured in your system
+
+## Example: Build & Run Alpha101
 
 This section serves as am example for compiling an existing factor library: Alpha101 and running it. Building and running your own factors will be similar. If you are only interested in how you can run Alpha101 factors, this section is all you need.
-First, clone the KunQuant repo and make a new directory named `build`:
 
-```shell
-git clone https://github.com/Menooker/KunQuant --recursive
-cd KunQuant
-mkdir build
-cd build
-```
-
-Then run cmake to configure the build:
-
-```shell
-cmake ..
-```
-
-If you want to use a non-default binary of Python executable, instead of the above command, run
-
-```shell
-cmake .. -DPYTHON_EXECUTABLE="PATH/TO/PYTHON/EXECUTABLE"
-```
-
-Build the code with cmake:
-
-```shell
-cmake --build . -- -j4
-```
-
-
-If the build is successful, you should be able to see in the terminal:
-
-```
-...
-[100%] Built target Alpha101
-```
-
-You can find `KunRunner.cpython-??-{x86_64-linux-gnu.so, amd64.pyd, darwin.so}` and `projects/{libAlpha101.so, libAlpha101.dylib}` (on Linux/macOS) or `projects/Release/Alpha101.dll` (on Windows) in your build directory.
-
-`libAlpha101.so`, `Alpha101.dll` or `libAlpha101.dylib` is the compiled code for Alpha101 factors on Linux, Windows or macOS. KunRunner is a Cpp extension for Python with helps to load the generated factor libraries. It also contains some supportive functions for the loaded libraries.
-
-Before running Python, set the environment variable of `PYTHONPATH`:
-
-On linux
-
-```bash
-export PYTHONPATH=$PYTHONPATH:/PATH/TO/KunQuant/build
-```
-
-On windows powershell
-
-```powershell
-$env:PYTHONPATH+=";x:\PATH\TO\KunQuant\build\Release"
-```
-
-Note that `/PATH/TO/KunQuant/build` or `x:\PATH\TO\KunQuant\build\Release` should be the directory containing `KunRunner.cpython-...{pyd,so}`
-
-Then in Python, import KunRunner and load the Alpha101 library:
+First, import KunQuant and necessary modules
 
 ```python
-import KunRunner as kr
-lib = kr.Library.load("./projects/libAlpha101.so")
-modu = lib.getModule("alpha_101")
+from KunQuant.jit import cfake
+from KunQuant.Driver import KunCompilerConfig
+from KunQuant.Op import Builder, Input, Output
+from KunQuant.Stage import Function
+from KunQuant.predefined import Alpha101
+from KunQuant.runner import KunRunner as kr
 ```
 
-Note that you need to give KunRunner a relative or absolute path of the factor library by replacing "./projects/libAlpha101.so" above.
+Then build a `Function` object and generete predefined factor `alpha001` in Alpha101:
+
+```python
+builder = Builder()
+with builder:
+    vclose = Input("close")
+    low = Input("low")
+    high = Input("high")
+    vopen = Input("open")
+    amount = Input("amount")
+    vol = Input("volume")
+    all_data = Alpha101.AllData(low=low,high=high,close=vclose,open=vopen, amount=amount, volume=vol)
+    Output(Alpha101.alpha001(all_data), "alpha001")
+f = Function(builder.ops)
+```
+
+You can review the `alpha001` expression by `print(f)`. And you will get output
+
+```
+v0 = Input@{name:close}()
+v2 = Div@(v0,v1)
+v3 = SubConst@{value:1.0}(v2)
+v4 = LessThanConst@{value:0.0}(v3)
+v5 = WindowedStddev@{window:20}(v3)
+v6 = Select@(v4,v5,v0)
+v7 = Mul@(v6,v6)
+v8 = TsArgMax@{window:5}(v7)
+v9 = Rank@(v8)
+v10 = Output@{name:alpha001}(v9)
+```
+
+Then compile it into an executable object (it may takes a few seconds to compile. If you encounter an subprocess error, please make sure MSVC or g++ is installed).
+
+```python
+lib = cfake.compileit([("alpha101", f, KunCompilerConfig(input_layout="TS", output_layout="TS"))], "out_first_lib", cfake.CppCompilerConfig())
+modu = lib.getModule("alpha101")
+```
+
+We will explain the function `cfake.compileit` in [Customize.md](./Customize.md). Let's continue to see how to use the compiled `lib`.
 
 Load your stock data. In this example, load from local pandas files. We assume the open, close, high, low, volumn and amount data for different stocks are stored in different files.
 
@@ -130,7 +115,6 @@ import pandas as pd
 # we need a multiple of 8 number of stocks
 watch_list = ["000002", "000063", ...]
 num_stocks = len(watch_list)
-assert(num_stocks % 8 == 0)
 df = []
 
 for stockid in watch_list:
@@ -178,17 +162,14 @@ for stockidx, data in enumerate(df):
         collected[colidx, stockidx, :] = mat
 ```
 
-Then an important step is to transpose the numpy array to shape `[features, stocks//8, time, 8]`. We split the axis of stocks into two axis `[stocks//8, 8]`. This step makes the memory layout of the numpy array match the SIMD length of AVX2, so that KunQuant can process the data in parallel in a single SIMD instruction. Notes:
- * the number `8` here is the `blocking_num` of the compiled code. It is decided by the SIMD lanes of the data type and the instruction set (AVX2 or AVX512). By default, the example code of `Alpha101` generates `float` dtype with AVX2. The register size of AVX2 is 256 bits, so the SIMD lanes of `float` should be 8.
- * you can change the `projects/Alpha101/generate.py` to let the compiled code accept the simple matrix of `[features, time, stocks]` without the need of transposing in this step. See below [section](#Specifing Memory layouts and data types) for more details. Using `TS` layout may result slower execution of the factors.
-
+Transpose the matrix to `[features, time, stocks]`
 ```python
-# [features, stocks, time] => [features, stocks//8, 8, time] => [features, stocks//8, time, 8]
-transposed = collected.reshape((collected.shape[0], -1, 8, collected.shape[2])).transpose((0, 1, 3, 2))
+# [features, stocks, time] => [features, time, stocks]
+transposed = collected.transpose((0, 2, 1))
 transposed = np.ascontiguousarray(transposed)
 ```
 
-Now fill the input data in a dict
+Now fill the input data in a dict of `{"open": matrix_open, "close": ...}`
 
 ```python
 input_dict = dict()
@@ -198,7 +179,7 @@ for colname, colidx in col2idx.items():
 
 Create an executor and compute the factors!
 
-```
+```python
 # using 4 threads
 executor = kr.createMultiThreadExecutor(4)
 out = kr.runGraph(executor, modu, input_dict, 0, num_time)
@@ -234,33 +215,70 @@ out = kr.runGraph(executor, modu, input_dict, 0, num_time, out_dict)
 
 Note that the executors are reusable. A multithread executor is actually a thread pool inside. If you want to run on multiple batches of data, you don’t need to create new executors for each batch.
 
+
 ## Customized factors
 
-KunQuant is a tool for general expressions. You can further read [Customize.md](./Customize.md) for how you can compile your own customized factors.
+KunQuant is a tool for general expressions. You can further read [Customize.md](./Customize.md) for how you can compile your own customized factors. This document also provides infomation on
+ * building and keeping the compilation result for later use
+ * Loading existing compiled factor library
+ * enabling AVX512
+ * select data types (float/double)
+ * Memory layout
+
+
+## Build from source and developing tips
+
+This section is for developer who would like to build KunQuant from source, instead of installing via pip.
+
+### Dependency
+
+* pybind11 (automatically cloned via git as a submodule)
+* Python (3.7+ with f-string and dataclass support)
+* cmake
+* A working C++ compiler with C++11 support (e.g. clang, g++, msvc)
+* x86-64 CPU with at least AVX2-FMA instruction set
+* Optionally requires AVX512 on CPU for better performance
+
+### Build and install
+
+```shell
+git clone https://github.com/Menooker/KunQuant --recursive
+cd KunQuant
+pip install .
+```
+### Build in develop mode
+
+If you would like to install KunQuant and edit it. You can use `editable` mode of python library.
+
+Linux:
+
+```shell
+# in the root directory of KunQuant
+KUN_BUILD_TESTS=1 pip install -e . 
+```
+
+Windows powershell:
+
+```shell
+# in the root directory of KunQuant
+$env:KUN_BUILD_TESTS=1
+pip install -e . 
+```
+
+### Useful environment variables
+
+ * `KUN_DEBUG=1` Print the internal results of each compiler pass
+ * `KUN_DEBUG_JIT=1` Print the C++ compilation internals, including command lines, temp results and etc. 
 
 ## Streaming mode
 
 KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./Stream.md)
 
-## Specifing Memory layouts and data types
 
-The developers can choose the memory layout when compiling KunQuant factor libraries. The memory layout decribes how the input/output matrix is organized. Currently, KunQuant supports `TS`, `STs` and `STREAM` as the memory layout. In `TS` layout, the input and output data is in plain `[num_time, num_stocks]` 2D matrix. In `STs` with `blocking_len = 8`, the data should be transformed to `[num_stocks//8, num_time, 8]` for better performance. The `STREAM` layout is for the streaming mode. You can choose the input/output layout independently in `compileit()` function of `generate.py`, by the parameters `compileit(..., input_layout="TS", output_layout="STs")` for example. By default, the input layout is `STs` and the output layout is `TS`. For more info of customizing the factor compilation, see [Customize.md](./Customize.md).
+## Using C-style APIs
 
-KunQuant supports `float` and `double` data types. It can be selected by the `dtype` parameter of `compileit()` in your own `generate.py`.
+KunQuant provides C-style APIs to call the generated factor code in shared libraries. See [CAPI.md](./CAPI.md)
 
-If CMake Option `-DKUN_AVX512` is `ON` (by default is `OFF`), the `blocking_len` for `dtype='float'` can be 8 or 16, and for `dtype='double'` can be 4 or 8. If `-DKUN_AVX512` is not specified or is `OFF`, the `blocking_len` for `dtype='float'` should only be 8, and for `dtype='double'` should be 4.
-
-## Enabling AVX512
-
-This project by default turns off AVX512, since this intruction set is not yet well adopted. If you are sure your CPU has AVX512, you can turn it on by adding cmake option `-DKUN_AVX512=ON` when running `cmake` command above. This will enable AVX512 features when compiling the KunQuant generated code. Some speed-up over `AVX2` mode are expected.
-
-In your customized project, you need to specify `blocking_len` parameter of in `compileit()` function of `generate.py` to enable AVX512. See above [section](#Specifing Memory layouts and data types). The example projects `Alpha101`, `Alpha101Stream`, `Alpha158` in `projects/` will detect if `-DKUN_AVX512=ON` and automatically set `blocking_len` to use AVX2 or AVX512. Please note that `blocking_len` will affect the `STs` format.
-
-There are some other CPU instruction sets that is optional for KunQuant. You can turn on `AVX512DQ` and `AVX512VL` to accelerate some parts of KunQuant-generated code. To enable them, add `-DKUN_AVX512DQ=ON` and `-DKUN_AVX512VL=ON` in cmake options respectively.
-
-To see if your CPU supports AVX512 (and `AVX512DQ` and `AVX512VL`), you can run command `lscpu` in Linux and check the outputs.
-
-Enabling AVX512 will slightly improve the performance, if it is supported by the CPU. Experiments only shows ~1% performance gain for 16-threads of AVX512 on Icelake, testing on double-precision Alpha101, with 128 stocks and time length of 12000. A single thread running the same task shows 5% performance gain on AVX512.
 
 ## Operator definitions
 
@@ -316,9 +334,6 @@ python ./tests/gen_alpha158.py --tmp /tmp/a158 --qlib /path/to/source/of/qlib --
 
 It will create the random input at `/tmp/input.npz` and result at `/tmp/alpha158.npz`
 
-## Using C-style APIs
-
-KunQuant provides C-style APIs to call the generated factor code in shared libraries. See [CAPI.md](./CAPI.md)
 
 ## Acknowledgement
 
@@ -327,3 +342,5 @@ The implementation and testing code for Alpha101 is based on https://github.com/
 The implementation code for Alpha158 is based on https://github.com/microsoft/qlib/blob/main/qlib/contrib/data/handler.py. Licensed under the MIT License.
 
 The AVX vector operators at `cpp/KunSIMD/cpu` was developed based on [x86simd](https://github.com/oneapi-src/oneDNN/tree/main/src/graph/backend/graph_compiler/core/src/runtime/kernel_include/x86simd) as a component of GraphCompiler, a backend of oneDNN Graph API. Licensed under the Apache License, Version 2.0 (the "License").
+
+The MSVC environment configuration was originated from cupy, Licensed under the MIT License: https://github.com/cupy/cupy/blob/main/cupy/cuda/compiler.py

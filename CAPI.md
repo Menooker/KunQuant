@@ -4,7 +4,7 @@ You can call generated factor code in your C code via our C-style APIs. For othe
 
 ## Build Necessary dependencies
 
-You need to build the target `KunRuntime` for the core runtime library of KunQuant. And you may need to build your factor library like `Alpah101`. In your C-language program (or whatever else language), you need to link to `libKunRuntime.so` (in Linux. Other OS may have different names like `KunRuntime.dll` or `libKunRuntime.dylib`). You don't need to directly link to the factor library (like `libAlpha101.so`).
+You need to build the target `KunRuntime` for the core runtime library of KunQuant (or you can find it in `KunQuant/runner/` in the KunQuant install directory). And you may need to build your factor as a shared library. See `Save the compilation result as a shared library` in [Customize.md](./Customize.md). In your C-language program (or whatever else language), you need to link to `libKunRuntime.so` (in Linux. Other OS may have different names like `KunRuntime.dll` or `libKunRuntime.dylib`). You don't need to directly link to the factor library (like `libAlpha101.so`).
 
 ## C language example
 

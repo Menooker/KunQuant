@@ -151,7 +151,7 @@ class _fake_temp:
         if not self.keep_files:
             shutil.rmtree(self.dir)
 
-def compileit(func: Tuple[str, Function, KunCompilerConfig], libname: str, compiler_config: CppCompilerConfig, tempdir: str = None, keep_files: bool = False, load: bool = True) -> Union[KunRunner.Library, str]:
+def compileit(func: List[Tuple[str, Function, KunCompilerConfig]], libname: str, compiler_config: CppCompilerConfig, tempdir: str = None, keep_files: bool = False, load: bool = True) -> Union[KunRunner.Library, str]:
     lib = None
     src: List[Tuple[str, str]] = []
     if keep_files and not tempdir:
