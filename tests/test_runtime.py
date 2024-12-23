@@ -119,8 +119,6 @@ def test_ema(lib):
     df = pd.DataFrame(inp)
     expected = ExpMovingAvg(df)
     expected2 = ExpMovingAvg(ExpMovingAvg(ExpMovingAvg(df.shift(1))))
-    print(output[:,0])
-    print(expected[0])
     np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)    
     np.testing.assert_allclose(out["gh_issue_26"], expected2, rtol=1e-6, equal_nan=True)
 
@@ -378,7 +376,8 @@ funclist = [check_1(),
     check_ema(),
     check_argmin(),
     check_aligned(),
-    check_rank_alpha029()]
+    check_rank_alpha029()
+    ]
 lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
 
 test_cfake()
