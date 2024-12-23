@@ -70,6 +70,11 @@ jobs:
         python -m pip install auditwheel
         auditwheel repair dist/*.whl -w dist/ --plat manylinux_2_31_x86_64
         rm dist/*linux_x86_64.whl
+    - name: Download all windows the dists
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions-windows-2022${{ matrix.python-version }}
+        path: dist/
     - name: Publish distribution 📦 to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
   publish-to-testpypi:

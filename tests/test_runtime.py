@@ -102,6 +102,7 @@ def check_ema():
     with builder:
         inp1 = Input("a")
         out2 = Output(ExpMovingAvg(inp1, 5), "ou2")
+        Output(ExpMovingAvg(ExpMovingAvg(ExpMovingAvg(BackRef(inp1, 1), 5), 5), 5), "gh_issue_26")
     f = Function(builder.ops)
     return "test_ema", f, KunCompilerConfig(input_layout="TS", output_layout="TS")
 
@@ -109,11 +110,17 @@ def test_ema(lib):
     modu = lib.getModule("test_ema")
     assert(modu)
     inp = np.random.rand(20, 24).astype("float32")
+    inp[5,:] = np.nan
+    def ExpMovingAvg(v: pd.DataFrame):
+        return v.ewm(span=5, adjust=False, ignore_na=True).mean()
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
     output = out["ou2"]
-    expected = pd.DataFrame(inp).ewm(span=5, adjust=False).mean()
-    np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)
+    df = pd.DataFrame(inp)
+    expected = ExpMovingAvg(df)
+    expected2 = ExpMovingAvg(ExpMovingAvg(ExpMovingAvg(df.shift(1))))
+    np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)    
+    np.testing.assert_allclose(out["gh_issue_26"], expected2, rtol=1e-6, equal_nan=True)
 
 ####################################
 
@@ -369,7 +376,8 @@ funclist = [check_1(),
     check_ema(),
     check_argmin(),
     check_aligned(),
-    check_rank_alpha029()]
+    check_rank_alpha029()
+    ]
 lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
 
 test_cfake()
