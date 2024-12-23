@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 3.5)
 add_subdirectory(3rdparty/pybind11)
 include_directories(${pybind11_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/cpp)
 
+set(CMAKE_INSTALL_RPATH "\$ORIGIN")
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+
 option(KUN_AVX512 "Enable AVX512 instruction set" OFF)
 option(KUN_AVX512DQ "Enable AVX512DQ instruction set" OFF)
 option(KUN_AVX512VL "Enable AVX512VL instruction set" OFF)
@@ -51,7 +54,7 @@ target_link_libraries(KunTest KunRunner)
 file(GLOB_RECURSE KunCApiTestSrc ${PROJECT_SOURCE_DIR}/tests/capi/*.cpp)
 add_executable(KunCApiTest EXCLUDE_FROM_ALL ${KunCApiTestSrc})
 target_link_libraries(KunCApiTest KunRuntime)
-add_dependencies(KunCApiTest KunTest Alpha101Stream)
+add_dependencies(KunCApiTest KunTest)
 
 if(NOT DEFINED PYTHON_EXECUTABLE)
     set(PYTHON_EXECUTABLE ${Python_EXECUTABLE})
@@ -59,6 +62,4 @@ endif()
 
 message(STATUS "PYTHON_EXECUTABLE = ${PYTHON_EXECUTABLE}")
 
-add_subdirectory(projects)
-
-add_custom_target(TestingTargets DEPENDS Alpha101 Alpha158 Alpha101Stream KunCApiTest KunTest KunRunner Test)
+add_custom_target(TestingTargets DEPENDS KunCApiTest KunTest KunRunner)

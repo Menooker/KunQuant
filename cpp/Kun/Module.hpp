@@ -2,6 +2,7 @@
 
 #include "Stage.hpp"
 #include <memory>
+#include <functional>
 
 namespace kun {
 
@@ -27,6 +28,7 @@ struct Module {
 
 struct Library {
     void *handle;
+    std::function<void(Library*)> dtor;
     KUN_API const Module *getModule(const char *name);
     KUN_API static std::shared_ptr<Library> load(const char *filename);
     Library(const Library &) = delete;

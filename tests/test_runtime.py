@@ -1,3 +1,4 @@
+from KunQuant.Driver import KunCompilerConfig
 import numpy as np
 import pandas as pd
 import sys
@@ -6,11 +7,11 @@ import os
 from KunQuant.jit import cfake
 from KunQuant.Op import Input, Output, Builder
 from KunQuant.Stage import Function
-
-base_dir = "./build/Release/projects" if os.name == "nt" else "./build/projects"
-base_dir2 = "./build/Release/" if os.name == "nt" else "./build/"
-sys.path.append(base_dir2)
-import KunRunner as kr
+from KunQuant.Op import *
+from KunQuant.ops import *
+from KunQuant.predefined.Alpha101 import *
+from  KunQuant.runner import KunRunner as kr
+import sys
 
 
 def test_cfake():
@@ -20,22 +21,16 @@ def test_cfake():
         inp2 = Input("b")
         Output(inp1 * inp2 + 10, "out")
     f = Function(builder.ops)
-    lib, mod = cfake.compileit(f, "test1", input_layout="TS", output_layout="TS")
-
+    lib = cfake.compileit([("test1", f, cfake.KunCompilerConfig(input_layout="TS", output_layout="TS"))], "cfaketest", cfake.CppCompilerConfig())
+    mod = lib.getModule("test1")
     inp = np.random.rand(10, 24).astype("float32")
     inp2 = np.random.rand(10, 24).astype("float32")
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, mod, {"a": inp, "b": inp2}, 0, 10)
     np.testing.assert_allclose(inp * inp2 + 10, out["out"])
 
-# inp = np.ndarray((3, 100, 8), dtype="float32")
-
-lib = kr.Library.load(base_dir+"/Test.dll" if os.name == "nt" else base_dir+"/libTest.so")
-print(lib)
-
-
-def test_runtime():
-    lib2 = kr.Library.load(base_dir2+"/KunTest.dll" if os.name == "nt" else base_dir2+"/libKunTest.so")
+def test_runtime(libpath):
+    lib2 = kr.Library.load(libpath)
     inp = np.random.rand(3, 10, 8).astype("float32")
     modu = lib2.getModule("testRuntimeModule")
     executor = kr.createSingleThreadExecutor()
@@ -45,7 +40,6 @@ def test_runtime():
     if not np.allclose(expected, out["output"]):
         raise RuntimeError("")
 
-
 def ST_ST8t(data: np.ndarray, blocking = 8) -> np.ndarray:
     return np.ascontiguousarray(data.reshape((-1, blocking, data.shape[1])).transpose((0, 2, 1)))
 
@@ -53,7 +47,20 @@ def ST_ST8t(data: np.ndarray, blocking = 8) -> np.ndarray:
 def ST8t_ST(data: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(data.transpose((0, 2, 1)).reshape((-1, data.shape[1])))
 
-def test_avg_stddev():
+def build_avg_and_stddev():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        v1 = WindowedAvg(inp1, 10)
+        v2 = WindowedStddev(inp1, 10)
+        out1 = Output(v1, "ou1")
+        out2 = Output(v2, "ou2")
+    return Function(builder.ops)
+
+def check_1():
+    return "avg_and_stddev", build_avg_and_stddev(), KunCompilerConfig()
+
+def test_avg_stddev(lib):
     modu = lib.getModule("avg_and_stddev")
     assert(modu)
     inp = np.random.rand(24, 20).astype("float32")
@@ -68,7 +75,12 @@ def test_avg_stddev():
     np.testing.assert_allclose(outmean, expected_mean, rtol=1e-6, equal_nan=True)
     np.testing.assert_allclose(outstd, expected_stddev, rtol=1e-6, equal_nan=True)
 
-def test_avg_stddev_TS():
+####################################
+
+def check_TS():
+    return "avg_and_stddev_TS", build_avg_and_stddev(), KunCompilerConfig(input_layout="TS", output_layout="TS")
+
+def test_avg_stddev_TS(lib):
     modu = lib.getModule("avg_and_stddev_TS")
     assert(modu)
     inp = np.random.rand(24, 20).astype("float32")
@@ -83,7 +95,75 @@ def test_avg_stddev_TS():
     np.testing.assert_allclose(outmean, expected_mean, rtol=1e-6, equal_nan=True)
     np.testing.assert_allclose(outstd, expected_stddev, rtol=1e-6, equal_nan=True)
 
-def test_rank():
+####################################
+
+def check_ema():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out2 = Output(ExpMovingAvg(inp1, 5), "ou2")
+        Output(ExpMovingAvg(ExpMovingAvg(ExpMovingAvg(BackRef(inp1, 1), 5), 5), 5), "gh_issue_26")
+    f = Function(builder.ops)
+    return "test_ema", f, KunCompilerConfig(input_layout="TS", output_layout="TS")
+
+def test_ema(lib):
+    modu = lib.getModule("test_ema")
+    assert(modu)
+    inp = np.random.rand(20, 24).astype("float32")
+    inp[5,:] = np.nan
+    def ExpMovingAvg(v: pd.DataFrame):
+        return v.ewm(span=5, adjust=False, ignore_na=True).mean()
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
+    output = out["ou2"]
+    df = pd.DataFrame(inp)
+    expected = ExpMovingAvg(df)
+    expected2 = ExpMovingAvg(ExpMovingAvg(ExpMovingAvg(df.shift(1))))
+    print(output[:,0])
+    print(expected[0])
+    np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)    
+    np.testing.assert_allclose(out["gh_issue_26"], expected2, rtol=1e-6, equal_nan=True)
+
+####################################
+
+def check_argmin():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out2 = Output(TsArgMin(inp1, 5), "ou2")
+        Output(WindowedMin(inp1, 5), "tsmin")
+        Output(TsRank(inp1, 5), "tsrank")
+    f = Function(builder.ops)
+    return "test_argmin", f, KunCompilerConfig(input_layout="TS", output_layout="TS")
+
+def test_argmin_issue19(lib):
+    #https://github.com/Menooker/KunQuant/issues/19
+    modu = lib.getModule("test_argmin")
+    assert(modu)
+    inp = np.empty((6, 8),"float32")
+    data = [ 0.6898481863442985, 0.6992020600574415, 0.6992020600574417, 0.6968635916291558, 0.6968635916291558, 0.6968635916291558 ]
+    for i in range(6):
+        inp[i, :] = data[i]
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": inp}, 0, 6)
+    df = pd.DataFrame(inp)
+    expected =df.rolling(5, min_periods=1).apply(lambda x: x.argmin() + 1, raw=True)
+    output = out["ou2"][4:]
+    np.testing.assert_allclose(output, expected[4:], rtol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(out["tsmin"], df.rolling(5).min(), rtol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(out["tsrank"], df.rolling(5).rank(), rtol=1e-6, equal_nan=True)
+
+####################################
+
+def check_rank():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out2 = Output(Rank(inp1), "ou2")
+    f = Function(builder.ops)
+    return "test_rank", f, KunCompilerConfig()
+
+def test_rank(lib):
     modu = lib.getModule("test_rank")
     assert(modu)
     def check(inp, timelen):
@@ -105,7 +185,20 @@ def test_rank():
     inp[10,:] = np.nan
     check(inp, 20)
 
-def test_rank2():
+####################################
+
+def check_rank2():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        v1 = Add(inp1, inp1)
+        v2 = Rank(v1)
+        v3 = Add(v2, v1)
+        Output(v3, "out")
+    f = Function(builder.ops)
+    return "test_rank2", f, KunCompilerConfig(dtype="double", input_layout="TS", output_layout="TS")
+
+def test_rank2(lib):
     modu = lib.getModule("test_rank2")
     assert(modu)
     def compute(stocks):
@@ -125,7 +218,20 @@ def test_rank2():
     # test unaligned
     compute(20)
 
-def test_rank029():
+####################################
+
+def check_rank_alpha029():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inner = WindowedSum(Rank(Rank(-1 * Rank(inp1))), 5)
+        v = Rank(inner)
+        Output(inner, "ou1")
+        Output(v, "ou2")
+    f = Function(builder.ops)
+    return "test_rank_alpha029", f, KunCompilerConfig(input_layout="TS", output_layout="TS", allow_unaligned = True, dtype="double", options={"opt_reduce": True, "fast_log": True})
+
+def test_rank029(lib):
     modu = lib.getModule("test_rank_alpha029")
     assert(modu)
     def rank(df):
@@ -154,7 +260,17 @@ def test_rank029():
         np.testing.assert_allclose(output2, expected, rtol=0, atol=0, equal_nan=True)
     compute(20)
 
-def test_log(dtype, name):
+####################################
+
+def check_log(dtype, name):
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        Output(Log(inp1), "outlog")
+    f = Function(builder.ops)
+    return (f"test_log{name}", f, KunCompilerConfig(dtype=dtype))
+
+def test_log(lib, dtype, name):
     modu = lib.getModule(f"test_log{name}")
     inp = np.zeros(shape=(24, 20), dtype=dtype)
     for i in range(24):
@@ -173,7 +289,23 @@ def test_log(dtype, name):
         warnings.filterwarnings('ignore', r'(divide by zero encountered)|(invalid value encountered)')
         np.testing.assert_allclose(output, np.log(inp), rtol=1e-5, atol=1e-5, equal_nan=True)
 
-def test_pow():
+####################################
+
+def check_pow():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inp2 = Input("b")
+        Output(Pow(inp1, ConstantOp(0.5)), "sqr")
+        Output(Pow(inp1, ConstantOp(2)), "pow2")
+        Output(Pow(inp1, ConstantOp(5)), "pow5")
+        Output(Pow(inp1, ConstantOp(1.2)), "pow1_2")
+        Output(Pow(inp1, inp2), "powa_b")
+        Output(Pow(ConstantOp(1.2), inp2), "pow12_b")
+    f = Function(builder.ops)
+    return ("test_pow", f, KunCompilerConfig())
+
+def test_pow(lib):
     modu = lib.getModule("test_pow")
     base = np.zeros(shape=(16, 20), dtype="float32")
     for i in range(16):
@@ -200,40 +332,17 @@ def test_pow():
         # np.testing.assert_allclose(ST8t_ST(out["powa_b"]), np.power(base, expo), rtol=1e-5, atol=1e-5, equal_nan=True)
         np.testing.assert_allclose(ST8t_ST(out["pow12_b"]), np.power(1.2, expo), rtol=1e-5, atol=1e-5, equal_nan=True)
 
-def test_ema():
-    modu = lib.getModule("test_ema")
-    assert(modu)
-    inp = np.random.rand(20, 24).astype("float32")
-    inp[5,:] = np.nan
-    def ExpMovingAvg(v: pd.DataFrame):
-        return v.ewm(span=5, adjust=False, ignore_na=True).mean()
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
-    output = out["ou2"]
-    df = pd.DataFrame(inp)
-    expected = ExpMovingAvg(df)
-    expected2 = ExpMovingAvg(ExpMovingAvg(ExpMovingAvg(df.shift(1))))
-    np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)    
-    np.testing.assert_allclose(out["gh_issue_26"], expected2, rtol=1e-6, equal_nan=True)
+####################################
 
-def test_argmin_issue19():
-    #https://github.com/Menooker/KunQuant/issues/19
-    modu = lib.getModule("test_argmin")
-    assert(modu)
-    inp = np.empty((6, 8),"float32")
-    data = [ 0.6898481863442985, 0.6992020600574415, 0.6992020600574417, 0.6968635916291558, 0.6968635916291558, 0.6968635916291558 ]
-    for i in range(6):
-        inp[i, :] = data[i]
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": inp}, 0, 6)
-    df = pd.DataFrame(inp)
-    expected =df.rolling(5, min_periods=1).apply(lambda x: x.argmin() + 1, raw=True)
-    output = out["ou2"][4:]
-    np.testing.assert_allclose(output, expected[4:], rtol=1e-6, equal_nan=True)
-    np.testing.assert_allclose(out["tsmin"], df.rolling(5).min(), rtol=1e-6, equal_nan=True)
-    np.testing.assert_allclose(out["tsrank"], df.rolling(5).rank(), rtol=1e-6, equal_nan=True)
+def check_aligned():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out2 = Output(Rank(inp1) *2, "ou2")
+    f = Function(builder.ops)
+    return ("test_aligned", f, KunCompilerConfig(input_layout="TS", output_layout="TS", allow_unaligned = False))
 
-def test_aligned():
+def test_aligned(lib):
     modu = lib.getModule("test_aligned")
     assert(modu)
     def check(inp, timelen):
@@ -256,17 +365,35 @@ def test_aligned():
     inp = np.random.rand(24, 20).astype("float32")
     check(inp, 20)
 
-test_avg_stddev_TS()
-test_runtime()
-test_avg_stddev()
-test_rank()
-test_rank2()
-test_log("float32", "")
-test_log("float64", "64")
-test_pow()
-test_ema()
-test_argmin_issue19()
-test_aligned()
-test_rank029()
+####################################
+
+funclist = [check_1(),
+    check_TS(),
+    check_rank(),
+    check_rank2(),
+    check_log("float", ""),
+    check_log("double", "64"),
+    check_pow(),
+    # check_alpha101_double(),
+    check_ema(),
+    check_argmin(),
+    check_aligned(),
+    check_rank_alpha029()]
+lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
+
 test_cfake()
+test_avg_stddev_TS(lib)
+kun_test_dll = os.path.join(cfake.get_runtime_path(), "KunTest.dll" if cfake.is_windows() else "libKunTest.so")
+if os.path.exists(kun_test_dll):
+    test_runtime(kun_test_dll)
+test_avg_stddev(lib)
+test_rank(lib)
+test_rank2(lib)
+test_log(lib, "float32", "")
+test_log(lib, "float64", "64")
+test_pow(lib)
+test_ema(lib)
+test_argmin_issue19(lib)
+test_aligned(lib)
+test_rank029(lib)
 print("done")

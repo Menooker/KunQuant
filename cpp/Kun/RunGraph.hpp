@@ -3,6 +3,7 @@
 #include "Context.hpp"
 #include "Module.hpp"
 #include <unordered_map>
+#include <string>
 #include <vector>
 
 namespace kun {

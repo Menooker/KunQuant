@@ -14,30 +14,13 @@ jobs:
     - uses: actions/checkout@v3
       with:
         submodules: recursive
-    - name: make
-      working-directory: ./
-      run: mkdir build && cd  build && cmake .. && cmake --build . --target Alpha101 --config Release -j
-  test-linux:
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v3
-      with:
-        submodules: recursive
     - uses: actions/setup-python@v5
       with:
         python-version: '3.9'
-        cache: 'pip' # caching pip dependencies
-    - run: pip install -r .github/workflows/requirements.txt
     - name: make
       working-directory: ./
-      run: mkdir build && cd build && cmake .. && cmake --build . --target TestingTargets --config Release -- -j
-    - name: download data
-      working-directory: ./
-      run: wget -nv -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz && wget -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz
-    - name: test
-      working-directory: ./
-      run: PYTHONPATH="./build:." bash ./tests/tests.sh
-  test-linux-avx512:
+      run: KUN_BUILD_TESTS=1 pip install . -v
+  test-linux:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v3
@@ -61,10 +44,46 @@ jobs:
       run: tar -xf sde-external-9.38.0-2024-04-18-lin.tar.xz
     - name: make
       working-directory: ./
-      run: mkdir build && cd build && cmake .. -DKUN_AVX512=ON -DKUN_AVX512VL=ON -DKUN_AVX512DQ=ON && cmake --build . --target TestingTargets --config Release -- -j
+      run: KUN_BUILD_TESTS=1 pip install . -v
     - name: download data
       working-directory: ./
       run: wget -nv -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz && wget -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz
     - name: test
       working-directory: ./
-      run: PATH="$PATH:./sde-external-9.38.0-2024-04-18-lin/" PYTHONPATH="./build:." bash ./tests/tests_avx512.sh
+      run: PATH="$PATH:./sde-external-9.38.0-2024-04-18-lin/" bash ./tests/tests.sh
+  test-windows:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+        cache: 'pip' # caching pip dependencies
+    - run: pip install -r .github/workflows/requirements.txt
+    - name: make
+      working-directory: ./
+      run: |
+        $env:KUN_BUILD_TESTS=1
+        pip install -e . -v
+    - name: download data
+      working-directory: ./
+      run: |
+        Invoke-WebRequest https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz -OutFile alpha158.npz
+        Invoke-WebRequest https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz -OutFile input.npz
+    - name: Add msbuild to PATH
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64
+    - name: Basic test
+      working-directory: ./
+      run: |
+        $env:KUN_DEBUG_JIT=1
+        python tests/test.py
+        python tests/test2.py
+        python tests/test_runtime.py
+    - name: Alpha158 test
+      working-directory: ./
+      run: |
+        python ./tests/test_alpha158.py --inputs ./input.npz --ref ./alpha158.npz --action run_avx2

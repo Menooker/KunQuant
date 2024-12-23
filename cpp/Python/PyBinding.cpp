@@ -1,6 +1,12 @@
 #include <Kun/Context.hpp>
 #include <Kun/Module.hpp>
 #include <Kun/RunGraph.hpp>
+#include <KunSIMD/cpu/Table.hpp>
+#ifdef _WIN32
+#include <Windows.h>
+#else
+#include <dlfcn.h>
+#endif
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -42,12 +48,39 @@ static void expectContiguousShape(kun::Datatype dtype,
 }
 
 PYBIND11_MODULE(KunRunner, m) {
+    m.attr("__name__") = "KunQuant.runner.KunRunner";
     m.doc() = R"(Code Runner for KunQuant generated code)";
 
     py::class_<kun::Executor, std::shared_ptr<kun::Executor>>(m, "Executor");
     m.def("createSingleThreadExecutor", &kun::createSingleThreadExecutor);
     m.def("createMultiThreadExecutor", &kun::createMultiThreadExecutor);
+    m.def("getRuntimePath", []() -> std::string {
+#ifdef _WIN32
+    char path[MAX_PATH];
+    HMODULE hm = NULL;
 
+    if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | 
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR) &kun_simd::LogLookupTable<float>::logr_table, &hm) == 0) {
+        int ret = GetLastError();
+        fprintf(stderr, "GetModuleHandle failed, error = %d\n", ret);
+        return std::string();
+        // Return or however you want to handle an error.
+    }
+    if (GetModuleFileName(hm, path, sizeof(path)) == 0) {
+        int ret = GetLastError();
+        fprintf(stderr, "GetModuleFileName failed, error = %d\n", ret);
+        return std::string();
+        // Return or however you want to handle an error.
+    }
+    return path;
+#else
+    // On Windows, use GetMappedFileNameW
+    Dl_info info;
+    if (dladdr(&kun_simd::LogLookupTable<float>::logr_table, &info)) { return info.dli_fname; }
+#endif
+        return std::string();
+    });
     py::class_<kun::Module>(m, "Module")
         .def_property_readonly("output_layout",
                                [](kun::Module &mod) {
@@ -85,6 +118,11 @@ PYBIND11_MODULE(KunRunner, m) {
         });
     py::class_<kun::Library, std::shared_ptr<kun::Library>>(m, "Library")
         .def_static("load", &kun::Library::load)
+        .def("setCleanup", [](kun::Library& v, py::function f) {
+            v.dtor = [f](kun::Library* v) {
+                f();
+            };
+        })
         .def("getModule", &kun::Library::getModule,
              py::return_value_policy::reference);
     m.def(

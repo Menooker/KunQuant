@@ -4,10 +4,19 @@ from KunQuant.Op import Input, Output, OpBase, CrossSectionalOp
 from typing import Dict, List, Union
 import typing
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from KunQuant.passes import Util as PassUtil
 
 required_version = "0x64100003"
+@dataclass
+class KunCompilerConfig:
+    partition_factor : int = 3
+    dtype:str = "float"
+    blocking_len: int = None
+    input_layout:str = "STs"
+    output_layout:str = "STs"
+    allow_unaligned: Union[bool, None] = None
+    options: dict = field(default_factory=dict)
 
 def optimize(f: Function, options: dict)->Dict[str, int]:
     if PassUtil.debug_mode:
