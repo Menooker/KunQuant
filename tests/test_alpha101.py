@@ -20,7 +20,7 @@ def check_alpha101(avx: str):
             Output(out, f.__name__)
     simd_len = 16 if avx == "avx512" else 8
     f = Function(builder.ops)
-    return "alpha_101", f, KunCompilerConfig(blocking_len=simd_len, output_layout="TS", options={"opt_reduce": True, "fast_log": True})
+    return "alpha_101", f, KunCompilerConfig(blocking_len=simd_len, output_layout="TS", split_source=12, options={"opt_reduce": True, "fast_log": True})
 
 def check_alpha101_double(avx: str):
     builder = Builder()

@@ -152,13 +152,15 @@ class _fake_temp:
             shutil.rmtree(self.dir)
 
 def compileit(func: List[Tuple[str, Function, KunCompilerConfig]], libname: str, compiler_config: CppCompilerConfig, tempdir: str = None, keep_files: bool = False, load: bool = True) -> Union[KunRunner.Library, str]:
+    get_compiler_env() # trigger cache
     lib = None
     src: List[Tuple[str, str]] = []
     if keep_files and not tempdir:
         raise RuntimeError("if keep_files=True, tempdir should not be empty")
     def kuncompile():
         for name, f, cfg in func:
-            src.append((name, driver_compileit(f, name, **dataclasses.asdict(cfg))))
+            for idx, src_str in enumerate(driver_compileit(f, name, **dataclasses.asdict(cfg))):
+                src.append((f"{name}_{idx}", src_str))
     def dowork():
         nonlocal lib
         with _fake_temp(tempdir, libname, keep_files) as tmpdirname:

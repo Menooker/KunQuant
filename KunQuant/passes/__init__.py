@@ -1,4 +1,4 @@
-from .Decompose import decompose, decompose_rank
+from .Decompose import decompose, decompose_rank, move_dup_rank_output
 from .ExprFold import expr_fold
 from .TempWindowElim import temp_window_elim
 from .SpecialOpt import special_optimize

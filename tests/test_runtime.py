@@ -14,6 +14,19 @@ from  KunQuant.runner import KunRunner as kr
 import sys
 
 
+def test_corrwith():
+    a = np.random.rand(24, 20).astype("float32")
+    b = np.random.rand(24, 20).astype("float32")
+    ret = np.random.rand(24, 20).astype("float32")
+    out1 = np.empty((24), dtype="float32")
+    out2 = np.empty((24), dtype="float32")
+    executor = kr.createSingleThreadExecutor()
+    kr.corrWith(executor,"TS", [a,b], ret, [out1, out2])
+    ex1 = pd.DataFrame(a).corrwith(pd.DataFrame(ret), axis=1)
+    np.testing.assert_allclose(out1, ex1, atol=1e-6, rtol=1e-4, equal_nan=True)
+    ex1 = pd.DataFrame(b).corrwith(pd.DataFrame(ret), axis=1)
+    np.testing.assert_allclose(out2, ex1, atol=1e-6, rtol=1e-4, equal_nan=True)
+
 def test_cfake():
     builder = Builder()
     with builder:
@@ -365,6 +378,7 @@ def test_aligned(lib):
 
 ####################################
 
+test_corrwith()
 funclist = [check_1(),
     check_TS(),
     check_rank(),
