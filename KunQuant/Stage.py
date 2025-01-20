@@ -1,4 +1,5 @@
-from KunQuant.Op import OpBase, Output, SinkOpTrait, Input
+from KunQuant.ops import ReduceOp
+from KunQuant.Op import OpBase, Output, ReductionOp, SinkOpTrait, Input
 from typing import List, Dict
 from collections import OrderedDict
 import typing
@@ -44,6 +45,8 @@ class Function:
         additional_dep = dict()
         for op in ops:
             parent = op.get_parent()
+            if not parent and isinstance(op, ReductionOp):
+                parent = op.get_loop()
             if parent:
                 if parent not in additional_dep:
                     additional_dep[parent] = set()

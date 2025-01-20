@@ -73,7 +73,7 @@ class MSVCCommandLineBuilder:
 
     @staticmethod
     def build_link_options(cfg: 'CppCompilerConfig', paths: List[str], outpath: str) -> List[str]:
-        cmd = [cfg.compiler, "/nologo", "/LD", "KunRuntime.lib"]
+        cmd = [cfg.compiler, "/nologo", "/MP", "/LD", "KunRuntime.lib"]
         cmd += paths
         cmd.append(f"/Fe{outpath}")
         cmd += ["/link", f'/LIBPATH:"{_runtime_path}"']

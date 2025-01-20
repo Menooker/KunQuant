@@ -370,15 +370,17 @@ class ReductionOp(OpBase, StatefulOpTrait):
     '''
     def __init__(self, v: OpBase, init_val: OpBase = None, attrs: Union[List[Tuple[str, object]], OrderedDict, None] = None) -> None:
         super().__init__([v] if init_val is None else [v, init_val], attrs)
-
-    def verify(self, func: 'KunQuant.Stage.Function') -> None:
-        assert(self.inputs.__len__() <= 2)
+    def get_loop(self) -> ForeachBackWindow:
         inp = self.inputs[0]
         # The inputs must be in a loop. we must be in a parent of it
         loop = inp.get_parent()
         # if directly using a for-each var, the loop is itself
         if isinstance(inp, ForeachBackWindow):
             loop = inp
+        return loop
+    def verify(self, func: 'KunQuant.Stage.Function') -> None:
+        assert(self.inputs.__len__() <= 2)
+        loop = self.get_loop()
         if loop is None or loop == self._parent_loop:
             raise RuntimeError(
                 f"verify() failed: ReductionOp using non-loop result: {self}\nself._parent_loop = {self._parent_loop}\nloop = {loop}")

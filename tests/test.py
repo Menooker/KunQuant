@@ -265,6 +265,25 @@ v5 = Output@{name:ou1}(v4)
 v6 = LessThan@(v1,v0)
 v7 = Output@{name:ou1}(v6)''')
 
+# check reduction op dependency sorted before ForeachBackWindow
+def check_toposort():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inp2 = Input("b")
+        loopa1 = ForeachBackWindow(inp1, 10)
+        builder.loop = loopa1
+        vara1 = IterValue(loopa1, inp1)
+        builder.loop = None
+        Output(ReduceRank(vara1,inp2))
+    ops = builder.ops
+    ops[1],ops[2] = ops[2],ops[1]
+    expect_output(Function(Function.topo_sort_ops(ops)),'''v0 = Input@{name:a}()
+v1 = Input@{name:b}()
+v2 = ForeachBackWindow@{window:10}(v0)
+v3 = IterValue@(v2,v0) in v2
+v4 = ReduceRank@(v3,v1)
+v5 = Output@{name:}(v4)''')
 
 def check_mergeLoop():
     builder = Builder()
@@ -336,3 +355,4 @@ if __name__ == "__main__":
     check_fold_window()
     check_div_cmp()
     check_mergeLoop()
+    check_toposort()
