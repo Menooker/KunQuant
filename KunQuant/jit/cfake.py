@@ -99,7 +99,12 @@ class GCCCommandLineBuilder:
 
     @staticmethod
     def build_link_options(cfg: 'CppCompilerConfig', paths: List[str], outpath: str) -> List[str]:
-        return [cfg.compiler] + paths + ["-l", "KunRuntime", "-shared", "-L", _runtime_path, "-o", outpath]
+        ret = [cfg.compiler] + paths + ["-l", "KunRuntime", "-shared", "-L", _runtime_path, "-o", outpath]
+        if cfg.fast_linker_threads:
+            ret.append("-fuse-ld=gold")
+            ret.append("-Wl,--threads")
+            ret.append(f"-Wl,--thread-count={cfg.fast_linker_threads}")
+        return ret
 
 _config = {
     "Windows": ("cl.exe", "obj", "dll", MSVCCommandLineBuilder),
@@ -111,6 +116,7 @@ class CppCompilerConfig:
     machine: Union[NativeCPUFlags, X64CPUFlags] = NativeCPUFlags()
     for_each: Callable[[FunctionList, CallableOnFunction], List[str]] = multi_thread_compile
     other_flags : Tuple[str] = ()
+    fast_linker_threads: int = 0
     compiler: str = _config[_os_name][0]
     obj_ext: str = _config[_os_name][1]
     dll_ext: str = _config[_os_name][2]

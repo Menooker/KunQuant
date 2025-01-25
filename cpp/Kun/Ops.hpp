@@ -414,6 +414,18 @@ kun_simd::vec<T, stride> WindowedLinearRegressionResiImpl(
     return val - (slope * T(window) + interp);
 }
 
+template <typename T, int stride, int window, typename T2>
+kun_simd::vec<T, stride> WindowedLinearRegressionResiImpl(
+    const WindowedLinearRegression<T, stride, window> &v,
+    T2 val) {
+    auto N = kun_simd::fast_cast<kun_simd::vec<T, stride>>(window - v.num_nans);
+    auto slope = WindowedLinearRegressionSlopeImpl(v);
+    auto x_mean = v.x_sum / N;
+    auto y_mean = v.y_sum / N;
+    auto interp = y_mean - slope * x_mean;
+    return kun_simd::vec<T, stride>(val) - (slope * T(window) + interp);
+}
+
 template <typename T, int stride>
 struct ReduceAdd {
     using simd_t = kun_simd::vec<T, stride>;

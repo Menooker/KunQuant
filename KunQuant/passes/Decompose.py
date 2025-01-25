@@ -40,6 +40,7 @@ def decompose_rank_impl(ops: List[OpBase], info: Dict[OpBase, OpInfo]) -> List[O
     changed = False
     already_added_out = dict()
     visited = set()
+    hash_cache: Dict['OpBase', int] = dict()
     for op in ops:
         op.replace_inputs(replace_map)
         if op in visited:
@@ -60,7 +61,7 @@ def decompose_rank_impl(ops: List[OpBase], info: Dict[OpBase, OpInfo]) -> List[O
                                 out.append(user)
                             break
                     if newin is None:
-                        newin = Output(inp, inp.hash_hex())
+                        newin = Output(inp, inp.hash_hex(hash_cache))
                         out.append(newin)
                     already_added_out[inp] = newin
                 op.inputs[0] = newin

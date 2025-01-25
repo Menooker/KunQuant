@@ -9,6 +9,10 @@ def expect_output(f: Function, out: str):
     if strf != out:
         raise RuntimeError(f"expecting {out}\nbut got\n{strf}")
 
+def expect_str_output(strf: str, out: str):
+    if strf != out:
+        raise RuntimeError(f"expecting {out}\nbut got\n{strf}")
+
 def check_simple():
     builder = Builder()
     with builder:
@@ -244,6 +248,69 @@ v27 = DivConst@{value:9}(v21)
 v28 = Sqrt@(v27)
 v29 = Output@{name:ou1}(v26)
 v30 = Output@{name:ou2}(v28)''')
+    # check that identity print works (out2 does not depend on input b)
+    expect_str_output(out2.to_string(0, True), '''Output@{name:ou2}(
+  Sqrt@(
+    DivConst@{value:9}(
+      ReduceAdd@(
+        Mul@(
+          Sub@(
+            IterValue@(
+              ForeachBackWindow@{window:10}(
+                WindowedTempOutput@{window:10}(
+                  input(a)
+                )
+              ),
+              WindowedTempOutput@{window:10}(
+                input(a)
+              )
+            ),
+            DivConst@{value:10}(
+              ReduceAdd@(
+                IterValue@(
+                  ForeachBackWindow@{window:10}(
+                    WindowedTempOutput@{window:10}(
+                      input(a)
+                    )
+                  ),
+                  WindowedTempOutput@{window:10}(
+                    input(a)
+                  )
+                )
+              )
+            )
+          ),
+          Sub@(
+            IterValue@(
+              ForeachBackWindow@{window:10}(
+                WindowedTempOutput@{window:10}(
+                  input(a)
+                )
+              ),
+              WindowedTempOutput@{window:10}(
+                input(a)
+              )
+            ),
+            DivConst@{value:10}(
+              ReduceAdd@(
+                IterValue@(
+                  ForeachBackWindow@{window:10}(
+                    WindowedTempOutput@{window:10}(
+                      input(a)
+                    )
+                  ),
+                  WindowedTempOutput@{window:10}(
+                    input(a)
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)''')
 
 def check_div_cmp():
     builder = Builder()

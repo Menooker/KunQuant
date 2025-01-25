@@ -1,8 +1,10 @@
-from typing import List, Dict, Tuple, Union
+from os import path
+from typing import List, Dict, Optional, Tuple, Union
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 import threading
 import KunQuant
+import zlib
 
 
 class _builder(threading.local):
@@ -58,7 +60,10 @@ def print_attrs(attr: OrderedDict) -> str:
 
 _clazzBackWindow = None
 _clazzWindowedTrait = None
+_empty_dict = {}
 
+def _hash_combine(x: int, y: int) -> int:
+    return (x * 23 + y) % (2 << 32)
 
 def traverse_replace_map(op: 'OpBase', replace_map: Dict['OpBase', 'OpBase']) -> 'OpBase':
     found = replace_map.get(op, None)
@@ -100,14 +105,41 @@ class OpBase:
     def attrs_str(self) -> str:
         return print_attrs(self.attrs)
 
-    def print_args(self, indent: int, identity: bool, **kwargs) -> str:
+    def fast_hash(self, cache: Optional[Dict['OpBase', int]] = None, **kwargs) -> int:
+        if cache is not None:
+            c = cache.get(self)
+            if c is not None:
+                return c
+        ret = zlib.adler32(self.__class__.__name__.encode())
+        ret = _hash_combine(ret, zlib.adler32(print_attrs(self.attrs).encode()))
+        ret = _hash_combine(ret, 114514)
+        for arg, subkwargs in self.get_args(True, **kwargs):
+            ret = _hash_combine(ret, arg.fast_hash(cache, **subkwargs))
+        ret = _hash_combine(ret, 1818910)
+        if cache is not None:
+            cache[self] = ret
+        return ret
+    
+    def items(self, **kwargs):
+        '''
+        returns an generator expr for all contents of the op and its dependencies
+        '''
+        yield self.__class__
+        yield self.attrs
+        yield "["
+        for arg, subkwargs in self.get_args(True, **kwargs):
+            yield from arg.items(**subkwargs)
+        yield "]"
+
+    def get_args(self, identity: bool, **kwargs) -> List[Tuple['OpBase', dict]]:
         assert(len(kwargs) == 0)
-        return f",\n".join([v.to_string(indent+1, identity) for v in self.inputs])
+        return [(v, _empty_dict) for v in self.inputs]
 
     def to_string(self, indent: int, identity: bool, **kwargs) -> str:
         selfname = self.__class__.__name__
         indents = make_indents(indent)
-        args = self.print_args(indent, identity, **kwargs)
+        args = [arg.to_string(indent+1, identity, **subkwargs) for arg, subkwargs in self.get_args(identity, **kwargs)]
+        args = ",\n".join(args)
         return f'''{indents}{selfname}@{print_attrs(self.attrs)}(
 {args}
 {indents})'''
@@ -120,11 +152,8 @@ class OpBase:
         args = ",".join([str(id(v)) for v in self.inputs])
         return f"{selfname}@{id(self)}@{print_attrs(self.attrs)}({args})"
 
-    def hash_hex(self) -> str:
-        v = str(self)
-        out = 0
-        for c in v:
-            out = (out * 23 + ord(c)) % (2 << 32)
+    def hash_hex(self, cache: Optional[Dict['OpBase', int]] = None) -> str:
+        out = self.fast_hash(cache)
         return f"{out:08x}"
 
     def verify(self, func: 'KunQuant.Stage.Function') -> None:
@@ -309,11 +338,11 @@ class ForeachBackWindow(OpBase, WindowedTrait):
             inputs.extend(args)
         super().__init__(inputs, [("window", window)])
 
-    def print_args(self, indent: int, identity: bool, **kwargs) -> str:
+    def get_args(self, identity: bool, **kwargs) -> List[Tuple['OpBase', bool, dict]]:
         if len(kwargs) == 0:
-            return super().print_args(indent, identity, **kwargs)
+            return super().get_args(identity, **kwargs)
         assert(kwargs["display"] in self.inputs)
-        return kwargs["display"].to_string(indent+1, identity)
+        return [(kwargs["display"], _empty_dict)]
 
 class IterValue(OpBase):
     '''
@@ -328,13 +357,12 @@ class IterValue(OpBase):
         super().__init__([loop, src], None)
         self.set_parent(loop)
 
-    def print_args(self, indent: int, identity: bool, **kwargs) -> str:
+    def get_args(self, identity: bool, **kwargs) -> str:
         assert (len(self.inputs) == 2)
         if not identity:
-            return super().print_args(indent, identity, **kwargs)
+            return super().get_args(identity, **kwargs)
         # tell input[0] (the loop) only print self.input[1]
-        return f'''{self.inputs[0].to_string(indent+1, identity, display=self.inputs[1])},
-{self.inputs[1].to_string(indent+1, identity)}'''
+        return [(self.inputs[0], {'display':self.inputs[1]}), (self.inputs[1], _empty_dict)]
 
     def verify(self, func: 'KunQuant.Stage.Function') -> None:
         super().verify(func)

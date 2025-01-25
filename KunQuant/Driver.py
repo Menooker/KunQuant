@@ -198,6 +198,8 @@ using namespace kun::ops;
 
     if PassUtil.debug_mode:
         print("Num temp buffers: ", num_temp_buffer)
+    
+    push_source()
     # push extern decls
     impl_src.append("\n".join(decl_src).rstrip())
     buffer_src = ",\n".join(["    "+ v.to_str(required_windows, input_windows) for v in buffer_names])
@@ -250,4 +252,5 @@ using namespace kun::ops;
     {"0" if allow_unaligned else "1"}
 }};''')
     push_source()
+    out_src[0], out_src[-1] = out_src[-1], out_src[0]
     return out_src

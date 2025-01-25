@@ -280,6 +280,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                 # input is shared by all ops
                 assert(op not in op_lookup_table)
                 op_lookup_table[op] = p
+    hash_cache: Dict['OpBase', int] = dict()
     for p in partitions:
         name_to_input = dict()
         depending : typing.OrderedDict[_Partition, None] = OrderedDict()
@@ -302,7 +303,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                         outop = _search_output_use(inp, inp_info)
                         if not outop:
                             # add an output op to that partition
-                            out_name = add_to_naming_table(inp.hash_hex())
+                            out_name = add_to_naming_table(inp.hash_hex(hash_cache))
                             outop = Output(inp, out_name)
                             inp_info.uses[outop] = 1
                             inp_partition = op_lookup_table[inp]
