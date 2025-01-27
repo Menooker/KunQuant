@@ -151,15 +151,20 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
 using namespace kun;
 using namespace kun::ops;
 '''
+    shared_header_simple = '''#include <Kun/Context.hpp>
+#include <Kun/Module.hpp>
+using namespace kun;
+'''
     impl_src = [shared_header]
-    def push_source():
+    def push_source(is_simple=False):
         nonlocal impl_src, cur_count
         out_src.append("\n\n".join(impl_src))
         cur_count = 0
-        impl_src = [shared_header]
+        impl_src = [shared_header_simple if is_simple else shared_header]
     out_src = []
     decl_src = []
     cur_count = 0
+    is_single_source = split_source == 0
     for func in impl:
         if split_source > 0 and cur_count > split_source:
             push_source()
@@ -181,7 +186,7 @@ using namespace kun::ops;
         def query_temp_buf_id(tempname: str, window: int) -> int:
             input_windows[tempname] = window
             return insert_name_str(tempname, "TEMP").idx
-        src, decl = codegen_cpp(module_name, func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows, dtype, blocking_len, not allow_unaligned, split_source == 0)
+        src, decl = codegen_cpp(module_name, func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows, dtype, blocking_len, not allow_unaligned, is_single_source)
         impl_src.append(src)
         decl_src.append(decl)
         newparti = _Partition(func.name, len(partitions), pins, pouts)
@@ -198,43 +203,63 @@ using namespace kun::ops;
 
     if PassUtil.debug_mode:
         print("Num temp buffers: ", num_temp_buffer)
-    
-    push_source()
-    # push extern decls
-    impl_src.append("\n".join(decl_src).rstrip())
+    if not is_single_source:
+        push_source(True)
+    static_or_none = "static" if is_single_source else ""
     buffer_src = ",\n".join(["    "+ v.to_str(required_windows, input_windows) for v in buffer_names])
-    impl_src.append(f"static BufferInfo __buffers[]{{\n{buffer_src}\n}};")
+    impl_src.append(f"{static_or_none} BufferInfo __buffers_{module_name}[]{{\n{buffer_src}\n}};")
+    buffer_decl = f"extern BufferInfo __buffers_{module_name}[{len(buffer_names)}];"
 
+    if not is_single_source:
+        push_source(True)
+        impl_src.append(buffer_decl)
     parti_buffer_src = []
+    parti_buffer_decl = []
     for name, parti in partitions.items():
-        buffer_lines = ", ".join([f"&__buffers[{v.idx}]" for v in parti.in_buf])
-        parti_buffer_src.append(f"static BufferInfo *stage_{name}_in_buf[] = {{{buffer_lines}}};")
-        buffer_lines = ", ".join([f"&__buffers[{v.idx}]" for v in parti.out_buf])
-        parti_buffer_src.append(f"static BufferInfo *stage_{name}_out_buf[] = {{{buffer_lines}}};")
+        buffer_lines = ", ".join([f"&__buffers_{module_name}[{v.idx}]" for v in parti.in_buf])
+        parti_buffer_src.append(f"{static_or_none} BufferInfo *stage_{name}_in_buf[] = {{{buffer_lines}}};")
+        parti_buffer_decl.append(f"extern BufferInfo *stage_{name}_in_buf[{len(parti.in_buf)}];")
+        buffer_lines = ", ".join([f"&__buffers_{module_name}[{v.idx}]" for v in parti.out_buf])
+        parti_buffer_src.append(f"{static_or_none} BufferInfo *stage_{name}_out_buf[] = {{{buffer_lines}}};")
+        parti_buffer_decl.append(f"extern BufferInfo *stage_{name}_out_buf[{len(parti.in_buf)}];")
     impl_src.append("\n".join(parti_buffer_src))
 
     parti_dep_src = "\n".join([f"extern Stage *stage_{module_name}__{name}_dep[{len(parti.outs)}];" if len(parti.outs) else f"Stage **stage_{module_name}__{name}_dep = nullptr;"
                                 for name, parti in partitions.items()])
-    impl_src.append(f'''namespace {{
+    if not is_single_source:
+        push_source(False)
+        impl_src.append(parti_dep_src)
+        impl_src.extend(parti_buffer_decl)
+    else:
+        impl_src.append(f'''namespace {{
 {parti_dep_src}
 }}
 ''')
+    # push extern decls
+    impl_src.append("\n".join(decl_src).rstrip())
     
     parti_info_src = ",\n".join([f'''    {{/*f*/ stage_{module_name}__{parti.name}, /*dependers*/ stage_{module_name}__{parti.name}_dep, /*num_dependers*/ {len(parti.outs)},
      /*in_buffers*/ stage_{parti.name}_in_buf, /*num_in_buffers*/ {len(parti.in_buf)},
      /*out_buffers*/ stage_{parti.name}_out_buf, /*num_out_buffers*/ {len(parti.out_buf)}, /*pending_out*/ {parti.num_in_dep},
      /*num_tasks*/ TaskExecKind::{"SLICE_BY_TIME" if parti.is_cross_sectional else "SLICE_BY_STOCK"}, /*id*/ {parti.idx}}}''' for parti in partitions.values()])
-    impl_src.append(f'''static Stage __stages[] = {{
+    impl_src.append(f'''{static_or_none} Stage __stages_{module_name}[] = {{
 {parti_info_src}
 }};''')
-                    
+
+    if not is_single_source:
+        push_source(True)
+        impl_src.append(f'''extern Stage __stages_{module_name}[{len(partitions)}];''')
+        impl_src.append(buffer_decl)
     parti_dep_src = []
     for name, parti in partitions.items():
         if len(parti.outs):
-            details = ", ".join([f"&__stages[{out.idx}]" for out in parti.outs])
+            details = ", ".join([f"&__stages_{module_name}[{out.idx}]" for out in parti.outs])
             parti_dep_src.append(f"Stage *stage_{module_name}__{parti.name}_dep[] = {{{details}}};")
     parti_dep_src2 = "\n".join(parti_dep_src)
-    impl_src.append(f'''namespace {{
+    if not is_single_source:
+        impl_src.append(parti_dep_src2)
+    else:
+        impl_src.append(f'''namespace {{
 {parti_dep_src2}
 }}
 ''')
@@ -242,9 +267,9 @@ using namespace kun::ops;
     impl_src.append(f'''KUN_EXPORT Module {module_name}{{
     {required_version},
     {len(partitions)},
-    __stages,
+    __stages_{module_name},
     {len(buffer_names)},
-    __buffers,
+    __buffers_{module_name},
     MemoryLayout::{input_layout},
     MemoryLayout::{output_layout},
     {blocking_len},
@@ -252,5 +277,6 @@ using namespace kun::ops;
     {"0" if allow_unaligned else "1"}
 }};''')
     push_source()
-    out_src[0], out_src[-1] = out_src[-1], out_src[0]
+    if not is_single_source:
+        out_src[0], out_src[-2] = out_src[-2], out_src[0]
     return out_src

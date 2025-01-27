@@ -130,12 +130,13 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
         for edge_op, is_in_loop in edge_ops.items():
             if edge_op in op_info.depender:
                 if is_in_loop:
-                    critical = 3
+                    critical = 3 if not isinstance(op, Output) else 2
                     break
                 else:
                     cur_score += 50000
         # If an op in the partition is blocked, because this ready op has not been executed, add scores to cur_score
         # if critical = 3, it means besides the condition above, the blocked op in the partition is an op in loop
+        # special case for isinstance(op, Output): critical should not be 3, but 2, to make other ops schedule first
 
         loop_score = 0
         # need to run the ops in the loop as soon as possible
@@ -290,7 +291,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                 if inp not in p.ops:
                     # if the partition depends on an op of another partition
                     if inp.get_parent():
-                        raise RuntimeError("Bad cross partition op: " + str(inp))
+                        raise RuntimeError("Bad cross partition op: " + str(inp) + "\ncur op=" + str(op))
                     inp_info = f.op_to_id[inp]
                     if isinstance(inp, ConstantOp):
                         if op in inp_info.uses:

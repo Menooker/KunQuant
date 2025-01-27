@@ -63,7 +63,7 @@ _clazzWindowedTrait = None
 _empty_dict = {}
 
 def _hash_combine(x: int, y: int) -> int:
-    return (x * 23 + y) % (2 << 32)
+    return (x * 23 + y + 1 + (x>>16) + (y>>16)*7) % (2 << 64)
 
 def traverse_replace_map(op: 'OpBase', replace_map: Dict['OpBase', 'OpBase']) -> 'OpBase':
     found = replace_map.get(op, None)
@@ -154,7 +154,7 @@ class OpBase:
 
     def hash_hex(self, cache: Optional[Dict['OpBase', int]] = None) -> str:
         out = self.fast_hash(cache)
-        return f"{out:08x}"
+        return f"{out:016x}"
 
     def verify(self, func: 'KunQuant.Stage.Function') -> None:
         if isinstance(self, _clazzWindowedTrait):

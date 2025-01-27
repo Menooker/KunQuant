@@ -143,7 +143,7 @@ def call_cpp_compiler_src(source: str, module_name: str, compiler: CppCompilerCo
 
 class _fake_temp:
     def __init__(self, dir: str, module_name: str, keep_files: bool) -> None:
-        if dir is None:
+        if not keep_files:
             self.dir = tempfile.mkdtemp(dir=dir)
         else:
             self.dir = os.path.join(dir, module_name)

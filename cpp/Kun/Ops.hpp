@@ -19,7 +19,7 @@ struct DataSource {
 struct dummy {};
 
 template <typename T1, typename T2, typename T3>
-inline T2 Select(T1 cond, T2 vtrue, T3 vfalse) {
+inline DecayVec_t<T2> Select(T1 cond, T2 vtrue, T3 vfalse) {
     return kun_simd::sc_select(cond, vtrue, vfalse);
 }
 
