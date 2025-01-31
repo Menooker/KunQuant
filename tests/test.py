@@ -332,6 +332,40 @@ v5 = Output@{name:ou1}(v4)
 v6 = LessThan@(v1,v0)
 v7 = Output@{name:ou1}(v6)''')
 
+
+def check_duplicate_rank_in():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        a = inp1 + 1
+        r = Rank(a)
+        s = Scale(a)
+        out1 = Output(r, "ou1")
+        out2 = Output(s, "ou1")
+    f = Function(builder.ops)
+    decompose_rank(f)
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = AddConst@{value:1}(v0)
+v2 = Output@{name:000055ec9e958923}(v1)
+v3 = Rank@(v2)
+v4 = Scale@(v2)
+v5 = Output@{name:ou1}(v3)
+v6 = Output@{name:ou1}(v4)''')
+
+def check_duplicate_rank_out():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        r = Rank(inp1)
+        out1 = Output(r, "ou1")
+        out2 = Output(r, "ou1")
+    f = Function(builder.ops)
+    move_dup_rank_output(f)
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = Rank@(v0)
+v2 = Output@{name:ou1}(v1)
+v3 = Output@{name:ou1}(v2)''')
+
 # check reduction op dependency sorted before ForeachBackWindow
 def check_toposort():
     builder = Builder()
@@ -423,3 +457,5 @@ if __name__ == "__main__":
     check_div_cmp()
     check_mergeLoop()
     check_toposort()
+    check_duplicate_rank_out()
+    check_duplicate_rank_in()
