@@ -1,6 +1,7 @@
 #include "Context.hpp"
 #include "Module.hpp"
 #include "RunGraph.hpp"
+#include "CorrWith.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <list>
@@ -164,6 +165,67 @@ bool RuntimeStage::onDone(size_t cnt) {
     }
     return true;
 }
+
+
+void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout,
+              std::vector<float*>& buffers,
+              float* corr_with_buffer,
+              std::vector<float*>& outbuffers,
+              size_t num_stocks, size_t total_time, size_t cur_time,
+              size_t length) {
+    auto thefunc = layout == MemoryLayout::TS ? &ops::CorrWith<ops::MapperTS<float, 8>>: &ops::CorrWith<ops::MapperSTs<float, 8>>;
+    std::vector<BufferInfo> buffer_info;
+    std::vector<Buffer> rtlbuffers;
+    std::vector<Stage> mstages;
+    std::vector<BufferInfo*> temp;
+    rtlbuffers.reserve(buffers.size() * 2 + 1);
+    buffer_info.reserve(buffers.size() * 2 + 1);
+    mstages.reserve(buffers.size() * 2 + 1);
+    temp.reserve(buffers.size() * 3);
+    for (float* b: buffers) {
+        rtlbuffers.emplace_back(b, total_time);
+        buffer_info.emplace_back(BufferInfo{buffer_info.size(), "", 1, BufferKind::INPUT, 0, 0});
+    }
+    for (float* b: outbuffers) {
+        rtlbuffers.emplace_back(b, total_time);
+        buffer_info.emplace_back(BufferInfo{buffer_info.size(), "", 0, BufferKind::OUTPUT, 0, 0});
+    }
+    rtlbuffers.emplace_back(corr_with_buffer, total_time);
+    buffer_info.emplace_back(BufferInfo{buffer_info.size(), "", 0, BufferKind::INPUT, 0, 0});
+    for(size_t i=0; i<buffers.size(); i++) {
+        temp.push_back(&buffer_info[i]);
+        auto* inbuf = &temp.back();
+        temp.push_back(&buffer_info.back());
+        temp.push_back(&buffer_info[i + buffers.size()]);
+        auto* outbuf = &temp.back();
+        mstages.emplace_back(Stage{thefunc, nullptr, 0, inbuf, 2, outbuf, 1, 0,
+            TaskExecKind::SLICE_BY_TIME, buffer_info.size()});
+    }
+    Context ctx{std::move(rtlbuffers),
+                {},
+                exec,
+                0,
+                num_stocks,
+                total_time,
+                cur_time,
+                length,
+                8,
+                Datatype::Float,
+                false};
+    std::vector<RuntimeStage> &stages = ctx.stages;
+    stages.reserve(buffers.size());
+    for (size_t i = 0; i < buffers.size(); i++) {
+        auto &stage = mstages[i];
+        stages.emplace_back(&stage, &ctx);
+    }
+    for (size_t i = 0; i <buffers.size(); i++) {
+        auto &stage = mstages[i];
+        if (stage.orig_pending == 0) {
+            stages[i].enqueue();
+        }
+    }
+    exec->runUntilDone();
+ }
 
 void runGraph(std::shared_ptr<Executor> exec, const Module *m,
               std::unordered_map<std::string, float *> &buffers,

@@ -70,10 +70,14 @@ def _value_to_float(op: OpBase, dtype: str) -> str:
 
 vector_len = 8
 
-def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int], elem_type: str, simd_lanes: int, aligned: bool) -> str:
+def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int], elem_type: str, simd_lanes: int, aligned: bool, static: bool) -> Tuple[str, str]:
     if len(f.ops) == 3 and isinstance(f.ops[1], CrossSectionalOp):
-        return f'''static auto stage_{f.name} = {f.ops[1].__class__.__name__}Stocks<Mapper{f.ops[0].attrs["layout"]}<{elem_type}, {simd_lanes}>, Mapper{f.ops[2].attrs["layout"]}<{elem_type}, {simd_lanes}>>;'''
-    header = f'''static void stage_{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
+        return "", f'''static auto stage_{prefix}__{f.name} = {f.ops[1].__class__.__name__}Stocks<Mapper{f.ops[0].attrs["layout"]}<{elem_type}, {simd_lanes}>, Mapper{f.ops[2].attrs["layout"]}<{elem_type}, {simd_lanes}>>;'''
+    header = f'''{"static " if static else ""}void stage_{prefix}__{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
+    if static:
+        decl = ""
+    else:
+        decl = f'''extern void stage_{prefix}__{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length);'''
     toplevel = _CppScope(None)
     buffer_type: Dict[OpBase, str] = dict()
     ptrname = "" if elem_type == "float" else "D"
@@ -237,4 +241,4 @@ def codegen_cpp(f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tup
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
         else:
             raise RuntimeError(f"Cannot generate {op} of function {f}")
-    return header + str(toplevel)
+    return header + str(toplevel), decl

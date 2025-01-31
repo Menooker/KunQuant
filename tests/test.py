@@ -9,6 +9,10 @@ def expect_output(f: Function, out: str):
     if strf != out:
         raise RuntimeError(f"expecting {out}\nbut got\n{strf}")
 
+def expect_str_output(strf: str, out: str):
+    if strf != out:
+        raise RuntimeError(f"expecting {out}\nbut got\n{strf}")
+
 def check_simple():
     builder = Builder()
     with builder:
@@ -244,6 +248,69 @@ v27 = DivConst@{value:9}(v21)
 v28 = Sqrt@(v27)
 v29 = Output@{name:ou1}(v26)
 v30 = Output@{name:ou2}(v28)''')
+    # check that identity print works (out2 does not depend on input b)
+    expect_str_output(out2.to_string(0, True), '''Output@{name:ou2}(
+  Sqrt@(
+    DivConst@{value:9}(
+      ReduceAdd@(
+        Mul@(
+          Sub@(
+            IterValue@(
+              ForeachBackWindow@{window:10}(
+                WindowedTempOutput@{window:10}(
+                  input(a)
+                )
+              ),
+              WindowedTempOutput@{window:10}(
+                input(a)
+              )
+            ),
+            DivConst@{value:10}(
+              ReduceAdd@(
+                IterValue@(
+                  ForeachBackWindow@{window:10}(
+                    WindowedTempOutput@{window:10}(
+                      input(a)
+                    )
+                  ),
+                  WindowedTempOutput@{window:10}(
+                    input(a)
+                  )
+                )
+              )
+            )
+          ),
+          Sub@(
+            IterValue@(
+              ForeachBackWindow@{window:10}(
+                WindowedTempOutput@{window:10}(
+                  input(a)
+                )
+              ),
+              WindowedTempOutput@{window:10}(
+                input(a)
+              )
+            ),
+            DivConst@{value:10}(
+              ReduceAdd@(
+                IterValue@(
+                  ForeachBackWindow@{window:10}(
+                    WindowedTempOutput@{window:10}(
+                      input(a)
+                    )
+                  ),
+                  WindowedTempOutput@{window:10}(
+                    input(a)
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)''')
 
 def check_div_cmp():
     builder = Builder()
@@ -265,6 +332,59 @@ v5 = Output@{name:ou1}(v4)
 v6 = LessThan@(v1,v0)
 v7 = Output@{name:ou1}(v6)''')
 
+
+def check_duplicate_rank_in():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        a = inp1 + 1
+        r = Rank(a)
+        s = Scale(a)
+        out1 = Output(r, "ou1")
+        out2 = Output(s, "ou1")
+    f = Function(builder.ops)
+    decompose_rank(f)
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = AddConst@{value:1}(v0)
+v2 = Output@{name:000055ec9e958923}(v1)
+v3 = Rank@(v2)
+v4 = Scale@(v2)
+v5 = Output@{name:ou1}(v3)
+v6 = Output@{name:ou1}(v4)''')
+
+def check_duplicate_rank_out():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        r = Rank(inp1)
+        out1 = Output(r, "ou1")
+        out2 = Output(r, "ou1")
+    f = Function(builder.ops)
+    move_dup_rank_output(f)
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = Rank@(v0)
+v2 = Output@{name:ou1}(v1)
+v3 = Output@{name:ou1}(v2)''')
+
+# check reduction op dependency sorted before ForeachBackWindow
+def check_toposort():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inp2 = Input("b")
+        loopa1 = ForeachBackWindow(inp1, 10)
+        builder.loop = loopa1
+        vara1 = IterValue(loopa1, inp1)
+        builder.loop = None
+        Output(ReduceRank(vara1,inp2))
+    ops = builder.ops
+    ops[1],ops[2] = ops[2],ops[1]
+    expect_output(Function(Function.topo_sort_ops(ops)),'''v0 = Input@{name:a}()
+v1 = Input@{name:b}()
+v2 = ForeachBackWindow@{window:10}(v0)
+v3 = IterValue@(v2,v0) in v2
+v4 = ReduceRank@(v3,v1)
+v5 = Output@{name:}(v4)''')
 
 def check_mergeLoop():
     builder = Builder()
@@ -336,3 +456,6 @@ if __name__ == "__main__":
     check_fold_window()
     check_div_cmp()
     check_mergeLoop()
+    check_toposort()
+    check_duplicate_rank_out()
+    check_duplicate_rank_in()

@@ -73,7 +73,7 @@ class MSVCCommandLineBuilder:
 
     @staticmethod
     def build_link_options(cfg: 'CppCompilerConfig', paths: List[str], outpath: str) -> List[str]:
-        cmd = [cfg.compiler, "/nologo", "/LD", "KunRuntime.lib"]
+        cmd = [cfg.compiler, "/nologo", "/MP", "/LD", "KunRuntime.lib"]
         cmd += paths
         cmd.append(f"/Fe{outpath}")
         cmd += ["/link", f'/LIBPATH:"{_runtime_path}"']
@@ -99,7 +99,12 @@ class GCCCommandLineBuilder:
 
     @staticmethod
     def build_link_options(cfg: 'CppCompilerConfig', paths: List[str], outpath: str) -> List[str]:
-        return [cfg.compiler] + paths + ["-l", "KunRuntime", "-shared", "-L", _runtime_path, "-o", outpath]
+        ret = [cfg.compiler] + paths + ["-l", "KunRuntime", "-shared", "-L", _runtime_path, "-o", outpath]
+        if cfg.fast_linker_threads:
+            ret.append("-fuse-ld=gold")
+            ret.append("-Wl,--threads")
+            ret.append(f"-Wl,--thread-count={cfg.fast_linker_threads}")
+        return ret
 
 _config = {
     "Windows": ("cl.exe", "obj", "dll", MSVCCommandLineBuilder),
@@ -111,6 +116,7 @@ class CppCompilerConfig:
     machine: Union[NativeCPUFlags, X64CPUFlags] = NativeCPUFlags()
     for_each: Callable[[FunctionList, CallableOnFunction], List[str]] = multi_thread_compile
     other_flags : Tuple[str] = ()
+    fast_linker_threads: int = 0
     compiler: str = _config[_os_name][0]
     obj_ext: str = _config[_os_name][1]
     dll_ext: str = _config[_os_name][2]
@@ -137,7 +143,7 @@ def call_cpp_compiler_src(source: str, module_name: str, compiler: CppCompilerCo
 
 class _fake_temp:
     def __init__(self, dir: str, module_name: str, keep_files: bool) -> None:
-        if dir is None:
+        if not keep_files:
             self.dir = tempfile.mkdtemp(dir=dir)
         else:
             self.dir = os.path.join(dir, module_name)
@@ -152,13 +158,15 @@ class _fake_temp:
             shutil.rmtree(self.dir)
 
 def compileit(func: List[Tuple[str, Function, KunCompilerConfig]], libname: str, compiler_config: CppCompilerConfig, tempdir: str = None, keep_files: bool = False, load: bool = True) -> Union[KunRunner.Library, str]:
+    get_compiler_env() # trigger cache
     lib = None
     src: List[Tuple[str, str]] = []
     if keep_files and not tempdir:
         raise RuntimeError("if keep_files=True, tempdir should not be empty")
     def kuncompile():
         for name, f, cfg in func:
-            src.append((name, driver_compileit(f, name, **dataclasses.asdict(cfg))))
+            for idx, src_str in enumerate(driver_compileit(f, name, **dataclasses.asdict(cfg))):
+                src.append((f"{name}_{idx}", src_str))
     def dowork():
         nonlocal lib
         with _fake_temp(tempdir, libname, keep_files) as tmpdirname:

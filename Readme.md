@@ -274,6 +274,19 @@ pip install -e .
 
 KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./Stream.md)
 
+## Row-to-row correlation (for IC/IR calculation)
+
+```python
+from KunQuant.runner import KunRunner as kr
+data1 = ... # np.ndarray of shape [time*stocks]. For example, a factor's results
+data2 = ... # np.ndarray of shape [time*stocks]. For example, a factor's results
+valid_in = {"alpha1": data1, "alpha2": data2}
+returns = ... # np.ndarray of shape [time*stocks]. For example, the returns
+valid_corr = {"alpha1": np.empty((time,), dtype="float32"), "alpha2": np.empty((time,), dtype="float32")}
+kr.corrWith(executor, "TS", valid_in, returns, valid_corr)
+# outputs in valid_corr
+alpha1_ic = valid_corr["alpha1"].mean()
+```
 
 ## Using C-style APIs
 

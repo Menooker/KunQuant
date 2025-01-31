@@ -92,6 +92,17 @@ def del_from_ready_op(ready_ops: List[Tuple[OpBase, int]], op: OpBase):
             return
     raise RuntimeError("del_from_ready_op: OP not found")
 
+def _is_bad_op_to_add(op: OpBase, partiton: _Partition):
+    connected_to_parti = False
+    has_bad_input = False
+    for inp in op.inputs:
+        if inp in partiton.ops:
+            connected_to_parti = True
+        else:
+            if partiton.is_op_not_in_and_depending(inp):
+                has_bad_input = True
+    return has_bad_input, connected_to_parti
+
 def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _PartitionOpInfo], partiton: _Partition, f: Function) -> OpBase:
     '''
     Select the next op to put into the partition.
@@ -109,14 +120,7 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
         # correctness check, if the partition has another path to the op and the path itself is not
         # in the partition, the op cannot be in the partition. Otherwise there will be a loop in the
         # partition dependency graph
-        connected_to_parti = False
-        has_bad_input = False
-        for inp in op.inputs:
-            if inp in partiton.ops:
-                connected_to_parti = True
-            else:
-                if partiton.is_op_not_in_and_depending(inp):
-                    has_bad_input = True
+        has_bad_input, connected_to_parti = _is_bad_op_to_add(op, partiton)
         if has_bad_input:
             continue
         op_info = info[op]
@@ -126,12 +130,13 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
         for edge_op, is_in_loop in edge_ops.items():
             if edge_op in op_info.depender:
                 if is_in_loop:
-                    critical = 3
+                    critical = 3 if not isinstance(op, Output) else 2
                     break
                 else:
                     cur_score += 50000
         # If an op in the partition is blocked, because this ready op has not been executed, add scores to cur_score
         # if critical = 3, it means besides the condition above, the blocked op in the partition is an op in loop
+        # special case for isinstance(op, Output): critical should not be 3, but 2, to make other ops schedule first
 
         loop_score = 0
         # need to run the ops in the loop as soon as possible
@@ -198,9 +203,12 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
                 direct_output = None
                 for candidate, bat in ready_ops:
                     if isinstance(candidate, Output):
+                        if _is_bad_op_to_add(candidate, partition)[0]:
+                            continue
                         direct_output = candidate
                         break
                 if direct_output is not None:
+                    
                     selected = direct_output
                     continue
                 # too many outputs visited, make a new partition
@@ -236,9 +244,10 @@ Impl:
     for s in stages:
         stck = []
         def recurive(x: GenericPartition):
-            stck.append(x)
-            if x == s and len(stck) > 1:
+            if x in stck and len(stck) > 1:
+                stck.append(x)
                 raise RuntimeError("Loop in partitions: " + str([val.attrs["name"] for val in stck]))
+            stck.append(x)
             for p in x.inputs:
                 recurive(p)
             stck.pop()
@@ -272,6 +281,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                 # input is shared by all ops
                 assert(op not in op_lookup_table)
                 op_lookup_table[op] = p
+    hash_cache: Dict['OpBase', int] = dict()
     for p in partitions:
         name_to_input = dict()
         depending : typing.OrderedDict[_Partition, None] = OrderedDict()
@@ -281,7 +291,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                 if inp not in p.ops:
                     # if the partition depends on an op of another partition
                     if inp.get_parent():
-                        raise RuntimeError("Bad cross partition op: " + str(inp))
+                        raise RuntimeError("Bad cross partition op: " + str(inp) + "\ncur op=" + str(op))
                     inp_info = f.op_to_id[inp]
                     if isinstance(inp, ConstantOp):
                         if op in inp_info.uses:
@@ -294,7 +304,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                         outop = _search_output_use(inp, inp_info)
                         if not outop:
                             # add an output op to that partition
-                            out_name = add_to_naming_table(inp.hash_hex())
+                            out_name = add_to_naming_table(inp.hash_hex(hash_cache))
                             outop = Output(inp, out_name)
                             inp_info.uses[outop] = 1
                             inp_partition = op_lookup_table[inp]

@@ -265,6 +265,83 @@ PYBIND11_MODULE(KunRunner, m) {
         py::arg("length"), py::arg("outputs") = py::dict(),
         py::arg("skip_check") = false, py::arg("num_stocks") = -1);
 
+    m.def(
+        "corrWith",
+        [](std::shared_ptr<kun::Executor> exec, const char* layout,
+           const std::vector<py::buffer>& inputs, py::buffer corr_with, const std::vector<py::buffer>& outs
+           ) {
+            kun::MemoryLayout mlayout;
+            if(!strcmp(layout, "TS")) {
+                mlayout = kun::MemoryLayout::TS;
+            } else if (!strcmp(layout, "STs")) {
+                mlayout = kun::MemoryLayout::STs;
+            } else {
+                throw std::runtime_error(std::string("Unknown layout") +
+                                                 layout);
+            }
+            if(inputs.size() != outs.size())
+                throw std::runtime_error("number of inputs and outputs should match");
+
+            py::ssize_t known_S = 0;
+            py::ssize_t known_T = 0;
+            py::ssize_t knownNumStocks = 0;
+            py::ssize_t simd_len = 8;
+            std::vector<float*> bufinputs;
+            std::vector<float*> bufoutputs;
+            auto check_input = [&](py::buffer buf_obj, const std::string& name) -> float* {
+                auto info = buf_obj.request();
+                if (mlayout == kun::MemoryLayout::STs) {
+                    // ST8t layout
+                    if (info.ndim != 3) {
+                        throw std::runtime_error("Bad STs shape at " + name);
+                    }
+                    auto S = info.shape[0];
+                    auto T = info.shape[1];
+                    if (known_S == 0) {
+                        known_S = S;
+                        known_T = T;
+                        knownNumStocks = known_S * simd_len;
+                    }
+                    expectContiguousShape(
+                        kun::Datatype::Float, info, name.c_str(),
+                        {known_S, known_T, simd_len});
+                } else if (mlayout == kun::MemoryLayout::TS) {
+                    // TS layout
+                    if (info.ndim != 2) {
+                        throw std::runtime_error("Bad TS shape at " + name);
+                    }
+                    auto S = info.shape[1];
+                    auto T = info.shape[0];
+                    if (known_S == 0) {
+                        known_S = S / simd_len;
+                        known_T = T;
+                        knownNumStocks = S;
+                    }
+                    expectContiguousShape(kun::Datatype::Float, info, name.c_str(),
+                                          {known_T, knownNumStocks});
+                } else {
+                    throw std::runtime_error("Unknown layout at " + name);
+                }
+                return (float *)info.ptr;
+            };
+            float* bufcorr_with = check_input(corr_with, "corr_with");
+            int idx = -1;
+            for (auto buf_obj : inputs) {
+                idx +=1;
+                bufinputs.push_back(check_input(buf_obj, std::string("buffer_") + std::to_string(idx)));
+            }
+            py::array::ShapeContainer expected_out_shape {known_T};
+            for (size_t i = 0; i < outs.size(); i++) {
+                auto &buf = outs[i];
+                auto info = buf.request(true);
+                expectContiguousShape(kun::Datatype::Float, info, "",
+                                            *expected_out_shape);
+                bufoutputs.push_back((float *)info.ptr);
+            }
+            kun::corrWith(exec, mlayout, bufinputs, bufcorr_with, bufoutputs, knownNumStocks, known_T, 0,
+                          known_T);
+        });
+
     py::class_<kun::StreamContext>(m, "StreamContext")
         .def(py::init<std::shared_ptr<kun::Executor>, const kun::Module *,
                       size_t>())

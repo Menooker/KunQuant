@@ -122,8 +122,11 @@ class KunCompilerConfig:
     input_layout:str = "STs"
     output_layout:str = "STs"
     allow_unaligned: Union[bool, None] = None
+    split_source: int = 0
     options: dict = field(default_factory=dict)
 ```
+
+If `split_source` is not 0, KunQuant will split the generated C++ source code into several files, each with at most `split_source` functions. This is useful to parallelize the compilation.
 
 The `CppCompilerConfig` controls how KunQuant calls the C++ compiler. To choose the non-default compiler, you can pass `CppCompilerConfig(compiler="/path/to/your/C++/compiler")` to `cfake.compileit`. You can also enable/disable AVX512 by this config class.
 
