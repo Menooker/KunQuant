@@ -111,7 +111,8 @@ class OpBase:
             if c is not None:
                 return c
         ret = zlib.adler32(self.__class__.__name__.encode())
-        ret = _hash_combine(ret, zlib.adler32(print_attrs(self.attrs).encode()))
+        attr_data = print_attrs(self.attrs).encode()
+        ret = _hash_combine(ret, (zlib.adler32(attr_data) << 32) + zlib.crc32(attr_data))
         ret = _hash_combine(ret, 114514)
         for arg, subkwargs in self.get_args(True, **kwargs):
             ret = _hash_combine(ret, arg.fast_hash(cache, **subkwargs))
