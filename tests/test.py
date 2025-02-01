@@ -346,7 +346,7 @@ def check_duplicate_rank_in():
     decompose_rank(f)
     expect_output(f, '''v0 = Input@{name:a}()
 v1 = AddConst@{value:1}(v0)
-v2 = Output@{name:000055ec9e958923}(v1)
+v2 = Output@{name:1302190f66243c466}(v1)
 v3 = Rank@(v2)
 v4 = Scale@(v2)
 v5 = Output@{name:ou1}(v3)
