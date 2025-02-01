@@ -61,24 +61,24 @@ def test_partition_cylic():
         out2 = Output(v3, "out2")
     f = Function(builder.ops)
     optimize(f)
-    exp1 = '''v0 = GenericPartition@{name:000375d54ee55716}()
-v1 = GenericPartition@{name:0000387b75b31810}(v0)
+    exp1 = '''v0 = GenericPartition@{name:18588255c1407f1d3}()
+v1 = GenericPartition@{name:14dad88c7b817c3dc}(v0)
 v2 = GenericPartition@{name:out1_out2}(v1,v0)'''
     exp2 = [
-'''name = 0000387b75b31810
-v0 = Input@{name:000375d54ee55716}()
+'''name = 14dad88c7b817c3dc
+v0 = Input@{name:18588255c1407f1d3}()
 v1 = Rank@(v0)
-v2 = Output@{name:0000387b75b31810}(v1)''',
-'''name = 000375d54ee55716
+v2 = Output@{name:14dad88c7b817c3dc}(v1)''',
+'''name = 18588255c1407f1d3
 v0 = Input@{name:a}()
 v1 = Input@{name:b}()
 v2 = Mul@(v0,v1)
-v3 = Output@{name:000375d54ee55716}(v2)''',
+v3 = Output@{name:18588255c1407f1d3}(v2)''',
 '''name = out1_out2
-v0 = Input@{name:0000387b75b31810}()
+v0 = Input@{name:14dad88c7b817c3dc}()
 v1 = AddConst@{value:1}(v0)
 v2 = Output@{name:out1}(v1)
-v3 = Input@{name:000375d54ee55716}()
+v3 = Input@{name:18588255c1407f1d3}()
 v4 = Mul@(v0,v3)
 v5 = Output@{name:out2}(v4)''']
     check_partition(f, exp1, exp2)
@@ -95,22 +95,22 @@ def test_partition_rank_out():
         out2 = Output(v3, "out2")
     f = Function(builder.ops)
     optimize(f)
-    exp1 = '''v0 = GenericPartition@{name:000375d54ee55716}()
+    exp1 = '''v0 = GenericPartition@{name:18588255c1407f1d3}()
 v1 = GenericPartition@{name:out1}(v0)
 v2 = GenericPartition@{name:out2}(v1,v0)'''
     exp2 = [
 '''name = out1
-v0 = Input@{name:000375d54ee55716}()
+v0 = Input@{name:18588255c1407f1d3}()
 v1 = Rank@(v0)
 v2 = Output@{name:out1}(v1)''',
-'''name = 000375d54ee55716
+'''name = 18588255c1407f1d3
 v0 = Input@{name:a}()
 v1 = Input@{name:b}()
 v2 = Mul@(v0,v1)
-v3 = Output@{name:000375d54ee55716}(v2)''',
+v3 = Output@{name:18588255c1407f1d3}(v2)''',
 '''name = out2
 v0 = Input@{name:out1}()
-v1 = Input@{name:000375d54ee55716}()
+v1 = Input@{name:18588255c1407f1d3}()
 v2 = Mul@(v0,v1)
 v3 = Output@{name:out2}(v2)''']
     check_partition(f, exp1, exp2)
