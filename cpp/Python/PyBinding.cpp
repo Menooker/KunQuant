@@ -267,8 +267,9 @@ PYBIND11_MODULE(KunRunner, m) {
 
     m.def(
         "corrWith",
-        [](std::shared_ptr<kun::Executor> exec, const char* layout,
-           const std::vector<py::buffer>& inputs, py::buffer corr_with, const std::vector<py::buffer>& outs
+        [](std::shared_ptr<kun::Executor> exec, 
+           const std::vector<py::buffer>& inputs, py::buffer corr_with, const std::vector<py::buffer>& outs, const char* layout,
+           bool rank_inputs
            ) {
             kun::MemoryLayout mlayout;
             if(!strcmp(layout, "TS")) {
@@ -338,9 +339,11 @@ PYBIND11_MODULE(KunRunner, m) {
                                             *expected_out_shape);
                 bufoutputs.push_back((float *)info.ptr);
             }
-            kun::corrWith(exec, mlayout, bufinputs, bufcorr_with, bufoutputs, knownNumStocks, known_T, 0,
+            kun::corrWith(exec, mlayout, rank_inputs, bufinputs, bufcorr_with, bufoutputs, knownNumStocks, known_T, 0,
                           known_T);
-        });
+        },
+        py::arg("exec"),  py::arg("inputs"), py::arg("corr_with"), py::arg("outs"), py::arg("layout") = "TS",
+        py::arg("rank_inputs") = false);
 
     py::class_<kun::StreamContext>(m, "StreamContext")
         .def(py::init<std::shared_ptr<kun::Executor>, const kun::Module *,

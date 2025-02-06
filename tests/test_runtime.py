@@ -21,10 +21,19 @@ def test_corrwith():
     out1 = np.empty((24), dtype="float32")
     out2 = np.empty((24), dtype="float32")
     executor = kr.createSingleThreadExecutor()
-    kr.corrWith(executor,"TS", [a,b], ret, [out1, out2])
+    kr.corrWith(executor, [a,b], ret, [out1, out2], "TS")
     ex1 = pd.DataFrame(a).corrwith(pd.DataFrame(ret), axis=1)
     np.testing.assert_allclose(out1, ex1, atol=1e-6, rtol=1e-4, equal_nan=True)
     ex1 = pd.DataFrame(b).corrwith(pd.DataFrame(ret), axis=1)
+    np.testing.assert_allclose(out2, ex1, atol=1e-6, rtol=1e-4, equal_nan=True)
+
+    a2 =  pd.DataFrame(a).rank(axis=1, pct=True).astype("float32")
+    b2 =  pd.DataFrame(b).rank(axis=1, pct=True).astype("float32")
+    ret2 =  pd.DataFrame(b).rank(axis=1, pct=True).astype("float32")
+    kr.corrWith(executor, [a2.to_numpy(),b2.to_numpy()], ret2.to_numpy(), [out1, out2], "TS", rank_inputs = True)
+    ex1 = a2.corrwith(ret2, axis=1)
+    np.testing.assert_allclose(out1, ex1, atol=1e-6, rtol=1e-4, equal_nan=True)
+    ex1 = b2.corrwith(ret2, axis=1)
     np.testing.assert_allclose(out2, ex1, atol=1e-6, rtol=1e-4, equal_nan=True)
 
 def test_cfake():
