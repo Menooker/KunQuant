@@ -167,13 +167,26 @@ bool RuntimeStage::onDone(size_t cnt) {
 }
 
 
-void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout,
+void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout, bool rank_inputs,
               std::vector<float*>& buffers,
               float* corr_with_buffer,
               std::vector<float*>& outbuffers,
               size_t num_stocks, size_t total_time, size_t cur_time,
               size_t length) {
-    auto thefunc = layout == MemoryLayout::TS ? &ops::CorrWith<ops::MapperTS<float, 8>>: &ops::CorrWith<ops::MapperSTs<float, 8>>;
+    decltype(&ops::CorrWith<ops::MapperTS<float, 8>>) thefunc = nullptr;
+    if (layout == MemoryLayout::TS) {
+        if (rank_inputs) {
+            thefunc = &ops::RankCorrWith<ops::MapperTS<float, 8>>;
+        } else {
+            thefunc = &ops::CorrWith<ops::MapperTS<float, 8>>;
+        }
+    } else {
+        if (rank_inputs) {
+            thefunc = &ops::RankCorrWith<ops::MapperSTs<float, 8>>;
+        } else {
+            thefunc = &ops::CorrWith<ops::MapperSTs<float, 8>>;
+        }
+    }
     std::vector<BufferInfo> buffer_info;
     std::vector<Buffer> rtlbuffers;
     std::vector<Stage> mstages;

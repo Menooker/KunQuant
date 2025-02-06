@@ -281,12 +281,14 @@ from KunQuant.runner import KunRunner as kr
 data1 = ... # np.ndarray of shape [time*stocks]. For example, a factor's results
 data2 = ... # np.ndarray of shape [time*stocks]. For example, a factor's results
 valid_in = {"alpha1": data1, "alpha2": data2}
-returns = ... # np.ndarray of shape [time*stocks]. For example, the returns
+returns = ... # np.ndarray of shape [time*stocks]. For example, the rank of returns
 valid_corr = {"alpha1": np.empty((time,), dtype="float32"), "alpha2": np.empty((time,), dtype="float32")}
-kr.corrWith(executor, "TS", valid_in, returns, valid_corr)
+kr.corrWith(executor, valid_in, returns, valid_corr, layout = "TS", rank_inputs = True)
 # outputs in valid_corr
 alpha1_ic = valid_corr["alpha1"].mean()
 ```
+
+The parameter `rank_inputs=True` will first compute rank in the first input array (e.g. `valid_in` above) and compute the correlation with the second input (e.g. `returns` above). It will not compute the rank of the second input.
 
 ## Using C-style APIs
 
