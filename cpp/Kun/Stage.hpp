@@ -42,8 +42,8 @@ union FuncHolder
 {
     RankFuncType rankf;
     FuncType f;
-    FuncHolder(RankFuncType r): rankf{r} {}
-    FuncHolder(FuncType r): f{r} {}
+    constexpr FuncHolder(RankFuncType r): rankf{r} {}
+    constexpr FuncHolder(FuncType r): f{r} {}
 };
 
 
