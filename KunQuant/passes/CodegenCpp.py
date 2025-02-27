@@ -81,6 +81,10 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
     toplevel = _CppScope(None)
     buffer_type: Dict[OpBase, str] = dict()
     ptrname = "" if elem_type == "float" else "D"
+    high_acc_sum = options.get("high_acc_sum", True)
+    high_acc_sum_str = "true" if high_acc_sum else "false"
+    arg_min_max_return_least_index = options.get("arg_min_max_return_least_index", True)
+    arg_min_max_return_least_index_str = "true" if arg_min_max_return_least_index else "false"
     for inp, buf_kind in inputs:
         name = inp.attrs["name"]
         layout = inp.attrs["layout"]
@@ -194,6 +198,10 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             thename = op.__class__.__name__
             if isinstance(op, ReduceDecayLinear):
                 thename = f'{thename}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>'
+            elif isinstance(op, ReduceAdd):
+                thename = f'{thename}<{elem_type}, {simd_lanes}, {high_acc_sum_str}>'
+            elif isinstance(op, ReduceArgMax) or isinstance(op, ReduceArgMin):
+                thename = f'{thename}<{elem_type}, {simd_lanes}, {arg_min_max_return_least_index_str}>'
             else:
                 thename = f'{thename}<{elem_type}, {simd_lanes}>'
             loop_op = op.inputs[0] if isinstance(op.inputs[0], ForeachBackWindow) else op.inputs[0].get_parent()
@@ -222,7 +230,7 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
             window = op.attrs["window"]
-            toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"FastWindowedSum<{elem_type}, {simd_lanes}, {window}> sum_{idx};"))
+            toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"FastWindowedSum<{elem_type}, {simd_lanes}, {window}, {high_acc_sum_str}> sum_{idx};"))
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = sum_{idx}.step({buf_name}, v{inp[0]}, i);"))
         elif isinstance(op, ExpMovingAvg):
             if stream_mode: raise RuntimeError(f"Stream Mode does not support {op.__class__.__name__}")

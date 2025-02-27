@@ -262,34 +262,57 @@ struct RequireWindow {
 using kun_simd::sc_isnan;
 using kun_simd::sc_select;
 
-template <typename T, int stride>
-INLINE kun_simd::vec<T, stride>
-kahanAdd(typename kun_simd::vec<T, stride>::Masktype isnan_small,
-         kun_simd::vec<T, stride> sum, kun_simd::vec<T, stride> small,
-         kun_simd::vec<T, stride> &compensation) {
-    auto y = small - compensation;
-    auto t = sum + y;
-    compensation = sc_select(isnan_small, compensation, t - sum - y);
-    return t;
-}
+template <typename T, int stride, bool kahan = true>
+struct AddImpl {
+    INLINE static kun_simd::vec<T, stride>
+    add(typename kun_simd::vec<T, stride>::Masktype isnan_small,
+            kun_simd::vec<T, stride> sum, kun_simd::vec<T, stride> small,
+            kun_simd::vec<T, stride> &compensation) {
+        auto y = small - compensation;
+        auto t = sum + y;
+        compensation = sc_select(isnan_small, compensation, t - sum - y);
+        return t;
+    }
+
+    INLINE static kun_simd::vec<T, stride>
+    add(kun_simd::vec<T, stride> sum, kun_simd::vec<T, stride> small,
+            kun_simd::vec<T, stride> &compensation) {
+        auto y = small - compensation;
+        auto t = sum + y;
+        compensation = t - sum - y;
+        return t;
+    }
+};
 
 template <typename T, int stride>
-INLINE kun_simd::vec<T, stride>
-kahanAdd(kun_simd::vec<T, stride> sum, kun_simd::vec<T, stride> small,
-         kun_simd::vec<T, stride> &compensation) {
-    auto y = small - compensation;
-    auto t = sum + y;
-    compensation = t - sum - y;
-    return t;
-}
+struct AddImpl <T, stride, false> {
+    INLINE static kun_simd::vec<T, stride>
+    add(typename kun_simd::vec<T, stride>::Masktype isnan_small,
+            kun_simd::vec<T, stride> sum, kun_simd::vec<T, stride> small,
+            kun_simd::vec<T, stride> &compensation) {
+        auto y = small - compensation;
+        auto t = sum + y;
+        compensation = sc_select(isnan_small, compensation, t - sum - y);
+        return t;
+    }
+    INLINE static kun_simd::vec<T, stride>
+    add(kun_simd::vec<T, stride> sum, kun_simd::vec<T, stride> small,
+            kun_simd::vec<T, stride> &compensation) {
+        auto y = small - compensation;
+        auto t = sum + y;
+        compensation = t - sum - y;
+        return t;
+    }
+};
 
-template <typename T, int stride, int window>
+template <typename T, int stride, int window, bool kahan>
 struct FastWindowedSum {
     using simd_t = kun_simd::vec<T, stride>;
     using simd_int_t =
         kun_simd::vec<typename kun_simd::fp_trait<T>::int_t, stride>;
     using int_mask_t = typename simd_int_t::Masktype;
     using float_mask_t = typename simd_t::Masktype;
+    using add_impl_t = typename AddImpl<T,stride, kahan>;
     simd_t v = 0;
     simd_t compensationAdd = 0;
     simd_t compensationSub = 0;
@@ -302,10 +325,10 @@ struct FastWindowedSum {
         auto new_is_nan = sc_isnan(cur);
         // v = old_is_nan? v : (v-old)
         v = sc_select(old_is_nan, v,
-                      kahanAdd(old_is_nan, v, 0 - old, compensationSub));
+                      add_impl_t::add(old_is_nan, v, 0 - old, compensationSub));
         // v = new_is_nan? v : (v+cur)
         v = sc_select(new_is_nan, v,
-                      kahanAdd(new_is_nan, v, cur, compensationAdd));
+                      add_impl_t::add(new_is_nan, v, cur, compensationAdd));
         num_nans =
             num_nans - sc_select(kun_simd::bitcast<int_mask_t>(old_is_nan),
                                  simd_int_t{1}, simd_int_t{0});
@@ -426,13 +449,14 @@ kun_simd::vec<T, stride> WindowedLinearRegressionResiImpl(
     return kun_simd::vec<T, stride>(val) - (slope * T(window) + interp);
 }
 
-template <typename T, int stride>
+template <typename T, int stride, bool kahan>
 struct ReduceAdd {
     using simd_t = kun_simd::vec<T, stride>;
+    using add_impl_t = typename AddImpl<T,stride, kahan>;
     simd_t v = 0;
     simd_t compensation = 0;
     void step(simd_t input, size_t index) {
-        v = kahanAdd(v, input, compensation);
+        v = add_impl_t::add(v, input, compensation);
     }
     operator simd_t() { return v; }
 };
@@ -524,14 +548,14 @@ inline auto Equals(T1 a, T2 b) -> decltype(kun_simd::operator==(a, b)) {
 //     return _mm256_cmp_ps(a, b, _CMP_NGE_UQ);
 // }
 
-template <typename T, int stride>
-struct ReduceArgMax {
+template <typename T, int stride, typename Impl>
+struct ReduceArgMaxBase {
     using simd_t = kun_simd::vec<T, stride>;
-    simd_t v = -std::numeric_limits<T>::infinity();
+    simd_t v = Impl::init;
     simd_t idx = 0;
     void step(simd_t input, size_t index) {
         auto is_nan = sc_isnan(v, input);
-        auto cmp = v < input;
+        auto cmp = Impl::cmp(v, input);
         v = sc_select(cmp, input, v);
         v = sc_select(is_nan, NAN, v);
         idx = sc_select(cmp, T(index), idx);
@@ -540,20 +564,39 @@ struct ReduceArgMax {
     operator simd_t() { return idx; }
 };
 
-template <typename T, int stride>
-struct ReduceArgMin {
-    using simd_t = kun_simd::vec<T, stride>;
-    simd_t v = std::numeric_limits<T>::infinity();
-    simd_t idx = 0;
-    void step(simd_t input, size_t index) {
-        auto is_nan = sc_isnan(v, input);
-        auto cmp = v > input;
-        v = sc_select(cmp, input, v);
-        v = sc_select(is_nan, NAN, v);
-        idx = sc_select(cmp, T(index), idx);
-        idx = sc_select(is_nan, NAN, idx);
+template <typename T, int stride, bool return_least_index>
+struct ReduceArgMax : ReduceArgMaxBase<T, stride, ReduceArgMax<T, stride, return_least_index>> {
+    static constexpr T init = -std::numeric_limits<T>::infinity();
+    static auto cmp(simd_t a, simd_t b) -> decltype(a<b) {
+        return a < b;
     }
-    operator simd_t() { return idx; }
+};
+
+
+template <typename T, int stride>
+struct ReduceArgMax<T, stride, false> : ReduceArgMaxBase<T, stride, ReduceArgMax<T, stride, false>> {
+    static constexpr T init = -std::numeric_limits<T>::infinity();
+    static auto cmp(simd_t a, simd_t b) -> decltype(a<b) {
+        return a <= b;
+    }
+};
+
+
+template <typename T, int stride, bool return_least_index>
+struct ReduceArgMin : ReduceArgMaxBase<T, stride, ReduceArgMin<T, stride, return_least_index>> {
+    static constexpr T init = std::numeric_limits<T>::infinity();
+    static auto cmp(simd_t a, simd_t b) -> decltype(a<b) {
+        return a > b;
+    }
+};
+
+
+template <typename T, int stride>
+struct ReduceArgMin<T, stride, false> : ReduceArgMaxBase<T, stride, ReduceArgMin<T, stride, false>> {
+    static constexpr T init = std::numeric_limits<T>::infinity();
+    static auto cmp(simd_t a, simd_t b) -> decltype(a<b) {
+        return a >= b;
+    }
 };
 
 template <typename T, int stride>
