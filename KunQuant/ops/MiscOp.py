@@ -107,6 +107,12 @@ class GenericCrossSectionalOp(CrossSectionalOp):
 
 
 class DiffWithWeightedSum(GenericCrossSectionalOp):
+    '''
+    Compute cross sectional weighted sum (of all stocks) and compute the difference
+    of each stock data and the sum. Similar to numpy code:
+    v2 = np.sum(v * w, axis=1)
+    result = v - v2.reshape((-1, 1))
+    '''
     def __init__(self, v: OpBase, w: OpBase) -> None:
         super().__init__([v, w], None)
 
