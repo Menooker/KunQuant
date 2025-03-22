@@ -82,7 +82,7 @@ class MSVCCommandLineBuilder:
 class GCCCommandLineBuilder:
     @staticmethod
     def build_compile_options(cfg: 'CppCompilerConfig', srcpath: str, outpath: str) -> List[str]:
-        cmd = [cfg.compiler, "-std=c++11", f"-O{cfg.opt_level}", "-c", "-fPIC", "-fvisibility=hidden", "-fvisibility-inlines-hidden"]
+        cmd = [cfg.compiler, "-std=c++11", f"-O{cfg.opt_level}", "-c", "-fPIC", "-fvisibility=hidden", "-fvisibility-inlines-hidden"] + list(cfg.other_flags)
         if isinstance(cfg.machine, NativeCPUFlags):
             cmd += ["-march=native"]
         else:
@@ -99,7 +99,7 @@ class GCCCommandLineBuilder:
 
     @staticmethod
     def build_link_options(cfg: 'CppCompilerConfig', paths: List[str], outpath: str) -> List[str]:
-        ret = [cfg.compiler] + paths + ["-l", "KunRuntime", "-shared", "-L", _runtime_path, "-o", outpath]
+        ret = [cfg.compiler] + paths + ["-l", "KunRuntime", "-shared", "-L", _runtime_path, "-o", outpath] + list(cfg.other_flags)
         if cfg.fast_linker_threads:
             ret.append("-fuse-ld=gold")
             ret.append("-Wl,--threads")

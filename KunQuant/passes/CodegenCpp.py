@@ -68,16 +68,69 @@ def _float_value_to_float(v: float, dtype: str) -> str:
 def _value_to_float(op: OpBase, dtype: str) -> str:
     return _float_value_to_float(op.attrs["value"], dtype)
 
-vector_len = 8
+def _is_cross_sectional(f: Function) -> GenericCrossSectionalOp:
+    for op in f.ops:
+        if isinstance(op, Input) or isinstance(op, Output):
+            continue
+        if isinstance(op, GenericCrossSectionalOp):
+            return op
+    return None
 
-def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int], elem_type: str, simd_lanes: int, aligned: bool, static: bool) -> Tuple[str, str]:
-    if len(f.ops) == 3 and isinstance(f.ops[1], CrossSectionalOp):
+def _generate_cross_sectional_func_name(op: GenericCrossSectionalOp, inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]]) -> str:
+    name = []
+    for idx, (inp, buf_kind) in enumerate(inputs):
+        layout = inp.attrs["layout"]
+        name.append(layout)
+    for idx, (outp, is_tmp) in enumerate(outputs):
+        layout = outp.attrs["layout"]
+        name.append(layout)
+    return f"{op.__class__.__name__}_{'_'.join(name)}"
+
+def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int], generated_cross_sectional_func: Set[str], elem_type: str, simd_lanes: int, aligned: bool, static: bool) -> Tuple[str, str]:
+    if len(f.ops) == 3 and isinstance(f.ops[1], SimpleCrossSectionalOp):
         return "", f'''static auto stage_{prefix}__{f.name} = {f.ops[1].__class__.__name__}Stocks<Mapper{f.ops[0].attrs["layout"]}<{elem_type}, {simd_lanes}>, Mapper{f.ops[2].attrs["layout"]}<{elem_type}, {simd_lanes}>>;'''
-    header = f'''{"static " if static else ""}void stage_{prefix}__{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length) '''
+    
+    is_cross_sectional = _is_cross_sectional(f)
+    time_or_stock, ctx_or_stage = ("__time_idx", "RuntimeStage *stage") if is_cross_sectional else ("__stock_idx", "Context* __ctx")
+    func_name = _generate_cross_sectional_func_name(is_cross_sectional, inputs, outputs) if is_cross_sectional else f.name
+    header = f'''{"static " if static else ""}void stage_{prefix}__{func_name}({ctx_or_stage}, size_t {time_or_stock}, size_t __total_time, size_t __start, size_t __length) '''
     if static:
         decl = ""
     else:
-        decl = f'''extern void stage_{prefix}__{f.name}(Context* __ctx, size_t __stock_idx, size_t __total_time, size_t __start, size_t __length);'''
+        decl = f'''extern void stage_{prefix}__{func_name}({ctx_or_stage}, size_t {time_or_stock}, size_t __total_time, size_t __start, size_t __length);'''
+    if is_cross_sectional:
+        decl = f"{decl}\nstatic auto stage_{prefix}__{f.name} = stage_{prefix}__{func_name};"
+        if func_name in generated_cross_sectional_func:
+            return "", decl
+        generated_cross_sectional_func.add(func_name)
+        lines = []
+        for idx, (inp, buf_kind) in enumerate(inputs):
+            name = inp.attrs["name"]
+            layout = inp.attrs["layout"]
+            holder = f"{make_indents(1)}CrossSectionalDataHolder<Mapper{layout}<{elem_type}, {simd_lanes}>, ExtractInputBuffer> holder_input_{idx}{{stage, {idx}, __total_time, __start}};"
+            lines.append(holder)
+        for idx, (outp, is_tmp) in enumerate(outputs):
+            name = outp.attrs["name"]
+            layout = outp.attrs["layout"]
+            holder = f"{make_indents(1)}CrossSectionalDataHolder<Mapper{layout}<{elem_type}, {simd_lanes}>, ExtractOutputBuffer> holder_output_{idx}{{stage, {idx}, __total_time, __start}};"
+            lines.append(holder)
+        lines.append(f'{make_indents(1)}auto time_end = std::min(__start + ({time_or_stock} + 1) * time_stride, __start + __length);')
+        lines.append(f'{make_indents(1)}auto num_stocks = stage->ctx->stock_count;')      
+        lines.append(f'{make_indents(1)}using T = {elem_type};')
+        lines.append(is_cross_sectional.generate_head())
+        lines.append(f'{make_indents(1)}for (size_t t = __start + ({time_or_stock}) * time_stride; t < time_end; t++) {{')
+        for idx, (inp, buf_kind) in enumerate(inputs):
+            lines.append(f'{make_indents(2)}auto input_{idx} = holder_input_{idx}.accessor(t);')
+        for idx, (outp, is_tmp) in enumerate(outputs):
+            lines.append(f'{make_indents(2)}auto output_{idx} = holder_output_{idx}.accessor(t);')
+
+        lines.append(is_cross_sectional.generate_body())
+        lines.append(f'{make_indents(1)}}}')
+        src = "\n".join(lines)
+        return f'''{header} {{
+{src}
+}}''', decl
+
     toplevel = _CppScope(None)
     buffer_type: Dict[OpBase, str] = dict()
     ptrname = "" if elem_type == "float" else "D"

@@ -13,6 +13,29 @@ from KunQuant.predefined.Alpha101 import *
 from  KunQuant.runner import KunRunner as kr
 import sys
 
+def test_generic_cross_sectional():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inp2 = Input("b")
+        inp3 = Input("c")
+        Output(DiffWithWeightedSum(inp1 - inp2, inp3), "out")
+    f = Function(builder.ops)
+    lib = cfake.compileit([("test1", f, cfake.KunCompilerConfig(input_layout="TS", output_layout="TS"))],
+                          "cfaketest", cfake.CppCompilerConfig())
+
+    a = np.random.rand(24, 16).astype("float32")
+    b = np.random.rand(24, 16).astype("float32")
+    c = np.random.rand(24, 16).astype("float32")
+    ret = np.random.rand(24, 16).astype("float32")
+    executor = kr.createSingleThreadExecutor()
+    kr.runGraph(executor, lib.getModule("test1"), {"a": a, "b": b, "c": c}, 0, 24, {"out": ret})
+
+    v1 = a - b
+    # compute row-wise dot of v1 an c
+    v2 = np.sum(v1 * c, axis=1)
+    expected = v1 - v2.reshape((-1, 1))
+    np.testing.assert_allclose(expected, ret, atol=1e-6, rtol=1e-4, equal_nan=True)
 
 def test_corrwith():
     a = np.random.rand(24, 20).astype("float32")
@@ -418,4 +441,5 @@ test_ema(lib)
 test_argmin_issue19(lib)
 test_aligned(lib)
 test_rank029(lib)
+test_generic_cross_sectional()
 print("done")
