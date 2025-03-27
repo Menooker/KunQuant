@@ -174,6 +174,8 @@ using namespace kun;
     decl_src = []
     cur_count = 0
     is_single_source = split_source == 0
+    # the set of names of custom cross sectional functions
+    generated_cross_sectional_func = set()
     for func in impl:
         if split_source > 0 and cur_count > split_source:
             push_source()
@@ -195,7 +197,6 @@ using namespace kun;
         def query_temp_buf_id(tempname: str, window: int) -> int:
             input_windows[tempname] = window
             return insert_name_str(tempname, "TEMP").idx
-        generated_cross_sectional_func = set()
         src, decl = codegen_cpp(module_name, func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows, generated_cross_sectional_func, dtype, blocking_len, not allow_unaligned, is_single_source)
         impl_src.append(src)
         decl_src.append(decl)
