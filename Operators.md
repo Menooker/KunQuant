@@ -344,7 +344,34 @@ class Scale(CrossSectionalOp):
     Similar to df.div(df.abs().sum(axis=1), axis=0)
     '''
     pass
+
+class GenericCrossSectionalOp(CrossSectionalOp):
+    '''
+    Cross sectional op with customized C++ implementation.
+    generate_body() should return a C++ source code string. The C++ code should iterate on the
+    stocks at the same point of "time" to compute the output.
+    '''
+    def generate_body(self) -> str:
+        '''
+        Predefined types and variables:
+        `T`: the datatype, float or double
+        `num_stocks`: the number of stocks
+        `input_{N}`: the array-like accessor for the input data at the current point of time. `input_0` should be the first input
+            To access the data of a stock, use `input_X[i]` for `i` in 0 to `num_stocks`
+        `output_0`: the array-like accessor for the output data
+        '''
+        raise NotImplementedError("GenericCrossSectionalOp must be specialized")
+
+    def generate_head(self) -> str:
+        '''
+        Predefined types and variables:
+        `T`: the datatype, float or double
+        `num_stocks`: the number of stocks
+        '''
+        raise NotImplementedError("GenericCrossSectionalOp must be specialized")
 ```
+
+You can define your own cross-sectional operator by injecting C++ code via `GenericCrossSectionalOp`. `DiffWithWeightedSum` is an example for defining a custom cross-sectional operator by extending `GenericCrossSectionalOp`.
 
 ### Miscellaneous ops
 
@@ -373,6 +400,15 @@ class ExpMovingAvg(OpBase, GloablStatefulOpTrait):
     '''
     def __init__(self, v: OpBase, window: int) -> None:
         pass
+class DiffWithWeightedSum(GenericCrossSectionalOp):
+    '''
+    Compute cross sectional weighted sum (of all stocks) and compute the difference
+    of each stock data and the sum. Similar to numpy code:
+    v2 = np.sum(v * w, axis=1)
+    result = v - v2.reshape((-1, 1))
+    '''
+    def __init__(self, v: OpBase, w: OpBase) -> None:
+        super().__init__([v, w], None)
 ```
 
 ## Internal ops
