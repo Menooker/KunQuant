@@ -70,6 +70,15 @@ class _Partition:
         for buf in self.in_buf:
             buf.num_users += 1
 
+def _is_cross_sectional(f: Function) -> bool:
+    for op in f.ops:
+        if isinstance(op, Input) or isinstance(op, Output):
+            continue
+        if isinstance(op, CrossSectionalOp):
+            return True
+        return False
+    return False
+
 def _deprecation_check(name: str, argname: str) -> str:
     if name == "ST8s":
         print(f"The layout name given in {argname} ST8s is depracated. Use STs and blocking_len=8 instead")
@@ -165,6 +174,8 @@ using namespace kun;
     decl_src = []
     cur_count = 0
     is_single_source = split_source == 0
+    # the set of names of custom cross sectional functions
+    generated_cross_sectional_func = set()
     for func in impl:
         if split_source > 0 and cur_count > split_source:
             push_source()
@@ -186,11 +197,11 @@ using namespace kun;
         def query_temp_buf_id(tempname: str, window: int) -> int:
             input_windows[tempname] = window
             return insert_name_str(tempname, "TEMP").idx
-        src, decl = codegen_cpp(module_name, func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows, dtype, blocking_len, not allow_unaligned, is_single_source)
+        src, decl = codegen_cpp(module_name, func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows, generated_cross_sectional_func, dtype, blocking_len, not allow_unaligned, is_single_source)
         impl_src.append(src)
         decl_src.append(decl)
         newparti = _Partition(func.name, len(partitions), pins, pouts)
-        if len(func.ops) == 3 and isinstance(func.ops[1], CrossSectionalOp):
+        if _is_cross_sectional(func):
             newparti.is_cross_sectional = True
         partitions[func.name] = newparti
         # if not cross session

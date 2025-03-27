@@ -22,27 +22,24 @@ void KUN_TEMPLATE_EXPORT RankStocks(RuntimeStage *stage, size_t time_idx,
         INPUT::getInput(&inbuf, stage->stage->in_buffers[0], num_stocks);
     using T = typename std::decay<decltype(*input)>::type;
     auto outinfo = stage->stage->out_buffers[0];
-    auto simd_len = stage->ctx->simd_len;
     T *output = OUTPUT::getOutput(&stage->ctx->buffers[outinfo->id], outinfo,
-                                  num_stocks, simd_len);
+                                  num_stocks);
     auto time_end =
         std::min(__start + (time_idx + 1) * time_stride, __start + __length);
     std::vector<T> data;
     data.reserve(num_stocks);
     for (size_t t = __start + time_idx * time_stride; t < time_end; t++) {
         for (size_t i = 0; i < num_stocks; i++) {
-            auto S = i / simd_len;
             T in = input[INPUT::call(i, t - in_base_time, in_num_time,
-                                     num_stocks, simd_len)];
+                                     num_stocks)];
             if (!std::isnan(in)) {
                 data.push_back(in);
             }
         }
         std::sort(data.begin(), data.end());
         for (size_t i = 0; i < num_stocks; i++) {
-            auto S = i / simd_len;
             T in = input[INPUT::call(i, t - in_base_time, in_num_time,
-                                     num_stocks, simd_len)];
+                                     num_stocks)];
             T out;
             if (!std::isnan(in)) {
                 auto pos = std::equal_range(data.begin(), data.end(), in);
@@ -54,8 +51,7 @@ void KUN_TEMPLATE_EXPORT RankStocks(RuntimeStage *stage, size_t time_idx,
             } else {
                 out = NAN;
             }
-            output[OUTPUT::call(i, t - __start, __length, num_stocks,
-                                simd_len)] = out;
+            output[OUTPUT::call(i, t - __start, __length, num_stocks)] = out;
         }
         data.clear();
     }

@@ -1,5 +1,5 @@
 import KunQuant
-from KunQuant.Op import OpBase, WindowedTrait, SinkOpTrait, StatefulOpTrait, GloablStatefulOpTrait, UnaryElementwiseOp, BinaryElementwiseOp
+from KunQuant.Op import OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GloablStatefulOpTrait, UnaryElementwiseOp, BinaryElementwiseOp
 
 class BackRef(OpBase, WindowedTrait):
     '''
@@ -79,6 +79,57 @@ class WindowedLinearRegressionResiImpl(BinaryElementwiseOp, WindowedLinearRegres
     Compute RSqaure of Windowed Linear Regression
     '''
     pass
+
+class GenericCrossSectionalOp(CrossSectionalOp):
+    '''
+    Cross sectional op with customized C++ implementation.
+    generate_body() should return a C++ source code string. The C++ code should iterate on the
+    stocks at the same point of "time" to compute the output.
+    '''
+    def generate_body(self) -> str:
+        '''
+        Predefined types and variables:
+        `T`: the datatype, float or double
+        `num_stocks`: the number of stocks
+        `input_{N}`: the array-like accessor for the input data at the current point of time. `input_0` should be the first input
+            To access the data of a stock, use `input_X[i]` for `i` in 0 to `num_stocks`
+        `output_0`: the array-like accessor for the output data
+        '''
+        raise NotImplementedError("GenericCrossSectionalOp must be specialized")
+
+    def generate_head(self) -> str:
+        '''
+        Predefined types and variables:
+        `T`: the datatype, float or double
+        `num_stocks`: the number of stocks
+        '''
+        raise NotImplementedError("GenericCrossSectionalOp must be specialized")
+
+
+class DiffWithWeightedSum(GenericCrossSectionalOp):
+    '''
+    Compute cross sectional weighted sum (of all stocks) and compute the difference
+    of each stock data and the sum. Similar to numpy code:
+    v2 = np.sum(v * w, axis=1)
+    result = v - v2.reshape((-1, 1))
+    '''
+    def __init__(self, v: OpBase, w: OpBase) -> None:
+        super().__init__([v, w], None)
+
+    def generate_body(self) -> str:
+        return """
+        T sum = 0;
+        for (size_t i = 0; i < num_stocks; i++) {
+            sum += input_0[i] * input_1[i];
+        }
+        for (size_t i = 0; i < num_stocks; i++) {
+            output_0[i] = input_0[i] - sum;
+        }
+        """
+
+    def generate_head(self) -> str:
+        return ""
+
 
 class GenericPartition(OpBase, SinkOpTrait):
     pass

@@ -417,19 +417,24 @@ class ReductionOp(OpBase, StatefulOpTrait):
             raise RuntimeError(
                 f"verify() failed: ReductionOp not in parent of input: {self}\nself._parent_loop = {self._parent_loop}\nloop.get_parent() = {loop.get_parent()}")
 
-
 class CrossSectionalOp(OpBase):
-    def __init__(self, v: OpBase) -> None:
-        super().__init__([v], None)
+    pass
 
-class Rank(CrossSectionalOp):
+class SimpleCrossSectionalOp(CrossSectionalOp):
+    '''
+    The cross sectional ops that are implemented in pure C++
+    '''
+    def __init__(self, v: OpBase, attrs=None) -> None:
+        super().__init__([v], attrs)
+
+class Rank(SimpleCrossSectionalOp):
     '''
     the cross sectional rank among different stocks. Between [0, 1]
     Similar to df.rank(axis=1, pct=True, method="average")
     '''
     pass
 
-class Scale(CrossSectionalOp):
+class Scale(SimpleCrossSectionalOp):
     '''
     the cross sectionally scale different stocks, to make sum([abs(stock[i]) for i in stock]) == 1
     Similar to df.div(df.abs().sum(axis=1), axis=0)

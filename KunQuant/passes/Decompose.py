@@ -46,25 +46,25 @@ def decompose_rank_impl(ops: List[OpBase], info: Dict[OpBase, OpInfo]) -> List[O
         if op in visited:
             continue
         if isinstance(op, CrossSectionalOp):
-            inp = op.inputs[0]
-            if not isinstance(inp, Input) and not isinstance(inp, Output):
-                changed = True
-                newin = None
-                if inp in already_added_out:
-                    newin = already_added_out[inp]
-                else:
-                    for user in info[inp].uses:
-                        if isinstance(user, Output):
-                            newin = user
-                            if user not in visited:
-                                visited.add(user)
-                                out.append(user)
-                            break
-                    if newin is None:
-                        newin = Output(inp, inp.hash_hex(hash_cache))
-                        out.append(newin)
-                    already_added_out[inp] = newin
-                op.inputs[0] = newin
+            for idx, inp in enumerate(op.inputs):
+                if not isinstance(inp, Input) and not isinstance(inp, Output):
+                    changed = True
+                    newin = None
+                    if inp in already_added_out:
+                        newin = already_added_out[inp]
+                    else:
+                        for user in info[inp].uses:
+                            if isinstance(user, Output):
+                                newin = user
+                                if user not in visited:
+                                    visited.add(user)
+                                    out.append(user)
+                                break
+                        if newin is None:
+                            newin = Output(inp, inp.hash_hex(hash_cache))
+                            out.append(newin)
+                        already_added_out[inp] = newin
+                    op.inputs[idx] = newin
             out.append(op)
             visited.add(op)
         else:
