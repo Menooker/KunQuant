@@ -286,6 +286,21 @@ class WindowedLinearRegressionResi(WindowedLinearRegressionBase):
     Residuals of windowed linear regression. Implementation see
     https://github.com/microsoft/qlib/blob/a7d5a9b500de5df053e32abf00f6a679546636eb/qlib/data/_libs/rolling.pyx#L91
     '''
+
+class WindowedKurt(WindowedCompositiveOp):
+    '''
+    Unbiased estimated kurtosis of a rolling look back window of input, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).kurt()
+    '''
+
+class WindowedSkew(WindowedCompositiveOp):
+    '''
+    Unbiased estimated skewness of a rolling look back window of input, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).skew()
+    The bias adjustion factor is math.sqrt(window-1)*window/(window-2)
+    '''
 ```
 
 Multiple operands windowed ops: 

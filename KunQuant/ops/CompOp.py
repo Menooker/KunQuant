@@ -152,6 +152,59 @@ class WindowedCorrelation(WindowedCompositiveOp):
             out = Div(vsum1, sum_xy)
         return b.ops
 
+
+class WindowedSkew(WindowedCompositiveOp):
+    '''
+    Unbiased estimated skewness of a rolling look back window of input, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).skew()
+    The bias adjustion factor is math.sqrt(window-1)*window/(window-2)
+    '''
+    def decompose(self) -> List[OpBase]:
+        window = self.attrs["window"]
+        x = self.inputs[0]
+        b = Builder(self.get_parent())
+        with b:
+            avgX = WindowedAvg(x, window)
+            wX = WindowedTempOutput(x, window)
+            each = ForeachBackWindow(wX, window)
+            b.set_loop(each)
+            diffX = Sub(IterValue(each, wX), avgX)
+            x2 = Mul(diffX, diffX)
+            x3 = x2 * diffX
+            b.set_loop(self.get_parent())
+            vsum_x2 = ReduceAdd(x2)
+            vsum_x3 = ReduceAdd(x3)
+            vsum_x3 / (vsum_x2 * Sqrt(vsum_x2)) * ConstantOp(math.sqrt(window-1)*window/(window-2))
+        return b.ops
+
+class WindowedKurt(WindowedCompositiveOp):
+    '''
+    Unbiased estimated kurtosis of a rolling look back window of input, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).kurt()
+    '''
+    def decompose(self) -> List[OpBase]:
+        n = self.attrs["window"]
+        x = self.inputs[0]
+        b = Builder(self.get_parent())
+        with b:
+            avgX = WindowedAvg(x, n)
+            wX = WindowedTempOutput(x, n)
+            each = ForeachBackWindow(wX, n)
+            b.set_loop(each)
+            diffX = Sub(IterValue(each, wX), avgX)
+            x2 = Mul(diffX, diffX)
+            x4 = x2 * x2
+            b.set_loop(self.get_parent())
+            vsum_x2 = ReduceAdd(x2)
+            vsum_x4 = ReduceAdd(x4)
+            adjfactor = n*(n-1)*(n+1) / (n-2) / (n-3)
+            adjoffset = 3*(n-1)*(n-1) / (n-2) / (n-3)
+            vsum_x4 / (vsum_x2 * vsum_x2) * adjfactor - adjoffset
+        return b.ops
+
+
 class TsArgMax(WindowedCompositiveOp):
     '''
     ArgMax in a rolling look back window, including the current newest data.
@@ -233,7 +286,41 @@ class DecayLinear(WindowedCompositiveOp):
             v1 = ForeachBackWindow(v0, window)
             v2 = ReduceDecayLinear(IterValue(v1, v0), None, [("window", window)])
         return b.ops
-    
+
+def _handle_special_pow(base, expov):
+    if expov == 0:
+        return ConstantOp(1)
+    elif expov < 0:
+        intpart = _handle_special_pow(base, -expov)
+        return ConstantOp(1) / intpart
+    elif expov == 0.5:
+        return Sqrt(base)
+    elif abs(expov - int(expov) - 0.5) < 1e-5:
+        intpart = _handle_special_pow(base, int(expov))
+        if intpart is None:
+            return None
+        return Sqrt(base) *intpart
+    elif int(expov) == expov and expov <= 1024 and expov >= 0:
+        # pow(x, 5) >>>>  x1=x*x x2=x1*x2 out=x2*x
+        cur_mul = base
+        cur_exp = 1
+        remain = int(expov)
+        is_set = remain & cur_exp
+        if is_set:
+            curv = base
+        else:
+            curv = 1
+        remain = remain & ~cur_exp
+        while remain:
+            cur_exp *= 2
+            cur_mul = cur_mul * cur_mul
+            is_set = remain & cur_exp
+            if is_set:
+                curv = curv * cur_mul
+            remain = remain & ~cur_exp
+        return curv
+    return None
+
 class Pow(CompositiveOp):
     '''
     elementwise math function power: base ** expo
@@ -263,34 +350,10 @@ class Pow(CompositiveOp):
                     return b.ops
         if isinstance(expo, ConstantOp):
             expov = expo.attrs["value"]
-            if expov == 0.5:
-                with b:
-                    Sqrt(base)
-                    return b.ops
-            elif int(expov) == expov and expov <= 1024 and expov >= 0:
-                # pow(x, 5) >>>>  x1=x*x x2=x1*x2 out=x2*x
-                with b:
-                    cur_mul = base
-                    cur_exp = 1
-                    remain = int(expov)
-                    is_set = remain & cur_exp
-                    if is_set:
-                        curv = base
-                    else:
-                        curv = 1
-                    remain = remain & ~cur_exp
-                    while remain:
-                        cur_exp *= 2
-                        cur_mul = cur_mul * cur_mul
-                        is_set = remain & cur_exp
-                        if is_set:
-                            curv = curv * cur_mul
-                        remain = remain & ~cur_exp
-                return b.ops
-            else:
-                with b:
+            with b:
+                if _handle_special_pow(base, expov) is None:
                     Exp(Log(base) * expov)
-                    return b.ops
+            return b.ops
         with b:
             Exp(expo * Log(base))
             return b.ops
