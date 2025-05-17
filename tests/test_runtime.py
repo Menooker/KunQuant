@@ -410,6 +410,34 @@ def test_aligned(lib):
 
 ####################################
 
+def check_skew_kurt():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out2 = Output(WindowedSkew(inp1, 5), "ou2")
+        out2 = Output(WindowedKurt(inp1, 5), "ou3")
+    f = Function(builder.ops)
+    return "test_skew", f, KunCompilerConfig(input_layout="TS", output_layout="TS", dtype="double")
+
+def test_skew_kurt():
+    modu = lib.getModule("test_skew")
+    assert(modu)
+    inp = np.random.rand(20, 24)
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
+    output = out["ou2"]
+    df = pd.DataFrame(inp)
+    expected = df.rolling(5).skew()
+    np.testing.assert_allclose(output, expected, equal_nan=True)
+    
+    output = out["ou3"]
+    expected = df.rolling(5).kurt()
+    np.testing.assert_allclose(output, expected, equal_nan=True)
+
+
+
+####################################
+
 test_corrwith()
 funclist = [check_1(),
     check_TS(),
@@ -422,7 +450,8 @@ funclist = [check_1(),
     check_ema(),
     check_argmin(),
     check_aligned(),
-    check_rank_alpha029()
+    check_rank_alpha029(),
+    check_skew_kurt()
     ]
 lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
 
@@ -442,4 +471,5 @@ test_argmin_issue19(lib)
 test_aligned(lib)
 test_rank029(lib)
 test_generic_cross_sectional()
+test_skew_kurt()
 print("done")
