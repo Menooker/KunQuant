@@ -94,7 +94,7 @@ jobs:
     - name: Download all the dists
       uses: actions/download-artifact@v4
       with:
-        name: python-package-distributions-ubuntu-20.04${{ matrix.python-version }}
+        name: python-package-distributions-ubuntu-22.04${{ matrix.python-version }}
         path: dist/
     - name: Repair wheel for manylinux (Linux only)
       if: runner.os == 'Linux'
