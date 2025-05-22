@@ -7,12 +7,12 @@ on:
     - '*'
   workflow_dispatch:
 jobs:
-  build:
-    name: Build distribution 📦
+  build-windows:
+    name: Build distribution Windows 📦
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04, windows-2022]
+        os: [windows-2022]
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
     steps:
@@ -29,9 +29,6 @@ jobs:
         pip install
         build
         --user
-    - name: Build a binary wheel and a source tarball (linux)
-      if: runner.os == 'Linux'
-      run: KUN_USE_GIT_VERSION=${{ startsWith(github.ref, 'refs/tags/') && '0' || '1' }} python3 -m build --wheel
     - name: Build a binary wheel and a source tarball (windows)
       if: runner.os == 'Windows'
       run: |
@@ -42,12 +39,56 @@ jobs:
       with:
         name: python-package-distributions-${{ matrix.os }}${{ matrix.python-version }}
         path: dist/
+  build-linux:
+    name: Build distribution Linux 📦
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          - python-version: "3.8"
+            cp-tag: "cp38"
+          - python-version: "3.9"
+            cp-tag: "cp39"
+          - python-version: "3.10"
+            cp-tag: "cp310"
+          - python-version: "3.11"
+            cp-tag: "cp311"
+          - python-version: "3.12"
+            cp-tag: "cp312"
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+    - name: Install cibuildwheel
+      run: >-
+        python3 -m
+        pip install
+        cibuildwheel
+        --user
+    - name: Build a binary wheel and a source tarball (linux)
+      run: |
+        cibuildwheel --platform linux --output-dir wheelhouse
+      env:
+          CIBW_BUILD: "${{ matrix.cp-tag }}-manylinux_x86_64"
+          CIBW_BUILD_FRONTEND: "build"
+          CIBW_MANYLINUX_X86_64_IMAGE: "ghcr.io/menooker/kunquant:main"
+          CIBW_ENVIRONMENT: "KUN_USE_GIT_VERSION=${{ startsWith(github.ref, 'refs/tags/') && '0' || '1' }}"
+    - name: Store the distribution packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-package-distributions-ubuntu-22.04${{ matrix.python-version }}
+        path: wheelhouse/*.whl
   publish-to-pypi:
     name: >-
       Publish Python 🐍 distribution 📦 to PyPI
     if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
     needs:
-    - build
+    - build-windows
+    - build-linux
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -63,13 +104,6 @@ jobs:
       with:
         name: python-package-distributions-ubuntu-22.04${{ matrix.python-version }}
         path: dist/
-    - name: Repair wheel for manylinux (Linux only)
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt install --upgrade patchelf
-        python -m pip install auditwheel
-        auditwheel repair dist/*.whl -w dist/ --plat manylinux_2_31_x86_64
-        rm dist/*linux_x86_64.whl
     - name: Download all windows the dists
       uses: actions/download-artifact@v4
       with:
@@ -80,7 +114,8 @@ jobs:
   publish-to-testpypi:
     name: Publish Python 🐍 distribution 📦 to TestPyPI
     needs:
-    - build
+    - build-windows
+    - build-linux
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -96,13 +131,6 @@ jobs:
       with:
         name: python-package-distributions-ubuntu-22.04${{ matrix.python-version }}
         path: dist/
-    - name: Repair wheel for manylinux (Linux only)
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt install --upgrade patchelf
-        python -m pip install auditwheel
-        auditwheel repair dist/*.whl -w dist/ --plat manylinux_2_31_x86_64
-        rm dist/*linux_x86_64.whl
     - name: Download all windows the dists
       uses: actions/download-artifact@v4
       with:
