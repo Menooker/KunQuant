@@ -74,9 +74,9 @@ jobs:
       run: |
         cibuildwheel --platform linux --output-dir wheelhouse
       env:
-         - CIBW_BUILD: "${{ matrix.cp-tag }}-manylinux_x86_64"
-         - CIBW_BUILD_FRONTEND: "build"
-         - CIBW_MANYLINUX_X86_64_IMAGE: "ghcr.io/menooker/kunquant:main"
+          CIBW_BUILD: "${{ matrix.cp-tag }}-manylinux_x86_64"
+          CIBW_BUILD_FRONTEND: "build"
+          CIBW_MANYLINUX_X86_64_IMAGE: "ghcr.io/menooker/kunquant:main"
     - name: Store the distribution packages
       uses: actions/upload-artifact@v4
       with:
