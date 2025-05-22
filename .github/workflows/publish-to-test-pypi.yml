@@ -14,7 +14,9 @@ jobs:
       matrix:
         os: [ubuntu-22.04, windows-2022]
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
-
+    if: runner.os == 'Linux'
+      container:
+        image: ubuntu:22.04
     steps:
     - uses: actions/checkout@v4
       with:
