@@ -1,4 +1,2 @@
-FROM ubuntu:20.04
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Etc/UTC
-RUN apt-get update && apt-get install -y git cmake g++
+FROM quay.io/pypa/manylinux_2_28_x86_64:2025.05.16-1
+RUN rm -rf /opt/_internal/pipx/venvs/cmake && yum install cmake -y
