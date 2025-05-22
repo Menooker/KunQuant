@@ -114,7 +114,8 @@ jobs:
   publish-to-testpypi:
     name: Publish Python 🐍 distribution 📦 to TestPyPI
     needs:
-    - build
+    - build-windows
+    - build-linux
     runs-on: ubuntu-latest
     strategy:
       matrix:
