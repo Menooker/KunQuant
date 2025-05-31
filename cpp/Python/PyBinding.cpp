@@ -12,7 +12,6 @@
 #include <pybind11/stl.h>
 #include <string>
 #include <vector>
-#include <memory>
 
 namespace py = pybind11;
 
@@ -148,7 +147,7 @@ PYBIND11_MODULE(KunRunner, m) {
         })
         .def("getModule", [](const std::shared_ptr<kun::Library>& v, const char* name) -> std::unique_ptr<ModuleHandle> {
             if (auto m = v->getModule(name)) {
-                return std::make_unique<ModuleHandle>(m, v);
+                return std::unique_ptr<ModuleHandle>(new ModuleHandle(m, v));
             }
             return nullptr;
         });
