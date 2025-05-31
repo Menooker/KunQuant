@@ -12,6 +12,7 @@
 #include <pybind11/stl.h>
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace py = pybind11;
 
