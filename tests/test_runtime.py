@@ -434,10 +434,25 @@ def test_skew_kurt():
     expected = df.rolling(5).kurt()
     np.testing.assert_allclose(output, expected, equal_nan=True)
 
+def create_stream_gh_issue_41():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out2 = Output(inp1 * inp1, "ou2")
+    f = Function(builder.ops)
+    lib = cfake.compileit([("test_stream", f, KunCompilerConfig(input_layout="STREAM", output_layout="STREAM"))], "test2", cfake.CppCompilerConfig())
+    modu = lib.getModule("test_stream")
+    executor = kr.createSingleThreadExecutor()
+    return kr.StreamContext(executor, modu, 8)
 
+def test_stream_lifetime_gh_issue_41():
+    # This causes segfault when calling methods before issue 41
+    stream = create_stream_gh_issue_41()
+    stream.pushData(0, np.array([0] * 8, dtype="float32"))
 
 ####################################
 
+test_stream_lifetime_gh_issue_41()
 test_corrwith()
 funclist = [check_1(),
     check_TS(),

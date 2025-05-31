@@ -47,6 +47,23 @@ static void expectContiguousShape(kun::Datatype dtype,
     }
 }
 
+namespace {
+    struct ModuleHandle {
+        const kun::Module* modu;
+        std::shared_ptr<kun::Library> lib;
+        ModuleHandle(const kun::Module* modu, const std::shared_ptr<kun::Library>& lib)
+            : modu{modu}, lib{lib} {
+        }
+    };
+    struct StreamContextWrapper: kun::StreamContext {
+        std::shared_ptr<kun::Library> lib;
+        StreamContextWrapper(std::shared_ptr<kun::Executor> exec, const ModuleHandle *m,
+                  size_t num_stocks)
+                  : kun::StreamContext{std::move(exec), m->modu, num_stocks}, lib{m->lib}
+        {}
+    };
+}
+
 PYBIND11_MODULE(KunRunner, m) {
     m.attr("__name__") = "KunQuant.runner.KunRunner";
     m.doc() = R"(Code Runner for KunQuant generated code)";
@@ -81,10 +98,10 @@ PYBIND11_MODULE(KunRunner, m) {
 #endif
         return std::string();
     });
-    py::class_<kun::Module>(m, "Module")
+    py::class_<ModuleHandle>(m, "Module")
         .def_property_readonly("output_layout",
-                               [](kun::Module &mod) {
-                                   switch (mod.output_layout) {
+                               [](ModuleHandle &mod) {
+                                   switch (mod.modu->output_layout) {
                                    case kun::MemoryLayout::STs:
                                        return "STs";
                                    case kun::MemoryLayout::TS:
@@ -94,9 +111,13 @@ PYBIND11_MODULE(KunRunner, m) {
                                    }
                                    return "?";
                                })
-        .def_readonly("blocking_len", &kun::Module::blocking_len)
+        .def_property_readonly("blocking_len",
+                               [](ModuleHandle &mod) {
+                                   return mod.modu->blocking_len;
+                               })
         .def("getOutputNames",
-             [](kun::Module &mod) {
+             [](ModuleHandle &m) {
+                 auto& mod = *(m.modu);
                  std::vector<std::string> ret;
                  for (size_t i = 0; i < mod.num_buffers; i++) {
                      auto &buf = mod.buffers[i];
@@ -106,7 +127,8 @@ PYBIND11_MODULE(KunRunner, m) {
                  }
                  return ret;
              })
-        .def("getOutputUnreliableCount", [](kun::Module &mod) {
+        .def("getOutputUnreliableCount", [](ModuleHandle &m) {
+            auto& mod = *(m.modu);
             py::dict ret;
             for (size_t i = 0; i < mod.num_buffers; i++) {
                 auto &buf = mod.buffers[i];
@@ -123,13 +145,18 @@ PYBIND11_MODULE(KunRunner, m) {
                 f();
             };
         })
-        .def("getModule", &kun::Library::getModule,
-             py::return_value_policy::reference);
+        .def("getModule", [](const std::shared_ptr<kun::Library>& v, const char* name) -> std::unique_ptr<ModuleHandle> {
+            if (auto m = v->getModule(name)) {
+                return std::unique_ptr<ModuleHandle>(new ModuleHandle(m, v));
+            }
+            return nullptr;
+        });
     m.def(
         "runGraph",
-        [](std::shared_ptr<kun::Executor> exec, const kun::Module *mod,
+        [](std::shared_ptr<kun::Executor> exec, ModuleHandle *m,
            const py::dict inputs, size_t cur_time, size_t length,
            const py::object outputs, bool skip_check, py::ssize_t num_stocks) {
+            auto mod = m->modu;
             std::unordered_map<std::string, float *> bufs;
             py::ssize_t known_S = 0;
             py::ssize_t known_T = 0;
@@ -345,18 +372,18 @@ PYBIND11_MODULE(KunRunner, m) {
         py::arg("exec"),  py::arg("inputs"), py::arg("corr_with"), py::arg("outs"), py::arg("layout") = "TS",
         py::arg("rank_inputs") = false);
 
-    py::class_<kun::StreamContext>(m, "StreamContext")
-        .def(py::init<std::shared_ptr<kun::Executor>, const kun::Module *,
+    py::class_<StreamContextWrapper>(m, "StreamContext")
+        .def(py::init<std::shared_ptr<kun::Executor>, const ModuleHandle *,
                       size_t>())
-        .def("queryBufferHandle", &kun::StreamContext::queryBufferHandle)
+        .def("queryBufferHandle", &StreamContextWrapper::queryBufferHandle)
         .def("getCurrentBuffer",
-             [](kun::StreamContext &ths, size_t handle) {
+             [](StreamContextWrapper &ths, size_t handle) {
                  auto buf = ths.getCurrentBufferPtr(handle);
                  return py::array_t<float, py::array::c_style>{
                      (py::ssize_t)ths.ctx.stock_count, buf};
              })
         .def("pushData",
-             [](kun::StreamContext &ths, size_t handle,
+             [](StreamContextWrapper &ths, size_t handle,
                 py::array_t<float, py::array::c_style> data) {
                  auto info = data.request();
                  if (info.shape.size() != 1 &&
@@ -365,5 +392,5 @@ PYBIND11_MODULE(KunRunner, m) {
                  }
                  ths.pushData(handle, (float *)info.ptr);
              })
-        .def("run", &kun::StreamContext::run);
+        .def("run", &StreamContextWrapper::run);
 }
