@@ -68,7 +68,7 @@ else:
 
 setup(
     name="KunQuant",
-    version="0.1.4" + git_ver,
+    version="0.1.5" + git_ver,
     description="A compiler, optimizer and executor for financial expressions and factors",
     long_description=open("Readme.md").read(),
     long_description_content_type="text/markdown",
