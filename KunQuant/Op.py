@@ -379,12 +379,56 @@ class BoolOpTrait:
     '''
     pass
 
-class StatefulOpTrait:
+
+class GenericCppCodegenTrait:
+    '''
+    The interface for generating C++ code for the op
+    '''
+    def get_func_or_class_template_name(self) -> str:
+        '''
+        return the function or state class template name for the op
+        '''
+        return f"{self.__class__.__name__}"
+
+
+    def get_func_or_class_full_name(self, elem_type: str, simd_lanes: int) -> str:
+        '''
+        return the full function name or state class name for the op, with the template parameters
+        '''
+        if "window" in self.attrs:
+            return f"{self.get_func_or_class_template_name()}<{elem_type}, {simd_lanes}, {self.attrs['window']}>"
+        return f"{self.get_func_or_class_template_name()}<{elem_type}, {simd_lanes}>"
+    
+    def generate_step_code(self, idx: str, time_idx: str, inputs: List[str], **kwargs) -> str:
+        '''
+        generate the code for the step of the op
+        idx: the output variable name index
+        time_idx: the time index variable name, e.g. "i"
+        inputs: the input variables of the op
+        kwargs: additional arguments, e.g. buf_name for WindowedTrait
+        '''
+        raise NotImplementedError(f"generate_step_code not implemented, op = {self.__class__.__name__}")
+
+
+class StatefulOpTrait(GenericCppCodegenTrait):
     '''
     The ops that have an internal state
     '''
-    pass
-
+    def get_state_variable_name_prefix(self) -> str:
+        '''
+        return the prefix of the state variable name, for better readability
+        '''
+        return "v"
+    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str]) -> str:
+        '''
+        generate the code for the initialization of the state variable
+        idx: the output variable name index
+        elem_type: the element type of the state variable
+        simd_lanes: SIMD lanes
+        inputs: the input variables of the op
+        '''
+        return f"{self.get_func_or_class_full_name(elem_type, simd_lanes)} {self.get_state_variable_name_prefix()}{idx};"
+    
 
 class GloablStatefulOpTrait(StatefulOpTrait):
     '''
@@ -416,7 +460,14 @@ class ReductionOp(OpBase, StatefulOpTrait):
         if self._parent_loop != loop.get_parent():
             raise RuntimeError(
                 f"verify() failed: ReductionOp not in parent of input: {self}\nself._parent_loop = {self._parent_loop}\nloop.get_parent() = {loop.get_parent()}")
-
+    
+    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str]) -> str:
+        init_val = "" if len(self.inputs) == 1 else inputs[1]
+        return f"{self.get_func_or_class_full_name(elem_type, simd_lanes)} {self.get_state_variable_name_prefix()}{idx}{{{init_val}}};"
+    
+    def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:
+        return f"{self.get_state_variable_name_prefix()}{idx}.step({inputs[0]}, {time_idx});"
+    
 class CrossSectionalOp(OpBase):
     pass
 

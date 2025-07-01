@@ -1,5 +1,6 @@
 import KunQuant
 from KunQuant.Op import OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GloablStatefulOpTrait, UnaryElementwiseOp, BinaryElementwiseOp
+from typing import List
 
 class BackRef(OpBase, WindowedTrait):
     '''
@@ -31,6 +32,13 @@ class FastWindowedSum(OpBase, WindowedTrait, GloablStatefulOpTrait):
 
     def required_input_window(self) -> int:
         return self.attrs["window"] + 1
+    
+    def get_state_variable_name_prefix(self) -> str:
+        return "sum_"
+    
+    def generate_step_code(self, idx: str, time_idx: str, inputs: List[str], buf_name: str) -> str:
+        return f"auto v{idx} = sum_{idx}.step({buf_name}, {inputs[0]}, {time_idx});"
+
 
 class ExpMovingAvg(OpBase, GloablStatefulOpTrait):
     '''
@@ -39,6 +47,12 @@ class ExpMovingAvg(OpBase, GloablStatefulOpTrait):
     '''
     def __init__(self, v: OpBase, window: int) -> None:
         super().__init__([v], [("window", window)])
+
+    def get_state_variable_name_prefix(self) -> str:
+        return "ema_"
+    
+    def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:
+        return f"auto v{idx} = ema_{idx}.step({inputs[0]}, {time_idx});"
 
 class WindowedLinearRegression(OpBase, WindowedTrait, GloablStatefulOpTrait):
     '''
@@ -49,7 +63,13 @@ class WindowedLinearRegression(OpBase, WindowedTrait, GloablStatefulOpTrait):
 
     def required_input_window(self) -> int:
         return self.attrs["window"] + 1
-
+    
+    def get_state_variable_name_prefix(self) -> str:
+        return "linear_"
+    
+    def generate_step_code(self, idx: str, time_idx: str, inputs: List[str], buf_name: str) -> str:
+        return f"const auto& v{idx} = linear_{idx}.step({buf_name}, {inputs[0]}, {time_idx});"
+    
 class WindowedLinearRegressionImplBase(OpBase):
     def __init__(self, v: OpBase) -> None:
         super().__init__([v])

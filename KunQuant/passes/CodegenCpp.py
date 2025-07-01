@@ -244,22 +244,16 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             buf_name = _get_buffer_name(op.inputs[1], inp[1])
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {buf_name}.getWindow(i, iter);"))
         elif isinstance(op, ReductionOp):
-            thename = op.__class__.__name__
-            if isinstance(op, ReduceDecayLinear):
-                thename = f'{thename}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>'
-            else:
-                thename = f'{thename}<{elem_type}, {simd_lanes}>'
             loop_op = op.inputs[0] if isinstance(op.inputs[0], ForeachBackWindow) else op.inputs[0].get_parent()
             loop_body = loop_to_cpp_loop[loop_op]
-            loop_var_idx = f.get_op_idx(loop_op)
             loop = loop_body.parent_for
             # insert a var definition before the for-loop
             loop_parent = loop.parent
             assert(isinstance(loop_parent, _CppScope))
-            init_val = "" if len(op.inputs) == 1 else f"v{inp[1]}"
-            loop_parent.scope.insert(loop_parent.scope.index(loop), _CppSingleLine(loop_parent, f"{thename} v{idx}{{{init_val}}};"))
+            vargs = [f"v{inpv}" for inpv in inp]
+            loop_parent.scope.insert(loop_parent.scope.index(loop), _CppSingleLine(loop_parent, op.generate_init_code(idx, elem_type, simd_lanes, vargs)))
             # insert a step in the for-loop
-            loop_body.scope.append(_CppSingleLine(loop_body, f"v{idx}.step(v{inp[0]}, iter);"))
+            loop_body.scope.append(_CppSingleLine(loop_body, op.generate_step_code(idx, "iter", vargs)))
         elif isinstance(op, BackRef):
             assert(op.get_parent() is None)
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
@@ -270,26 +264,16 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
             funcname = "windowedQuantile"
             scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>({buf_name}, i, {_float_value_to_float(op.attrs["q"], elem_type)});'))
-        elif isinstance(op, FastWindowedSum):
+        elif isinstance(op, GloablStatefulOpTrait):
             if stream_mode: raise RuntimeError(f"Stream Mode does not support {op.__class__.__name__}")
             assert(op.get_parent() is None)
-            buf_name = _get_buffer_name(op.inputs[0], inp[0])
-            window = op.attrs["window"]
-            toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"FastWindowedSum<{elem_type}, {simd_lanes}, {window}> sum_{idx};"))
-            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = sum_{idx}.step({buf_name}, v{inp[0]}, i);"))
-        elif isinstance(op, ExpMovingAvg):
-            if stream_mode: raise RuntimeError(f"Stream Mode does not support {op.__class__.__name__}")
-            assert(op.get_parent() is None)
-            window = op.attrs["window"]
-            toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"ExpMovingAvg<{elem_type}, {simd_lanes}, {window}> ema_{idx};"))
-            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = ema_{idx}.step(v{inp[0]}, i);"))
-        elif isinstance(op, WindowedLinearRegression):
-            if stream_mode: raise RuntimeError(f"Stream Mode does not support {op.__class__.__name__}")
-            assert(op.get_parent() is None)
-            buf_name = _get_buffer_name(op.inputs[0], inp[0])
-            window = op.attrs["window"]
-            toplevel.scope.insert(-1, _CppSingleLine(toplevel, f"WindowedLinearRegression<{elem_type}, {simd_lanes}, {window}> linear_{idx};"))
-            scope.scope.append(_CppSingleLine(scope, f"const auto& v{idx} = linear_{idx}.step({buf_name}, v{inp[0]}, i);"))
+            args = {}
+            if isinstance(op, WindowedTrait):
+                buf_name = _get_buffer_name(op.inputs[0], inp[0])
+                args["buf_name"] = buf_name
+            vargs = [f"v{inpv}" for inpv in inp]
+            toplevel.scope.insert(-1, _CppSingleLine(toplevel, op.generate_init_code(idx, elem_type, simd_lanes, vargs)))
+            scope.scope.append(_CppSingleLine(scope, op.generate_step_code(idx, "i", vargs, **args)))
         elif isinstance(op, Select):
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
         else:
