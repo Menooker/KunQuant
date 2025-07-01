@@ -334,3 +334,6 @@ void compute(...) {
     }
 }
 ```
+
+
+PR is welcome if you create a new op and would like to contribute back to KunQuant.

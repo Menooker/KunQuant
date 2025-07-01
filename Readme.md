@@ -299,6 +299,8 @@ KunQuant provides C-style APIs to call the generated factor code in shared libra
 
 See [Operators.md](./Operators.md)
 
+To add new operators, see [NewOperators.md](./NewOperators.md)
+
 ## Testing and validation
 
 Unit tests for some of the internal IR transformations:
