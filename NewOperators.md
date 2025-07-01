@@ -4,8 +4,6 @@ Currently, KunQuant includes dozens of operators, ranging from basic arithmetic 
 
 Refer to the documentation here before proceeding: [Operators.md](./Operators.md)
 
-Here's the English translation of your document in **Markdown** format:
-
 ## Operators Overview
 
 KunQuant is a lightweight compiler that converts user expressions into **computation graphs**, specifically **Directed Acyclic Graphs (DAGs)**. Each node in the graph is an **operator**, which accepts 0 or more inputs and produces 0 or 1 outputs.
