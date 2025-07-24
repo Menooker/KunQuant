@@ -144,7 +144,7 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
         if stream_mode:
             window_size = stream_window_size.get(name, 1)
             buffer_type[inp] = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}>"
-            code = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf, __stock_idx, __ctx->stock_count}};"
+            code = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf{ptrname}, __stock_idx, __ctx->stock_count}};"
         else:
             buffer_type[inp] = f"Input{layout}<{elem_type}, {simd_lanes}>"
             code = f"Input{layout}<{elem_type}, {simd_lanes}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr{ptrname}, __stock_idx, __ctx->stock_count, {total_str}, {start_str}}};"
@@ -160,7 +160,7 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
         if stream_mode:
             window_size = stream_window_size.get(name, 1)
             buffer_type[inp] = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}>"
-            code = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf, __stock_idx, __ctx->stock_count}};"
+            code = f"StreamWindow<{elem_type}, {simd_lanes}, {window_size}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].stream_buf{ptrname}, __stock_idx, __ctx->stock_count}};"
         else:
             buffer_type[inp] = f"Output{layout}<{elem_type}, {simd_lanes}>"
             code = f"Output{layout}<{elem_type}, {simd_lanes}> buf_{name}{{__ctx->buffers[{idx_in_ctx}].ptr{ptrname}, __stock_idx, __ctx->stock_count, __length, 0}};"
@@ -172,7 +172,7 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             if stream_mode:
                 buffer_type[op] = f"StreamWindow<{elem_type}, {simd_lanes}, {window}>"
                 bufname = f"{f.name}_{idx}"
-                code = f"StreamWindow<{elem_type}, {simd_lanes}, {window}> temp_{idx}{{__ctx->buffers[{query_temp_buffer_id(bufname, window)}].stream_buf, __stock_idx, __ctx->stock_count}};"
+                code = f"StreamWindow<{elem_type}, {simd_lanes}, {window}> temp_{idx}{{__ctx->buffers[{query_temp_buffer_id(bufname, window)}].stream_buf{ptrname}, __stock_idx, __ctx->stock_count}};"
             else:
                 buffer_type[op] = f"OutputWindow<{elem_type}, {simd_lanes}, {window}>"
                 code = f"OutputWindow<{elem_type}, {simd_lanes}, {window}> temp_{idx}{{}};"

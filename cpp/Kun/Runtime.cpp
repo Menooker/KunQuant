@@ -1,7 +1,7 @@
 #include "Context.hpp"
+#include "CorrWith.hpp"
 #include "Module.hpp"
 #include "RunGraph.hpp"
-#include "CorrWith.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <list>
@@ -166,11 +166,9 @@ bool RuntimeStage::onDone(size_t cnt) {
     return true;
 }
 
-
-void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout, bool rank_inputs,
-              std::vector<float*>& buffers,
-              float* corr_with_buffer,
-              std::vector<float*>& outbuffers,
+void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout,
+              bool rank_inputs, std::vector<float *> &buffers,
+              float *corr_with_buffer, std::vector<float *> &outbuffers,
               size_t num_stocks, size_t total_time, size_t cur_time,
               size_t length) {
     decltype(&ops::CorrWith<ops::MapperTS<float, 8>>) thefunc = nullptr;
@@ -190,29 +188,33 @@ void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout, bool rank_inp
     std::vector<BufferInfo> buffer_info;
     std::vector<Buffer> rtlbuffers;
     std::vector<Stage> mstages;
-    std::vector<BufferInfo*> temp;
+    std::vector<BufferInfo *> temp;
     rtlbuffers.reserve(buffers.size() * 2 + 1);
     buffer_info.reserve(buffers.size() * 2 + 1);
     mstages.reserve(buffers.size() * 2 + 1);
     temp.reserve(buffers.size() * 3);
-    for (float* b: buffers) {
+    for (float *b : buffers) {
         rtlbuffers.emplace_back(b, total_time);
-        buffer_info.emplace_back(BufferInfo{buffer_info.size(), "", 1, BufferKind::INPUT, 0, 0});
+        buffer_info.emplace_back(
+            BufferInfo{buffer_info.size(), "", 1, BufferKind::INPUT, 0, 0});
     }
-    for (float* b: outbuffers) {
+    for (float *b : outbuffers) {
         rtlbuffers.emplace_back(b, total_time);
-        buffer_info.emplace_back(BufferInfo{buffer_info.size(), "", 0, BufferKind::OUTPUT, 0, 0});
+        buffer_info.emplace_back(
+            BufferInfo{buffer_info.size(), "", 0, BufferKind::OUTPUT, 0, 0});
     }
     rtlbuffers.emplace_back(corr_with_buffer, total_time);
-    buffer_info.emplace_back(BufferInfo{buffer_info.size(), "", 0, BufferKind::INPUT, 0, 0});
-    for(size_t i=0; i<buffers.size(); i++) {
+    buffer_info.emplace_back(
+        BufferInfo{buffer_info.size(), "", 0, BufferKind::INPUT, 0, 0});
+    for (size_t i = 0; i < buffers.size(); i++) {
         temp.push_back(&buffer_info[i]);
-        auto* inbuf = &temp.back();
+        auto *inbuf = &temp.back();
         temp.push_back(&buffer_info.back());
         temp.push_back(&buffer_info[i + buffers.size()]);
-        auto* outbuf = &temp.back();
+        auto *outbuf = &temp.back();
         mstages.emplace_back(Stage{thefunc, nullptr, 0, inbuf, 2, outbuf, 1, 0,
-            TaskExecKind::SLICE_BY_TIME, buffer_info.size()});
+                                   TaskExecKind::SLICE_BY_TIME,
+                                   buffer_info.size()});
     }
     Context ctx{std::move(rtlbuffers),
                 {},
@@ -231,14 +233,14 @@ void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout, bool rank_inp
         auto &stage = mstages[i];
         stages.emplace_back(&stage, &ctx);
     }
-    for (size_t i = 0; i <buffers.size(); i++) {
+    for (size_t i = 0; i < buffers.size(); i++) {
         auto &stage = mstages[i];
         if (stage.orig_pending == 0) {
             stages[i].enqueue();
         }
     }
     exec->runUntilDone();
- }
+}
 
 void runGraph(std::shared_ptr<Executor> exec, const Module *m,
               std::unordered_map<std::string, float *> &buffers,
@@ -270,7 +272,8 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
     Context ctx{std::move(rtlbuffers),
                 {},
                 exec,
-                divideAndCeil(num_stocks, m->blocking_len) * m->blocking_len * length,
+                divideAndCeil(num_stocks, m->blocking_len) * m->blocking_len *
+                    length,
                 num_stocks,
                 total_time,
                 cur_time,
@@ -358,20 +361,31 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
         throw std::runtime_error(
             "Cannot run batch mode module via StreamContext");
     }
-    if (m->dtype != Datatype::Float) {
-        throw std::runtime_error(
-            "Stream mode currently does not support double type yet");
-    }
     std::vector<Buffer> rtlbuffers;
     rtlbuffers.reserve(m->num_buffers);
     buffers.reserve(m->num_buffers);
-    for (size_t i = 0; i < m->num_buffers; i++) {
-        auto &buf = m->buffers[i];
-        buffers.emplace_back(
-            StreamBuffer<float>::make(num_stocks, buf.window, m->blocking_len),
-            StreamBuffer<float>::getBufferSize(num_stocks, buf.window,
-                                               m->blocking_len));
-        rtlbuffers.emplace_back((float *)buffers.back().get(), 1);
+    if (m->dtype == Datatype::Float) {
+        for (size_t i = 0; i < m->num_buffers; i++) {
+            auto &buf = m->buffers[i];
+            auto ptr = StreamBuffer<float>::make(num_stocks, buf.window,
+                                                 m->blocking_len);
+            buffers.emplace_back(
+                ptr, StreamBuffer<float>::getBufferSize(num_stocks, buf.window,
+                                                        m->blocking_len));
+            rtlbuffers.emplace_back((float *)ptr, 1);
+        }
+    } else if (m->dtype == Datatype::Double) {
+        for (size_t i = 0; i < m->num_buffers; i++) {
+            auto &buf = m->buffers[i];
+            auto ptr = StreamBuffer<double>::make(num_stocks, buf.window,
+                                                  m->blocking_len);
+            buffers.emplace_back(
+                ptr, StreamBuffer<double>::getBufferSize(num_stocks, buf.window,
+                                                         m->blocking_len));
+            rtlbuffers.emplace_back((float *)ptr, 1);
+        }
+    } else {
+        throw std::runtime_error("Unknown type");
     }
     ctx.buffers = std::move(rtlbuffers);
     ctx.executor = exec;
@@ -395,8 +409,13 @@ size_t StreamContext::queryBufferHandle(const char *name) const {
     throw std::runtime_error("Cannot find the buffer name");
 }
 
-const float *StreamContext::getCurrentBufferPtr(size_t handle) const {
+const float *StreamContext::getCurrentBufferPtrFloat(size_t handle) const {
     auto buf = (StreamBuffer<float> *)buffers.at(handle).get();
+    return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window);
+}
+
+const double *StreamContext::getCurrentBufferPtrDouble(size_t handle) const {
+    auto buf = (StreamBuffer<double> *)buffers.at(handle).get();
     return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window);
 }
 
@@ -405,6 +424,13 @@ void StreamContext::pushData(size_t handle, const float *data) {
     float *ptr = buf->pushData(ctx.stock_count, m->buffers[handle].window,
                                m->blocking_len);
     memcpy(ptr, data, ctx.stock_count * sizeof(float));
+}
+
+void StreamContext::pushData(size_t handle, const double *data) {
+    auto buf = (StreamBuffer<double> *)buffers.at(handle).get();
+    double *ptr = buf->pushData(ctx.stock_count, m->buffers[handle].window,
+                                m->blocking_len);
+    memcpy(ptr, data, ctx.stock_count * sizeof(double));
 }
 
 void StreamContext::run() {
