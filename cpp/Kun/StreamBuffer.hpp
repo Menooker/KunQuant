@@ -12,7 +12,7 @@ struct StreamBuffer {
     // [stock_count/simd_len of Buffer positions (size_t)]
 
     alignas(32) char buf[0];
-    float *getBuffer() const { return (float *)(buf); }
+    T *getBuffer() const { return (T *)(buf); }
     size_t *getPos(size_t idx, size_t stock_count, size_t window_size) const {
         return (size_t *)(buf + sizeof(T) * stock_count * window_size +
                           idx * sizeof(size_t));
@@ -23,7 +23,7 @@ struct StreamBuffer {
                stock_count / simd_len * sizeof(size_t);
     }
     static char *make(size_t stock_count, size_t window_size, size_t simd_len);
-    const float *getCurrentBufferPtr(size_t stock_count,
+    const T *getCurrentBufferPtr(size_t stock_count,
                                      size_t window_size) const {
         size_t pos = *getPos(0, stock_count, window_size);
         size_t offset = 1;
@@ -31,7 +31,7 @@ struct StreamBuffer {
             pos >= offset ? (pos - offset) : (pos + window_size - offset);
         return getBuffer() + idx * stock_count;
     }
-    float *pushData(size_t stock_count, size_t window_size, size_t simd_len) {
+    T *pushData(size_t stock_count, size_t window_size, size_t simd_len) {
         size_t pos = *getPos(0, stock_count, window_size);
         auto ret = getBuffer() + pos * stock_count;
         pos += 1;

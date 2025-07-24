@@ -92,8 +92,8 @@ KUN_API size_t kunQueryBufferHandle(KunStreamContextHandle context,
 
 KUN_API const float *kunStreamGetCurrentBuffer(KunStreamContextHandle context,
                                                size_t handle) {
-    return reinterpret_cast<kun::StreamContext *>(context)->getCurrentBufferPtr(
-        handle);
+    return reinterpret_cast<kun::StreamContext *>(context)
+        ->getCurrentBufferPtrFloat(handle);
 }
 
 KUN_API void kunStreamPushData(KunStreamContextHandle context, size_t handle,

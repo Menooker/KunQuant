@@ -48,21 +48,21 @@ static void expectContiguousShape(kun::Datatype dtype,
 }
 
 namespace {
-    struct ModuleHandle {
-        const kun::Module* modu;
-        std::shared_ptr<kun::Library> lib;
-        ModuleHandle(const kun::Module* modu, const std::shared_ptr<kun::Library>& lib)
-            : modu{modu}, lib{lib} {
-        }
-    };
-    struct StreamContextWrapper: kun::StreamContext {
-        std::shared_ptr<kun::Library> lib;
-        StreamContextWrapper(std::shared_ptr<kun::Executor> exec, const ModuleHandle *m,
-                  size_t num_stocks)
-                  : kun::StreamContext{std::move(exec), m->modu, num_stocks}, lib{m->lib}
-        {}
-    };
-}
+struct ModuleHandle {
+    const kun::Module *modu;
+    std::shared_ptr<kun::Library> lib;
+    ModuleHandle(const kun::Module *modu,
+                 const std::shared_ptr<kun::Library> &lib)
+        : modu{modu}, lib{lib} {}
+};
+struct StreamContextWrapper : kun::StreamContext {
+    std::shared_ptr<kun::Library> lib;
+    StreamContextWrapper(std::shared_ptr<kun::Executor> exec,
+                         const ModuleHandle *m, size_t num_stocks)
+        : kun::StreamContext{std::move(exec), m->modu, num_stocks},
+          lib{m->lib} {}
+};
+} // namespace
 
 PYBIND11_MODULE(KunRunner, m) {
     m.attr("__name__") = "KunQuant.runner.KunRunner";
@@ -73,24 +73,26 @@ PYBIND11_MODULE(KunRunner, m) {
     m.def("createMultiThreadExecutor", &kun::createMultiThreadExecutor);
     m.def("getRuntimePath", []() -> std::string {
 #ifdef _WIN32
-    char path[MAX_PATH];
-    HMODULE hm = NULL;
+        char path[MAX_PATH];
+        HMODULE hm = NULL;
 
-    if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | 
-            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            (LPCSTR) &kun_simd::LogLookupTable<float>::logr_table, &hm) == 0) {
-        int ret = GetLastError();
-        fprintf(stderr, "GetModuleHandle failed, error = %d\n", ret);
-        return std::string();
-        // Return or however you want to handle an error.
-    }
-    if (GetModuleFileName(hm, path, sizeof(path)) == 0) {
-        int ret = GetLastError();
-        fprintf(stderr, "GetModuleFileName failed, error = %d\n", ret);
-        return std::string();
-        // Return or however you want to handle an error.
-    }
-    return path;
+        if (GetModuleHandleEx(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                (LPCSTR)&kun_simd::LogLookupTable<float>::logr_table,
+                &hm) == 0) {
+            int ret = GetLastError();
+            fprintf(stderr, "GetModuleHandle failed, error = %d\n", ret);
+            return std::string();
+            // Return or however you want to handle an error.
+        }
+        if (GetModuleFileName(hm, path, sizeof(path)) == 0) {
+            int ret = GetLastError();
+            fprintf(stderr, "GetModuleFileName failed, error = %d\n", ret);
+            return std::string();
+            // Return or however you want to handle an error.
+        }
+        return path;
 #else
     // On Windows, use GetMappedFileNameW
     Dl_info info;
@@ -111,13 +113,12 @@ PYBIND11_MODULE(KunRunner, m) {
                                    }
                                    return "?";
                                })
-        .def_property_readonly("blocking_len",
-                               [](ModuleHandle &mod) {
-                                   return mod.modu->blocking_len;
-                               })
+        .def_property_readonly(
+            "blocking_len",
+            [](ModuleHandle &mod) { return mod.modu->blocking_len; })
         .def("getOutputNames",
              [](ModuleHandle &m) {
-                 auto& mod = *(m.modu);
+                 auto &mod = *(m.modu);
                  std::vector<std::string> ret;
                  for (size_t i = 0; i < mod.num_buffers; i++) {
                      auto &buf = mod.buffers[i];
@@ -128,7 +129,7 @@ PYBIND11_MODULE(KunRunner, m) {
                  return ret;
              })
         .def("getOutputUnreliableCount", [](ModuleHandle &m) {
-            auto& mod = *(m.modu);
+            auto &mod = *(m.modu);
             py::dict ret;
             for (size_t i = 0; i < mod.num_buffers; i++) {
                 auto &buf = mod.buffers[i];
@@ -140,17 +141,19 @@ PYBIND11_MODULE(KunRunner, m) {
         });
     py::class_<kun::Library, std::shared_ptr<kun::Library>>(m, "Library")
         .def_static("load", &kun::Library::load)
-        .def("setCleanup", [](kun::Library& v, py::function f) {
-            v.dtor = [f](kun::Library* v) {
-                f();
-            };
-        })
-        .def("getModule", [](const std::shared_ptr<kun::Library>& v, const char* name) -> std::unique_ptr<ModuleHandle> {
-            if (auto m = v->getModule(name)) {
-                return std::unique_ptr<ModuleHandle>(new ModuleHandle(m, v));
-            }
-            return nullptr;
-        });
+        .def("setCleanup",
+             [](kun::Library &v, py::function f) {
+                 v.dtor = [f](kun::Library *v) { f(); };
+             })
+        .def("getModule",
+             [](const std::shared_ptr<kun::Library> &v,
+                const char *name) -> std::unique_ptr<ModuleHandle> {
+                 if (auto m = v->getModule(name)) {
+                     return std::unique_ptr<ModuleHandle>(
+                         new ModuleHandle(m, v));
+                 }
+                 return nullptr;
+             });
     m.def(
         "runGraph",
         [](std::shared_ptr<kun::Executor> exec, ModuleHandle *m,
@@ -294,29 +297,31 @@ PYBIND11_MODULE(KunRunner, m) {
 
     m.def(
         "corrWith",
-        [](std::shared_ptr<kun::Executor> exec, 
-           const std::vector<py::buffer>& inputs, py::buffer corr_with, const std::vector<py::buffer>& outs, const char* layout,
-           bool rank_inputs
-           ) {
+        [](std::shared_ptr<kun::Executor> exec,
+           const std::vector<py::buffer> &inputs, py::buffer corr_with,
+           const std::vector<py::buffer> &outs, const char *layout,
+           bool rank_inputs) {
             kun::MemoryLayout mlayout;
-            if(!strcmp(layout, "TS")) {
+            if (!strcmp(layout, "TS")) {
                 mlayout = kun::MemoryLayout::TS;
             } else if (!strcmp(layout, "STs")) {
                 mlayout = kun::MemoryLayout::STs;
             } else {
                 throw std::runtime_error(std::string("Unknown layout") +
-                                                 layout);
+                                         layout);
             }
-            if(inputs.size() != outs.size())
-                throw std::runtime_error("number of inputs and outputs should match");
+            if (inputs.size() != outs.size())
+                throw std::runtime_error(
+                    "number of inputs and outputs should match");
 
             py::ssize_t known_S = 0;
             py::ssize_t known_T = 0;
             py::ssize_t knownNumStocks = 0;
             py::ssize_t simd_len = 8;
-            std::vector<float*> bufinputs;
-            std::vector<float*> bufoutputs;
-            auto check_input = [&](py::buffer buf_obj, const std::string& name) -> float* {
+            std::vector<float *> bufinputs;
+            std::vector<float *> bufoutputs;
+            auto check_input = [&](py::buffer buf_obj,
+                                   const std::string &name) -> float * {
                 auto info = buf_obj.request();
                 if (mlayout == kun::MemoryLayout::STs) {
                     // ST8t layout
@@ -330,9 +335,9 @@ PYBIND11_MODULE(KunRunner, m) {
                         known_T = T;
                         knownNumStocks = known_S * simd_len;
                     }
-                    expectContiguousShape(
-                        kun::Datatype::Float, info, name.c_str(),
-                        {known_S, known_T, simd_len});
+                    expectContiguousShape(kun::Datatype::Float, info,
+                                          name.c_str(),
+                                          {known_S, known_T, simd_len});
                 } else if (mlayout == kun::MemoryLayout::TS) {
                     // TS layout
                     if (info.ndim != 2) {
@@ -345,31 +350,34 @@ PYBIND11_MODULE(KunRunner, m) {
                         known_T = T;
                         knownNumStocks = S;
                     }
-                    expectContiguousShape(kun::Datatype::Float, info, name.c_str(),
+                    expectContiguousShape(kun::Datatype::Float, info,
+                                          name.c_str(),
                                           {known_T, knownNumStocks});
                 } else {
                     throw std::runtime_error("Unknown layout at " + name);
                 }
                 return (float *)info.ptr;
             };
-            float* bufcorr_with = check_input(corr_with, "corr_with");
+            float *bufcorr_with = check_input(corr_with, "corr_with");
             int idx = -1;
             for (auto buf_obj : inputs) {
-                idx +=1;
-                bufinputs.push_back(check_input(buf_obj, std::string("buffer_") + std::to_string(idx)));
+                idx += 1;
+                bufinputs.push_back(check_input(
+                    buf_obj, std::string("buffer_") + std::to_string(idx)));
             }
-            py::array::ShapeContainer expected_out_shape {known_T};
+            py::array::ShapeContainer expected_out_shape{known_T};
             for (size_t i = 0; i < outs.size(); i++) {
                 auto &buf = outs[i];
                 auto info = buf.request(true);
                 expectContiguousShape(kun::Datatype::Float, info, "",
-                                            *expected_out_shape);
+                                      *expected_out_shape);
                 bufoutputs.push_back((float *)info.ptr);
             }
-            kun::corrWith(exec, mlayout, rank_inputs, bufinputs, bufcorr_with, bufoutputs, knownNumStocks, known_T, 0,
-                          known_T);
+            kun::corrWith(exec, mlayout, rank_inputs, bufinputs, bufcorr_with,
+                          bufoutputs, knownNumStocks, known_T, 0, known_T);
         },
-        py::arg("exec"),  py::arg("inputs"), py::arg("corr_with"), py::arg("outs"), py::arg("layout") = "TS",
+        py::arg("exec"), py::arg("inputs"), py::arg("corr_with"),
+        py::arg("outs"), py::arg("layout") = "TS",
         py::arg("rank_inputs") = false);
 
     py::class_<StreamContextWrapper>(m, "StreamContext")
@@ -377,20 +385,43 @@ PYBIND11_MODULE(KunRunner, m) {
                       size_t>())
         .def("queryBufferHandle", &StreamContextWrapper::queryBufferHandle)
         .def("getCurrentBuffer",
-             [](StreamContextWrapper &ths, size_t handle) {
-                 auto buf = ths.getCurrentBufferPtr(handle);
+             [](StreamContextWrapper &ths, size_t handle) -> py::buffer {
+                 if (ths.m->dtype == kun::Datatype::Double) {
+                     auto buf = ths.getCurrentBufferPtrDouble(handle);
+                     return py::array_t<double, py::array::c_style>{
+                         (py::ssize_t)ths.ctx.stock_count, buf};
+                 }
+                 auto buf = ths.getCurrentBufferPtrFloat(handle);
                  return py::array_t<float, py::array::c_style>{
                      (py::ssize_t)ths.ctx.stock_count, buf};
              })
-        .def("pushData",
-             [](StreamContextWrapper &ths, size_t handle,
-                py::array_t<float, py::array::c_style> data) {
-                 auto info = data.request();
-                 if (info.shape.size() != 1 &&
-                     info.shape[0] != ths.ctx.stock_count) {
-                     throw std::runtime_error("Bad input data to push");
-                 }
-                 ths.pushData(handle, (float *)info.ptr);
-             })
+        .def(
+            "pushData",
+            [](StreamContextWrapper &ths, size_t handle, py::array data) {
+                ssize_t ndim;
+                if (ths.m->dtype == kun::Datatype::Float) {
+                    if (!py::isinstance<py::array_t<float, py::array::c_style>>(
+                            data)) {
+                        throw std::runtime_error(
+                            "Bad input type to push, expecting float");
+                    }
+                } else {
+                    if (!py::isinstance<
+                            py::array_t<double, py::array::c_style>>(data)) {
+                        throw std::runtime_error(
+                            "Bad input type to push, expecting float");
+                    }
+                }
+                if (data.ndim() != 1 ||
+                    data.shape()[0] != ths.ctx.stock_count) {
+                    throw std::runtime_error(
+                        "Bad dimension for input data to push");
+                }
+                if (ths.m->dtype == kun::Datatype::Float) {
+                    ths.pushData(handle, (const float *)data.data());
+                } else {
+                    ths.pushData(handle, (const double *)data.data());
+                }
+            })
         .def("run", &StreamContextWrapper::run);
 }

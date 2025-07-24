@@ -434,6 +434,8 @@ def test_skew_kurt():
     expected = df.rolling(5).kurt()
     np.testing.assert_allclose(output, expected, equal_nan=True)
 
+######################################################
+
 def create_stream_gh_issue_41():
     builder = Builder()
     with builder:
@@ -452,9 +454,30 @@ def test_stream_lifetime_gh_issue_41():
 
 ####################################
 
+
+def create_stream_double():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out2 = Output(inp1 * inp1, "ou2")
+    f = Function(builder.ops)
+    return "test_stream", f, KunCompilerConfig(input_layout="STREAM", output_layout="STREAM", dtype="double")
+
+def test_stream_double():
+    modu = lib.getModule("test_stream")
+    executor = kr.createSingleThreadExecutor()
+    stream = kr.StreamContext(executor, modu, 8)
+    input_data = np.array([4] * 8, dtype="double")
+    stream.pushData(stream.queryBufferHandle("a"), input_data)
+    stream.run()
+    value: np.ndarray = stream.getCurrentBuffer(stream.queryBufferHandle("ou2"))[:]
+    np.testing.assert_allclose(value, input_data * input_data, equal_nan=False)
+
 test_stream_lifetime_gh_issue_41()
 test_corrwith()
-funclist = [check_1(),
+funclist = [
+    create_stream_double(),
+    check_1(),
     check_TS(),
     check_rank(),
     check_rank2(),
@@ -487,4 +510,5 @@ test_aligned(lib)
 test_rank029(lib)
 test_generic_cross_sectional()
 test_skew_kurt()
+test_stream_double()
 print("done")

@@ -63,7 +63,8 @@ struct Buffer {
         void* __restrict raw;
         float *__restrict ptr;
         double *__restrict ptrD;
-        StreamBuffer<float> *stream_buf;
+        StreamBuffer<float> * __restrict stream_buf;
+        StreamBuffer<double> * __restrict stream_bufD;
     };
     
     template <typename T>

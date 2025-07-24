@@ -42,10 +42,12 @@ struct KUN_API StreamContext {
     size_t queryBufferHandle(const char *name) const;
     // get the current readable position of the named buffer. The returned
     // buffer length should be num_stocks.
-    const float *getCurrentBufferPtr(size_t handle) const;
+    const float *getCurrentBufferPtrFloat(size_t handle) const;
+    const double *getCurrentBufferPtrDouble(size_t handle) const;
     // push new data on the named buffer and move forward the internal data
     // position register.
     void pushData(size_t handle, const float *data);
+    void pushData(size_t handle, const double *data);
     void run();
     StreamContext(const StreamContext&) = delete;
     StreamContext& operator=(const StreamContext&) = delete;
