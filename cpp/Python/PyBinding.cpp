@@ -398,7 +398,7 @@ PYBIND11_MODULE(KunRunner, m) {
         .def(
             "pushData",
             [](StreamContextWrapper &ths, size_t handle, py::array data) {
-                ssize_t ndim;
+                py::ssize_t ndim;
                 if (ths.m->dtype == kun::Datatype::Float) {
                     if (!py::isinstance<py::array_t<float, py::array::c_style>>(
                             data)) {
