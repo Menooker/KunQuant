@@ -18,8 +18,6 @@
 #define kunAlignedFree(x) free(x)
 #endif
 
-static size_t divideAndCeil(size_t x, size_t y) { return (x + y - 1) / y; }
-
 #if CHECKED_PTR
 #include <assert.h>
 #include <sys/mman.h>
@@ -338,11 +336,14 @@ char *StreamBuffer<T>::make(size_t stock_count, size_t window_size,
     auto ret = kunAlignedAlloc(
         64, StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
     auto buf = (StreamBuffer *)ret;
-    for (size_t i = 0; i < stock_count * window_size; i++) {
-        buf->getBuffer()[i] = NAN;
+    auto data = buf->getBuffer();
+    auto rounded_stock_count = roundUp(stock_count, simd_len);
+    // fill the buffer with NANs
+    for (size_t i = 0; i < rounded_stock_count * window_size; i++) {
+        data[i] = NAN;
     }
-    for (size_t i = 0; i < stock_count / simd_len; i++) {
-        *buf->getPos(i, stock_count, window_size) = 0;
+    for (size_t i = 0; i < divideAndCeil(stock_count, simd_len); i++) {
+        *buf->getPos(i, rounded_stock_count, window_size) = 0;
     }
     return (char *)ret;
 }
@@ -411,12 +412,12 @@ size_t StreamContext::queryBufferHandle(const char *name) const {
 
 const float *StreamContext::getCurrentBufferPtrFloat(size_t handle) const {
     auto buf = (StreamBuffer<float> *)buffers.at(handle).get();
-    return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window);
+    return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window, m->blocking_len);
 }
 
 const double *StreamContext::getCurrentBufferPtrDouble(size_t handle) const {
     auto buf = (StreamBuffer<double> *)buffers.at(handle).get();
-    return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window);
+    return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window, m->blocking_len);
 }
 
 void StreamContext::pushData(size_t handle, const float *data) {

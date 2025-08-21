@@ -67,6 +67,12 @@ struct Buffer {
         StreamBuffer<double> * __restrict stream_bufD;
     };
     
+    StreamBuffer<float> * getStream(float*) const {
+        return stream_buf;
+    }
+    StreamBuffer<double> * getStream(double*) const {
+        return stream_bufD;
+    }
     template <typename T>
     T* getPtr() const {
         return reinterpret_cast<T*>(raw);

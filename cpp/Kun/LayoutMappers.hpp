@@ -42,10 +42,12 @@ template <typename T, size_t simd_len>
 struct KUN_TEMPLATE_ARG MapperSTREAM {
     using type = T;
     static const T *getInput(Buffer *b, BufferInfo *info, size_t num_stock) {
-        return b->stream_buf->getCurrentBufferPtr(num_stock, info->window);
+        return b->getStream((T *)nullptr)
+            ->getCurrentBufferPtr(num_stock, info->window, simd_len);
     }
     static T *getOutput(Buffer *b, BufferInfo *info, size_t num_stock) {
-        return b->stream_buf->pushData(num_stock, info->window, simd_len);
+        return b->getStream((T *)nullptr)
+            ->pushData(num_stock, info->window, simd_len);
     }
     static size_t call(size_t stockid, size_t t, size_t num_time,
                        size_t num_stock) {
@@ -104,9 +106,9 @@ struct CrossSectionalDataHolder {
             : holder(holder), time_idx(time_idx) {}
 
         auto operator[](size_t stockid) -> decltype(holder.buffer[0]) {
-            return holder.buffer[Mapper::call(
-                stockid, time_idx - holder.base_time, holder.num_time,
-                holder.num_stocks)];
+            return holder
+                .buffer[Mapper::call(stockid, time_idx - holder.base_time,
+                                     holder.num_time, holder.num_stocks)];
         }
     };
 

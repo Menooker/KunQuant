@@ -75,9 +75,21 @@ def test_cfake():
     np.testing.assert_allclose(inp * inp2 + 10, out["out"])
 
 def test_runtime(libpath):
+    # test error handling
+    try:
+        print("Load non-exist library. It may print some error message below. It is OK.")
+        lib1 = kr.Library.load(libpath+"notexist")
+        raise ValueError("Should not reach here")
+    except RuntimeError as e:
+        pass
     lib2 = kr.Library.load(libpath)
     inp = np.random.rand(3, 10, 8).astype("float32")
     modu = lib2.getModule("testRuntimeModule")
+    try:
+        lib2.getModule("testRuntimeModule2")
+        raise ValueError("Should not reach here")
+    except RuntimeError as e:
+        pass
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"input": inp}, 0, 10)
 

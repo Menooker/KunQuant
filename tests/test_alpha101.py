@@ -46,7 +46,7 @@ def check_alpha101_stream(avx):
             cnt += 1
     simd_len = 16 if avx == "avx512" else 8
     f = Function(builder.ops)
-    return "alpha_101_stream", f, KunCompilerConfig(blocking_len=simd_len, partition_factor=8, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
+    return "alpha_101_stream", f, KunCompilerConfig(blocking_len=simd_len, partition_factor=8, input_layout="STREAM", output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
  
 def count_unmatched_elements(arr1: np.ndarray, arr2: np.ndarray, atol=1e-8, rtol=1e-5, equal_nan=False):
     # Check if arrays have the same shape
@@ -342,11 +342,10 @@ def test_stream(modu, executor, start_window, num_stock, num_time, my_input, ref
         outputs[name] = TS_ST(outputs[name])
     return check_result(outputs, ref, outnames, start_window, num_stock, 0, num_time)
 
-def streammain():
+def streammain(num_stock):
     modu = lib.getModule("alpha_101_stream")
     start_window = modu.getOutputUnreliableCount()
     # print(start_window)
-    num_stock = 64
     num_time = 220
     is_check = True
     my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, 0)
@@ -452,4 +451,8 @@ print("Check f32 batch")
 main(False, True)
 print("======================================")
 print("Check f32 stream")
-streammain()
+streammain(64)
+if action != "run_avx512":
+    print("======================================")
+    print("Check f32 stream unaligned")
+    streammain(63)

@@ -20,11 +20,12 @@ class CMakeBuildExtension(build_ext):
         else:
             build_temp = os.path.abspath(self.build_temp)
         os.makedirs(build_temp, exist_ok=True)
+        release_or_debug = os.environ.get("KUN_BUILD_TYPE", "Release")
         # Run CMake
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={ext_dir}",
             f"-DPYTHON_EXECUTABLE={os.sys.executable}",
-            "-DCMAKE_BUILD_TYPE=Release"
+            f"-DCMAKE_BUILD_TYPE={release_or_debug}"
         ]
         build_args = ["cmake", "--build", "."]
         devbuild = False
@@ -39,7 +40,7 @@ class CMakeBuildExtension(build_ext):
                 f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG={ext_dir}",
                 f"-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG={ext_dir}",
                 "-A", "x64"]
-            build_args += ["--config", "Release"]
+            build_args += ["--config", release_or_debug]
         else:
             build_args += ["--", "-j"]
 
@@ -68,7 +69,7 @@ else:
 
 setup(
     name="KunQuant",
-    version="0.1.5" + git_ver,
+    version="0.1.6" + git_ver,
     description="A compiler, optimizer and executor for financial expressions and factors",
     long_description=open("Readme.md").read(),
     long_description_content_type="text/markdown",
