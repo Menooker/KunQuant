@@ -140,7 +140,13 @@ PYBIND11_MODULE(KunRunner, m) {
             return ret;
         });
     py::class_<kun::Library, std::shared_ptr<kun::Library>>(m, "Library")
-        .def_static("load", &kun::Library::load)
+        .def_static("load", [](const char *filename) {
+            auto lib = kun::Library::load(filename);
+            if (!lib) {
+                throw std::runtime_error("Cannot load library");
+            }
+            return lib;
+        })
         .def("setCleanup",
              [](kun::Library &v, py::function f) {
                  v.dtor = [f](kun::Library *v) { f(); };
@@ -152,7 +158,7 @@ PYBIND11_MODULE(KunRunner, m) {
                      return std::unique_ptr<ModuleHandle>(
                          new ModuleHandle(m, v));
                  }
-                 return nullptr;
+                 throw std::runtime_error("Module name not found");
              });
     m.def(
         "runGraph",
