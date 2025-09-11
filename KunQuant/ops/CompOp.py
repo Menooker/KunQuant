@@ -1,5 +1,5 @@
 from .ReduceOp import ReduceAdd, ReduceMul, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax, ReduceDecayLinear, ReduceArgMin
-from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue
+from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue, WindowLoopIndex
 from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp, Exp, Log, Min, Max
 from .MiscOp import WindowedLinearRegression, WindowedLinearRegressionResiImpl, WindowedLinearRegressionRSqaureImpl, WindowedLinearRegressionSlopeImpl
 from collections import OrderedDict
@@ -191,12 +191,10 @@ class WindowedKurt(WindowedCompositiveOp):
         with b:
             avgX = WindowedAvg(x, n)
             wX = WindowedTempOutput(x, n)
-            each = ForeachBackWindow(wX, n)
-            b.set_loop(each)
-            diffX = Sub(IterValue(each, wX), avgX)
-            x2 = Mul(diffX, diffX)
-            x4 = x2 * x2
-            b.set_loop(self.get_parent())
+            with ForeachBackWindow(wX, n) as each:
+                diffX = Sub(IterValue(each, wX), avgX)
+                x2 = Mul(diffX, diffX)
+                x4 = x2 * x2
             vsum_x2 = ReduceAdd(x2)
             vsum_x4 = ReduceAdd(x4)
             adjfactor = n*(n-1)*(n+1) / (n-2) / (n-3)
@@ -394,3 +392,27 @@ class WindowedLinearRegressionResi(WindowedLinearRegressionBase):
     '''
     def make_extract(self, regr: OpBase, inp: OpBase) -> OpBase:
         return WindowedLinearRegressionResiImpl(regr, inp)
+
+
+class WindowedMaxDrawdown(WindowedCompositiveOp):
+    '''
+    Max Drawdown in a rolling look back window, including the current newest data.
+    For indices < window-1, the output will be NaN
+    maxdrawdown = (max(hwm) - v) / max(hwm)
+    where hwm is the highest of the input v in the rolling window and v is the lowest value of input with
+    index larger than or equal to the index of highest value.
+    '''
+    def decompose(self) -> List[OpBase]:
+        b = Builder(self.get_parent())
+        window = self.attrs["window"]
+        v = self.inputs[0]
+        with b:
+            peak = WindowedMax(v, window)
+            max_bar_index = TsArgMax(v, window) - 1 # tsargmax starts from 1
+            inf = ConstantOp(float('inf'))
+            with ForeachBackWindow(v, window) as each:
+                index = WindowLoopIndex(each)
+                filtered = Select(index >= max_bar_index, IterValue(each, v), inf)
+            trough = ReduceMin(filtered)
+            (peak - trough) / peak
+        return b.ops

@@ -345,6 +345,16 @@ class ForeachBackWindow(OpBase, WindowedTrait):
         assert(kwargs["display"] in self.inputs)
         return [(kwargs["display"], _empty_dict)]
 
+    def __enter__(self):
+        assert(_tls.loop is None)
+        _tls.loop = self
+        return self
+
+    def __exit__(self, exception_type, exception_value, exception_traceback):
+        assert(_tls.loop == self)
+        _tls.loop = None
+
+
 class IterValue(OpBase):
     '''
     Gets the current iteration value of the ForeachBackWindow
@@ -369,6 +379,21 @@ class IterValue(OpBase):
         super().verify(func)
         if not isinstance(self.inputs[0], ForeachBackWindow):
             raise RuntimeError("Bad IterValue: " + str(self))
+
+
+class WindowLoopIndex(OpBase):
+    '''
+    Get the current index of the ForEachWindow loop, starting from 0 to window-1. 0 for the oldest data
+    and window-1 for the latest data
+    '''
+    def __init__(self, forwindow: ForeachBackWindow) -> None:
+        super().__init__([forwindow], [])
+        self.set_parent(forwindow)
+
+    def verify(self, func: 'KunQuant.Stage.Function') -> None:
+        super().verify(func)
+        if not isinstance(self.inputs[0], ForeachBackWindow):
+            raise RuntimeError("Bad WindowLoopIndex, input must be a forloop: " + str(self))
 
 
 _clazzBackWindow = ForeachBackWindow

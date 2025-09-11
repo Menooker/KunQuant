@@ -59,6 +59,12 @@ def _get_buffer_name(op: OpBase, idx: int) -> str:
 
 def _float_value_to_float(v: float, dtype: str) -> str:
     ret = str(v)
+    if 'inf' == ret:
+        return f"std::numeric_limits<{dtype}>::infinity()"
+    if '-inf' == ret:
+        return f"-std::numeric_limits<{dtype}>::infinity()"
+    if 'nan' in ret.lower():
+        return f"std::numeric_limits<{dtype}>::quiet_NaN()"
     if '.' not in ret and 'e' not in ret:
         ret += '.'
     if dtype == "float":
@@ -243,6 +249,9 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             loop = op.inputs[0]
             buf_name = _get_buffer_name(op.inputs[1], inp[1])
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = {buf_name}.getWindow(i, iter);"))
+        elif isinstance(op, WindowLoopIndex):
+            loop = op.inputs[0]
+            scope.scope.append(_CppSingleLine(scope, f' kun_simd::vec<{elem_type}, {simd_lanes}> v{idx} {{ {elem_type}({window} - 1 - iter) }};'))
         elif isinstance(op, ReductionOp):
             loop_op = op.inputs[0] if isinstance(op.inputs[0], ForeachBackWindow) else op.inputs[0].get_parent()
             loop_body = loop_to_cpp_loop[loop_op]

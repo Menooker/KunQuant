@@ -14,7 +14,7 @@ Experiments show that KunQuant-generated code can be more than 170x faster than 
 | Single precision (STs layout) | 6.138s |  0.083s  |  0.027s  |
 | Double precision (TS layout) | 6.332s |  0.120s  |  0.031s  |
 
-The data was collected on 4-core Intel i7-7700HQ CPU, running synthetic data of 64 stocks with 260 rows of data in single precision float point data type. Environment:
+The data was collected on 4-core Intel i7-7700HQ CPU, running synthetic data of 64 stocks with 260 rows of data. Environment:
 
 ```
 OS=Ubuntu 22.04.3 on WSL2 on Windows 10
@@ -268,6 +268,8 @@ Windows powershell:
 $env:KUN_BUILD_TESTS=1
 pip install -e . 
 ```
+
+You can also set environment variable `KUN_BUILD_TYPE=Debug` before `pip install -e .` to enable debug build of KunQuant. It will provide debug info of the KunQuant runtime but also slow down the execution.
 
 ### Useful environment variables
 

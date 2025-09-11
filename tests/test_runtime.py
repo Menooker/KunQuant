@@ -485,6 +485,49 @@ def test_stream_double():
     value: np.ndarray = stream.getCurrentBuffer(stream.queryBufferHandle("ou2"))[:]
     np.testing.assert_allclose(value, input_data * input_data, equal_nan=False)
 
+
+def create_loop_index():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        Output(WindowedMaxDrawdown(inp1, 5), "out")
+    f = Function(builder.ops)
+    return "test_max_drawdown", f, KunCompilerConfig(input_layout="TS", output_layout="TS")
+
+
+def test_loop_index():
+    modu = lib.getModule("test_max_drawdown")
+    assert(modu)
+    inp = np.random.rand(20, 24).astype("float32")
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
+    output = out["out"]
+    
+    # reference implementation, from https://stackoverflow.com/a/21059308. Modified for our version of maxdd
+    def windowed_view(x, window_size):
+        from numpy.lib.stride_tricks import as_strided
+        y = as_strided(x, shape=(x.size - window_size + 1, window_size),
+                    strides=(x.strides[0], x.strides[0]))
+        return y
+
+    def rolling_max_dd(x, window_size, min_periods=1):
+        if min_periods < window_size:
+            pad = np.empty(window_size - min_periods)
+            pad.fill(x[0])
+            x = np.concatenate((pad, x))
+        y = windowed_view(x, window_size).copy()
+        maxv = y.max(axis=1)
+        argmax_pos = np.argmax(y, axis=1)
+        for idx, pos in enumerate(argmax_pos):
+            y[idx, :pos] = np.inf
+        minv = y.min(axis=1)
+        return (maxv - minv) / maxv
+    expected = np.empty_like(output)
+    expected.fill(np.nan)
+    for i in range(inp.shape[1]):
+        expected[:,i] = rolling_max_dd(inp[:,i], 5, min_periods=1)
+    np.testing.assert_allclose(output[5:], expected[5:], equal_nan=True, atol=1e-7, rtol=1e-7)
+
 test_stream_lifetime_gh_issue_41()
 test_corrwith()
 funclist = [
@@ -501,7 +544,8 @@ funclist = [
     check_argmin(),
     check_aligned(),
     check_rank_alpha029(),
-    check_skew_kurt()
+    check_skew_kurt(),
+    create_loop_index()
     ]
 lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
 
@@ -523,4 +567,5 @@ test_rank029(lib)
 test_generic_cross_sectional()
 test_skew_kurt()
 test_stream_double()
+test_loop_index()
 print("done")

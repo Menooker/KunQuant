@@ -301,6 +301,15 @@ class WindowedSkew(WindowedCompositiveOp):
     similar to pandas.DataFrame.rolling(n).skew()
     The bias adjustion factor is math.sqrt(window-1)*window/(window-2)
     '''
+
+class WindowedMaxDrawdown(WindowedCompositiveOp):
+    '''
+    Max Drawdown in a rolling look back window, including the current newest data.
+    For indices < window-1, the output will be NaN
+    maxdrawdown = (max(hwm) - v) / max(hwm)
+    where hwm is the highest of the input v in the rolling window and v is the lowest value of input with
+    index larger than or equal to the index of highest value.
+    '''
 ```
 
 Multiple operands windowed ops: 
@@ -516,6 +525,17 @@ class IterValue(OpBase):
         pass
 
     def print_args(self, indent: int, identity: bool, **kwargs) -> str:
+        pass
+
+    def verify(self, func: 'KunQuant.Stage.Function') -> None:
+        pass
+
+class WindowLoopIndex(OpBase):
+    '''
+    Get the current index of the ForEachWindow loop, starting from 0 to window-1. 0 for the oldest data
+    and window-1 for the latest data
+    '''
+    def __init__(self, forwindow: ForeachBackWindow) -> None:
         pass
 
     def verify(self, func: 'KunQuant.Stage.Function') -> None:
