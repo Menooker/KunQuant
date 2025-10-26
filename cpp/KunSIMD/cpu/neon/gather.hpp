@@ -11,10 +11,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *******************************************************************************/
+
 #pragma once
 
-#if defined(__SSE__)
-#include "x86/gather.hpp"
-#else
-#include "neon/gather.hpp"
-#endif
+#include "f32x4.hpp"
+#include "s32x4.hpp"
+
+namespace kun_simd {
+
+template<int scale>
+INLINE vec_f32x4 gather(const float* ptr, vec_s32x4 v) {
+    float out[4];
+    for (int i = 0; i < 4; ++i) {
+        out[i] = ptr[v.raw[i] * scale];
+    }
+    return vld1q_f32(out);
+}
+
+}

@@ -36,8 +36,7 @@ struct alignas(16) vec<float, 4> {
     INLINE vec() = default;
     INLINE vec(float f) { v = vdupq_n_f32(f); }
     INLINE vec(float i0, float i1, float i2, float i3) {
-        float vals[4] = {i0, i1, i2, i3};
-        v = vld1q_f32(vals);
+        v = {i0, i1, i2, i3};
     }
     INLINE vec(float32x4_t const &x) { v = x; }
 

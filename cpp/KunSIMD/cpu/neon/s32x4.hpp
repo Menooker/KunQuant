@@ -35,7 +35,7 @@ public:
     INLINE vec() = default;
     INLINE vec(int32_t f) { v = vdupq_n_s32(f); }
     INLINE vec(int32_t i0, int32_t i1, int32_t i2, int32_t i3) {
-        v = vld1q_s32((const int32_t[]){i0, i1, i2, i3});
+        v = {i0, i1, i2, i3};
     }
     INLINE vec(int32x4_t const &x) { v = x; }
 
