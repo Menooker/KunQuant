@@ -1,6 +1,4 @@
 /*******************************************************************************
- * Copyright 2020-2023 Intel Corporation
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -47,26 +45,6 @@ struct alignas(16) vec<float, 4> {
     static INLINE vec load_aligned(const float *p) { return vld1q_f32(p); }
     static INLINE void store(vec v, float *p) { vst1q_f32(p, v.v); }
     static INLINE void store_aligned(vec v, float *p) { vst1q_f32(p, v.v); }
-    static INLINE vec masked_load(const float *p, Masktype mask) {
-        vec ret;
-        for (int i = 0; i < 4; ++i) {
-            ret.raw[i] = mask.raw[i] ? p[i] : 0.0f;
-        }
-        return ret;
-    }
-    static INLINE void masked_store(vec v, float *p, Masktype mask) {
-        for (int i = 0; i < 4; ++i) {
-            if (mask.raw[i]) p[i] = v.raw[i];
-        }
-    }
-
-    static Masktype make_mask(int N) {
-        Masktype mask;
-        for (int i = 0; i < 4; ++i) {
-            mask.raw[i] = (i < N) ? -1 : 0; // all-bits-one for true
-        }
-        return mask;
-    }
 
     operator float32x4_t() const { return v; }
 };
@@ -102,39 +80,27 @@ INLINE vec_f32x4 sc_select(vec_s32x4 const &cond, vec_f32x4 const &a,
 
 /* comparison -> return integer mask (vec<int32_t,4>) */
 INLINE vec_s32x4 operator==(vec_f32x4 const &a, vec_f32x4 const &b) {
-    vec_s32x4 ret;
-    ret.v = vreinterpretq_s32_u32(vceqq_f32(a.v, b.v));
-    return ret;
+    return vreinterpretq_s32_u32(vceqq_f32(a.v, b.v));
 }
 INLINE vec_s32x4 operator!=(vec_f32x4 const &a, vec_f32x4 const &b) {
-    vec_s32x4 ret;
     uint32x4_t cmp = vceqq_f32(a.v, b.v);
-    ret.v = vreinterpretq_s32_u32(vmvnq_u32(cmp));
-    return ret;
+    return vreinterpretq_s32_u32(vmvnq_u32(cmp));
 }
 INLINE vec_s32x4 operator>(vec_f32x4 const &a, vec_f32x4 const &b) {
-    vec_s32x4 ret;
-    ret.v = vreinterpretq_s32_u32(vcgtq_f32(a.v, b.v));
-    return ret;
+    return vreinterpretq_s32_u32(vcgtq_f32(a.v, b.v));
 }
 INLINE vec_s32x4 operator<(vec_f32x4 const &a, vec_f32x4 const &b) {
-    vec_s32x4 ret;
-    ret.v = vreinterpretq_s32_u32(vcltq_f32(a.v, b.v));
-    return ret;
+    return vreinterpretq_s32_u32(vcltq_f32(a.v, b.v));
 }
 INLINE vec_s32x4 operator>=(vec_f32x4 const &a, vec_f32x4 const &b) {
     // a >= b  <=>  !(a < b)
     vec_s32x4 lt = operator<(a, b);
-    vec_s32x4 ret;
-    ret.v = vreinterpretq_s32_u32(vmvnq_u32(vreinterpretq_u32_s32(lt.v)));
-    return ret;
+    return vreinterpretq_s32_u32(vmvnq_u32(vreinterpretq_u32_s32(lt.v)));
 }
 INLINE vec_s32x4 operator<=(vec_f32x4 const &a, vec_f32x4 const &b) {
     // a <= b  <=>  !(a > b)
     vec_s32x4 gt = operator>(a, b);
-    vec_s32x4 ret;
-    ret.v = vreinterpretq_s32_u32(vmvnq_u32(vreinterpretq_u32_s32(gt.v)));
-    return ret;
+    return vreinterpretq_s32_u32(vmvnq_u32(vreinterpretq_u32_s32(gt.v)));
 }
 
 /* keep float bitwise ops (reinterpreted) for completeness */
@@ -161,49 +127,53 @@ INLINE vec_f32x4 sc_min(vec_f32x4 const &a, vec_f32x4 const &b) {
 }
 
 INLINE vec_f32x4 sc_round(vec_f32x4 const &a) {
-    vec_f32x4 ret;
-    for (int i = 0; i < 4; ++i) ret.raw[i] = std::round(a.raw[i]);
-    return ret;
+    // round to nearest using NEON: convert to int with rounding-to-nearest then back
+    int32x4_t t = vcvtnq_s32_f32(a.v);
+    return vcvtq_f32_s32(t);
 }
 
 INLINE vec_f32x4 sc_ceil(vec_f32x4 const &a) {
-    vec_f32x4 ret;
-    for (int i = 0; i < 4; ++i) ret.raw[i] = std::ceil(a.raw[i]);
-    return ret;
+    // compute trunc (toward zero) then add 1 where a > trunc
+    int32x4_t t = vcvtq_s32_f32(a.v); // truncate toward zero
+    float32x4_t tf = vcvtq_f32_s32(t);
+    uint32x4_t gt_mask = vcgtq_f32(a.v, tf);
+    uint32x4_t one_u = vdupq_n_u32(1);
+    uint32x4_t adjust_u = vandq_u32(gt_mask, one_u);
+    int32x4_t adjust_s = vreinterpretq_s32_u32(adjust_u);
+    int32x4_t t_adj = vaddq_s32(t, adjust_s);
+    return vcvtq_f32_s32(t_adj);
 }
+
 INLINE vec_f32x4 sc_floor(vec_f32x4 const &a) {
-    vec_f32x4 ret;
-    for (int i = 0; i < 4; ++i) ret.raw[i] = std::floor(a.raw[i]);
-    return ret;
+    // compute trunc (toward zero) then subtract 1 where a < trunc
+    int32x4_t t = vcvtq_s32_f32(a.v); // truncate toward zero
+    float32x4_t tf = vcvtq_f32_s32(t);
+    uint32x4_t lt_mask = vcltq_f32(a.v, tf);
+    uint32x4_t one_u = vdupq_n_u32(1);
+    uint32x4_t adjust_u = vandq_u32(lt_mask, one_u);
+    int32x4_t adjust_s = vreinterpretq_s32_u32(adjust_u);
+    int32x4_t t_adj = vsubq_s32(t, adjust_s);
+    return vcvtq_f32_s32(t_adj);
 }
 
 INLINE vec_f32x4 sc_sqrt(vec_f32x4 const &a) {
     return vsqrtq_f32(a.v);
-}
-INLINE vec_f32x4 sc_rsqrt(vec_f32x4 const &a) {
-    vec_f32x4 ret;
-    for (int i = 0; i < 4; ++i) ret.raw[i] = 1.0f / std::sqrt(a.raw[i]);
-    return ret;
 }
 
 INLINE vec_f32x4 sc_abs(vec_f32x4 const &a) {
     return vabsq_f32(a.v);
 }
 
-/* isnan -> return integer mask vec<int32_t,4> */
-INLINE vec_s32x4 sc_isnan(vec_f32x4 v1, vec_f32x4 v2) {
-    vec_s32x4 ret;
-    // vceqq_f32 with itself gives 0 for NaN, so use isnan checks scalar-wise or use vcneq, but easiest:
-    for (int i = 0; i < 4; ++i) {
-        ret.raw[i] = (std::isnan(v1.raw[i]) || std::isnan(v2.raw[i])) ? -1 : 0;
-    }
-    return ret;
-}
 
 INLINE vec_s32x4 sc_isnan(vec_f32x4 v1) {
     vec_s32x4 ret;
-    for (int i = 0; i < 4; ++i) ret.raw[i] = std::isnan(v1.raw[i]) ? -1 : 0;
-    return ret;
+    uint32x4_t cmp = vceqq_f32(v1.v, v1.v);
+    uint32x4_t nan_u = vmvnq_u32(cmp);
+    return vreinterpretq_s32_u32(nan_u);
+}
+
+INLINE vec_s32x4 sc_isnan(vec_f32x4 v1, vec_f32x4 v2) {
+    return sc_isnan(v1) | sc_isnan(v2);
 }
 
 } // namespace kun_simd

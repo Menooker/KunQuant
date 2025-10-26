@@ -3,7 +3,6 @@
 #include <Kun/Context.hpp>
 #include <Kun/LayoutMappers.hpp>
 #include <Kun/Module.hpp>
-#include <Kun/Ops.hpp>
 #include <algorithm>
 #include <cmath>
 

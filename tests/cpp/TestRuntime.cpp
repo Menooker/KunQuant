@@ -1,6 +1,5 @@
 #include <Kun/Context.hpp>
 #include <Kun/Module.hpp>
-#include <KunSIMD/cpu/Math.hpp>
 
 using namespace kun;
 
