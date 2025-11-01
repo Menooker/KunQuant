@@ -18,7 +18,7 @@
 #ifdef __AVX512F__
 #include <immintrin.h>
 #include <stdint.h>
-#include "common.hpp"
+#include "../common.hpp"
 #include <KunSIMD/Vector.hpp>
 
 namespace kun_simd {

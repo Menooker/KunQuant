@@ -20,7 +20,7 @@
 #ifndef __AVX512F__
 #include <cmath>
 #endif
-#include "common.hpp"
+#include "../common.hpp"
 #include <KunSIMD/Vector.hpp>
 
 namespace kun_simd {

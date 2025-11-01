@@ -17,7 +17,7 @@
 #define GRAPH_BACKEND_GRAPH_COMPILER_CORE_SRC_RUNTIME_KERNEL_INCLUDE_X86SIMD_VEC_S32X8_HPP
 #include <immintrin.h>
 #include <stdint.h>
-#include "common.hpp"
+#include "../common.hpp"
 #include <KunSIMD/Vector.hpp>
 
 namespace kun_simd {
