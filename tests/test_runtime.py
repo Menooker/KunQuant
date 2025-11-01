@@ -1,3 +1,4 @@
+from numpy.core.shape_base import block
 from KunQuant.Driver import KunCompilerConfig
 import numpy as np
 import pandas as pd
@@ -97,8 +98,11 @@ def test_runtime(libpath):
     if not np.allclose(expected, out["output"]):
         raise RuntimeError("")
 
-def ST_ST8t(data: np.ndarray = 8) -> np.ndarray:
+def ST_ST8t(data: np.ndarray = 8, is_double = False) -> np.ndarray:
     blocking = 4 if platform.machine() == "aarch64" else 8
+    if is_double:
+        blocking = blocking // 2
+
     return np.ascontiguousarray(data.reshape((-1, blocking, data.shape[1])).transpose((0, 2, 1)))
 
 
@@ -335,7 +339,7 @@ def test_log(lib, dtype, name):
     inp[-1,:] = 0
     inp[1,:] = np.nan
     # print(inp)
-    blocked = ST_ST8t(inp)
+    blocked = ST_ST8t(inp, is_double=(dtype=="float64"))
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"a": blocked}, 0, 20)
     output = ST8t_ST(out["outlog"])
@@ -547,9 +551,9 @@ if platform.machine() != "aarch64":
     funclist.append(check_log("double", "64"))
     funclist.append(create_stream_double())
     funclist.append(check_rank2())
-    funclist.append(test_rank029())
-    funclist.append(test_skew_kurt())
+    funclist.append(check_skew_kurt())
     funclist.append(check_aligned())
+    funclist.append(check_rank_alpha029())
 lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
 
 test_cfake()
