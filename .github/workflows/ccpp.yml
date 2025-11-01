@@ -61,7 +61,7 @@ jobs:
     - name: test arm
       if: ${{ matrix.os == 'ubuntu-22.04-arm' }}
       working-directory: ./
-      run: bash ./tests/tests)arm.sh
+      run: bash ./tests/tests_arm.sh
   test-windows:
     runs-on: windows-2022
     steps:
