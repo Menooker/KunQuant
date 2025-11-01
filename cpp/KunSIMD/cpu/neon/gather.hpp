@@ -23,7 +23,7 @@ template<int scale>
 INLINE vec_f32x4 gather(const float* ptr, vec_s32x4 v) {
     float out[4];
     for (int i = 0; i < 4; ++i) {
-        out[i] = ptr[v.raw[i] * scale];
+        out[i] = *reinterpret_cast<const float*>(reinterpret_cast<const char*>(ptr) + v.raw[i] * scale);
     }
     return vld1q_f32(out);
 }

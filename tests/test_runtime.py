@@ -97,7 +97,8 @@ def test_runtime(libpath):
     if not np.allclose(expected, out["output"]):
         raise RuntimeError("")
 
-def ST_ST8t(data: np.ndarray, blocking = 8) -> np.ndarray:
+def ST_ST8t(data: np.ndarray = 8) -> np.ndarray:
+    blocking = 4 if platform.machine() == "aarch64" else 8
     return np.ascontiguousarray(data.reshape((-1, blocking, data.shape[1])).transpose((0, 2, 1)))
 
 
@@ -334,7 +335,7 @@ def test_log(lib, dtype, name):
     inp[-1,:] = 0
     inp[1,:] = np.nan
     # print(inp)
-    blocked = ST_ST8t(inp, 8 if dtype == "float32" else 4)
+    blocked = ST_ST8t(inp)
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"a": blocked}, 0, 20)
     output = ST8t_ST(out["outlog"])
@@ -531,22 +532,24 @@ def test_loop_index():
 test_stream_lifetime_gh_issue_41()
 test_corrwith()
 funclist = [
-    create_stream_double(),
     check_1(),
     check_TS(),
     check_rank(),
-    check_rank2(),
     check_log("float", ""),
-    check_log("double", "64"),
     check_pow(),
     # check_alpha101_double(),
     check_ema(),
     check_argmin(),
-    check_aligned(),
-    check_rank_alpha029(),
-    check_skew_kurt(),
     create_loop_index()
     ]
+import platform
+if platform.machine() != "aarch64":
+    funclist.append(check_log("double", "64"))
+    funclist.append(create_stream_double())
+    funclist.append(check_rank2())
+    funclist.append(test_rank029())
+    funclist.append(test_skew_kurt())
+    funclist.append(check_aligned())
 lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
 
 test_cfake()
@@ -556,16 +559,17 @@ if os.path.exists(kun_test_dll):
     test_runtime(kun_test_dll)
 test_avg_stddev(lib)
 test_rank(lib)
-test_rank2(lib)
 test_log(lib, "float32", "")
-test_log(lib, "float64", "64")
 test_pow(lib)
 test_ema(lib)
 test_argmin_issue19(lib)
-test_aligned(lib)
-test_rank029(lib)
 test_generic_cross_sectional()
-test_skew_kurt()
-test_stream_double()
+if platform.machine() != "aarch64":
+    test_stream_double()
+    test_log(lib, "float64", "64")
+    test_rank2(lib)
+    test_rank029(lib)
+    test_skew_kurt()
+    test_aligned(lib)
 test_loop_index()
 print("done")

@@ -17,8 +17,9 @@
 #include <arm_neon.h>
 #include <stdint.h>
 #include <cmath>
-#include "common.hpp"
+#include "../common.hpp"
 #include <KunSIMD/Vector.hpp>
+#include "s32x4.hpp"
 
 namespace kun_simd {
 
@@ -36,7 +37,7 @@ struct alignas(16) vec<float, 4> {
     INLINE vec() = default;
     INLINE vec(float f) { v = vdupq_n_f32(f); }
     INLINE vec(float i0, float i1, float i2, float i3) {
-        v = {i0, i1, i2, i3};
+        v = float32x4_t{i0, i1, i2, i3};
     }
     INLINE vec(float32x4_t const &x) { v = x; }
 
@@ -92,14 +93,10 @@ INLINE vec_s32x4 operator<(vec_f32x4 const &a, vec_f32x4 const &b) {
     return vreinterpretq_s32_u32(vcltq_f32(a.v, b.v));
 }
 INLINE vec_s32x4 operator>=(vec_f32x4 const &a, vec_f32x4 const &b) {
-    // a >= b  <=>  !(a < b)
-    vec_s32x4 lt = operator<(a, b);
-    return vreinterpretq_s32_u32(vmvnq_u32(vreinterpretq_u32_s32(lt.v)));
+    return vreinterpretq_s32_u32(vcgeq_f32(a.v, b.v));
 }
 INLINE vec_s32x4 operator<=(vec_f32x4 const &a, vec_f32x4 const &b) {
-    // a <= b  <=>  !(a > b)
-    vec_s32x4 gt = operator>(a, b);
-    return vreinterpretq_s32_u32(vmvnq_u32(vreinterpretq_u32_s32(gt.v)));
+    return vreinterpretq_s32_u32(vcleq_f32(a.v, b.v));
 }
 
 /* keep float bitwise ops (reinterpreted) for completeness */
@@ -119,10 +116,12 @@ INLINE vec_f32x4 sc_fnmadd(vec_f32x4 const &a, vec_f32x4 const &b,
 }
 
 INLINE vec_f32x4 sc_max(vec_f32x4 const &a, vec_f32x4 const &b) {
-    return vmaxq_f32(a.v, b.v);
+    // vminnmq_f32 has different behavior when NAN is involved
+    return sc_select(a > b, a.v, b.v);
 }
 INLINE vec_f32x4 sc_min(vec_f32x4 const &a, vec_f32x4 const &b) {
-    return vminq_f32(a.v, b.v);
+    // vminnmq_f32 has different behavior when NAN is involved
+    return sc_select(a < b, a.v, b.v);
 }
 
 INLINE vec_f32x4 sc_round(vec_f32x4 const &a) {

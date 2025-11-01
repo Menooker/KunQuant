@@ -16,7 +16,7 @@
 
 #include <arm_neon.h>
 #include <stdint.h>
-#include "common.hpp"
+#include "../common.hpp"
 #include <KunSIMD/Vector.hpp>
 
 namespace kun_simd {
@@ -35,9 +35,10 @@ public:
     INLINE vec() = default;
     INLINE vec(int32_t f) { v = vdupq_n_s32(f); }
     INLINE vec(int32_t i0, int32_t i1, int32_t i2, int32_t i3) {
-        v = {i0, i1, i2, i3};
+        v = int32x4_t {i0, i1, i2, i3};
     }
     INLINE vec(int32x4_t const &x) { v = x; }
+    INLINE vec(uint32x4_t const &x) { v = vreinterpretq_s32_u32(x); }
 
     static INLINE vec load(const int32_t *p) { return vld1q_s32(p); }
     static INLINE vec load_aligned(const int32_t *p) { return vld1q_s32(p); }
@@ -95,6 +96,10 @@ INLINE vec_s32x4 operator<<(vec_s32x4 const &a, vec_s32x4 const &b) {
 INLINE vec_s32x4 operator>>(vec_s32x4 const &a, vec_s32x4 const &b) {
     int32x4_t neg = vnegq_s32(b.v);
     return vshlq_s32(a.v, neg);
+}
+
+INLINE vec_s32x4 operator!(vec_s32x4 const &a) {
+    return vmvnq_s32(a.v);
 }
 
 INLINE vec_s32x4 logical_shr(vec_s32x4 const &a, vec_s32x4 const &b) {
