@@ -29,3 +29,6 @@ jobs:
       run: KUN_BUILD_TESTS=1 pip install . -v
     - name: test arm
       run: bash ./tests/tests_arm.sh
+    - name: Debug with tmate on failure
+      if: ${{ failure() }}
+      uses: mxschmitt/action-tmate@v3
