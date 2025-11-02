@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-macos:
-    runs-on: macos-13
+    runs-on: macos-15
     steps:
     - uses: actions/checkout@v3
       with:
@@ -17,9 +17,16 @@ jobs:
     - uses: actions/setup-python@v5
       with:
         python-version: '3.9'
+        cache: 'pip' # caching pip dependencies
+    - run: pip install -r .github/workflows/requirements.txt
+    - name: download data
+      working-directory: ./
+      run: wget -nv -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz && wget -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz
     - name: make
       working-directory: ./
       run: KUN_BUILD_TESTS=1 pip install . -v
+    - name: test arm
+      run: bash ./tests/tests_arm.sh
   test-linux:
     # run this job on both amd64 and arm64 ubuntu runners
     runs-on: ${{ matrix.os }}
