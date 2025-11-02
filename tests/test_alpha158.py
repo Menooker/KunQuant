@@ -12,6 +12,9 @@ from KunQuant.Stage import Function
 from KunQuant.predefined.Alpha158 import AllData
 
 
+import platform
+isx86 = platform.machine() != "aarch64"
+
 def check_alpha158(avx512, keep, tempdir):
     builder = Builder()
     with builder:
@@ -36,7 +39,12 @@ def check_alpha158(avx512, keep, tempdir):
             Output(v, k)
     print("Total names: ", len(names))
     f = Function(builder.ops)
-    simd_len = 8 if avx512 else 4
+    if avx512:
+        simd_len = 8
+    elif isx86:
+        simd_len = 4
+    else:
+        simd_len = 2
     target = [("alpha158", f, KunCompilerConfig(dtype='double', blocking_len=simd_len, partition_factor=4,
                output_layout="TS", input_layout="TS", options={"opt_reduce": True, "fast_log": True}))]
     if avx512:

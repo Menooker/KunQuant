@@ -77,7 +77,8 @@ setup(
     author_email="menooker@live.com",
     packages=["KunQuant", "KunQuant.jit", "KunQuant.ops", "KunQuant.passes", "KunQuant.predefined", "KunQuant.runner"],
     package_dir={"KunQuant": "KunQuant"},
-    package_data={"KunQuant": ["../cpp/Kun/*.hpp", "../cpp/Kun/Ops/*.hpp", "../cpp/KunSIMD/*.hpp", "../cpp/KunSIMD/cpu/*.hpp"]},
+    package_data={"KunQuant": ["../cpp/Kun/*.hpp", "../cpp/Kun/Ops/*.hpp", "../cpp/KunSIMD/*.hpp", "../cpp/KunSIMD/cpu/*.hpp",
+                              "../cpp/KunSIMD/cpu/x86/*.hpp", "../cpp/KunSIMD/cpu/neon/*.hpp"]},
     include_package_data=True,
     ext_modules=[
         CMakeExtension("KunQuant.runner.KunRunner", "KunRunner", sourcedir="cpp"),

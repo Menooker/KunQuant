@@ -7,6 +7,10 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from KunQuant.passes import Util as PassUtil
 
+# get the cpu architecture of the machine
+import platform
+_cpu_arch = platform.machine()
+
 required_version = "0x64100003"
 @dataclass
 class KunCompilerConfig:
@@ -86,13 +90,25 @@ def _deprecation_check(name: str, argname: str) -> str:
     return name
 
 def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "float", blocking_len = None, input_layout = "STs", output_layout = "STs", allow_unaligned: Union[bool, None] = None, split_source = 0, options = {}) -> List[str]:
+    element_size = {"float": 32, "double": 64}
+    if _cpu_arch in ["x86_64", "i386", "AMD64"]:
+        suggested_len = {"float": 8, "double": 4}
+        simd_len = {256, 512}
+    elif _cpu_arch == "aarch64":
+        suggested_len = {"float": 4, "double": 2}
+        simd_len = {128}
+        if dtype == "double":
+            raise RuntimeError("Double precision is not supported on aarch64")
+    else:
+        raise RuntimeError(f"Unsupported CPU architecture: {_cpu_arch}")
     input_layout = _deprecation_check(input_layout, "input_layout")
     output_layout = _deprecation_check(output_layout, "input_layout")
     if dtype not in ["float", "double"]:
         raise RuntimeError("Bad dtype " + dtype)
     if blocking_len is None:
-        suggested_len = {"float": 8, "double": 4}
         blocking_len = suggested_len[dtype]
+    if element_size[dtype] * blocking_len not in simd_len:
+        raise RuntimeError(f"Blocking length {blocking_len} is not supported for {dtype} on {_cpu_arch}")
     if output_layout not in ["STs", "TS", "STREAM"]:
         raise RuntimeError("Bad output_layout name " + output_layout)
     if input_layout not in ["STs", "TS", "STREAM"]:
@@ -107,10 +123,12 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
     if stream_mode and allow_unaligned is None:
         allow_unaligned = False
     elif allow_unaligned is None:
-        allow_unaligned = True
+        allow_unaligned = _cpu_arch != "aarch64"
     if allow_unaligned and stream_mode:
         raise RuntimeError("Currently allow_unaligned in stream mode is not supported.")
-
+    if allow_unaligned and _cpu_arch == "aarch64":
+        raise RuntimeError("Currently allow_unaligned is not supported on aarch64")
+    
     input_name_to_idx: Dict[str, int] = dict()
     buffer_names: List[_Buffer] = []
     partitions: typing.OrderedDict[str, _Partition] = OrderedDict()
