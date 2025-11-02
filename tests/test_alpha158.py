@@ -10,10 +10,9 @@ from KunQuant.runner import KunRunner as kr
 from KunQuant.Op import Builder, Input, Output
 from KunQuant.Stage import Function
 from KunQuant.predefined.Alpha158 import AllData
+from KunQuant.jit.env import cpu_arch
 
-
-import platform
-isx86 = platform.machine() != "aarch64"
+isx86 = cpu_arch != "aarch64"
 
 def check_alpha158(avx512, keep, tempdir):
     builder = Builder()
