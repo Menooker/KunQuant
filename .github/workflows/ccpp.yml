@@ -23,8 +23,10 @@ jobs:
       working-directory: ./
       run: wget -nv -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz && wget -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz
     - name: make
+      env:
+        MACOSX_DEPLOYMENT_TARGET: 15.0
       working-directory: ./
-      run: KUN_BUILD_TESTS=1 MACOSX_DEPLOYMENT_TARGET=15_0 pip install . -v
+      run: KUN_BUILD_TESTS=1 pip install . -v
     - name: test arm
       run: bash ./tests/tests_arm.sh
   test-linux:
