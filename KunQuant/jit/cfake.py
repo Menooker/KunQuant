@@ -108,7 +108,8 @@ class GCCCommandLineBuilder:
 
 _config = {
     "Windows": ("cl.exe", "obj", "dll", MSVCCommandLineBuilder),
-    "Linux": ("g++", "o", "so", GCCCommandLineBuilder)
+    "Linux": ("g++", "o", "so", GCCCommandLineBuilder),
+    "Darwin": ("clang++", "o", "dylib", GCCCommandLineBuilder)
 }
 @dataclass
 class CppCompilerConfig:
