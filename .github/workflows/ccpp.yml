@@ -29,6 +29,84 @@ jobs:
       run: KUN_BUILD_TESTS=1 pip install . -v
     - name: test arm
       run: bash ./tests/tests_arm.sh
-    - name: Debug with tmate on failure
-      if: ${{ failure() }}
-      uses: mxschmitt/action-tmate@v3
+    # - name: Debug with tmate on failure
+    #   if: ${{ failure() }}
+    #   uses: mxschmitt/action-tmate@v3
+  test-linux:
+    # run this job on both amd64 and arm64 ubuntu runners
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm]
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+        cache: 'pip' # caching pip dependencies
+    - run: pip install -r .github/workflows/requirements.txt
+    - name: Cache SDE
+      if: ${{ matrix.os != 'ubuntu-22.04-arm' }}
+      id: cache-intel-sde
+      uses: actions/cache@v4
+      with:
+        path: sde-external-9.38.0-2024-04-18-lin.tar.xz
+        key: ${{ runner.os }}-intel-sde
+    - name: Download SDE
+      if: ${{ matrix.os != 'ubuntu-22.04-arm' && steps.cache-intel-sde.outputs.cache-hit != 'true' }}
+      run: wget -nv https://downloadmirror.intel.com/823664/sde-external-9.38.0-2024-04-18-lin.tar.xz
+    - name: Extract SDE
+      if: ${{ matrix.os != 'ubuntu-22.04-arm' }}
+      run: tar -xf sde-external-9.38.0-2024-04-18-lin.tar.xz
+    - name: make
+      working-directory: ./
+      run: KUN_BUILD_TESTS=1 pip install . -v
+    - name: download data
+      working-directory: ./
+      run: wget -nv -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz && wget -P /tmp https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz
+    - name: test
+      if: ${{ matrix.os != 'ubuntu-22.04-arm' }}
+      working-directory: ./
+      run: PATH="$PATH:./sde-external-9.38.0-2024-04-18-lin/" bash ./tests/tests.sh
+    - name: test arm
+      if: ${{ matrix.os == 'ubuntu-22.04-arm' }}
+      working-directory: ./
+      run: bash ./tests/tests_arm.sh
+  test-windows:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+        cache: 'pip' # caching pip dependencies
+    - run: pip install -r .github/workflows/requirements.txt
+    - name: make
+      working-directory: ./
+      run: |
+        $env:KUN_BUILD_TESTS=1
+        pip install -e . -v
+    - name: download data
+      working-directory: ./
+      run: |
+        Invoke-WebRequest https://github.com/Menooker/KunQuant/releases/download/alpha158/alpha158.npz -OutFile alpha158.npz
+        Invoke-WebRequest https://github.com/Menooker/KunQuant/releases/download/alpha158/input.npz -OutFile input.npz
+    - name: Add msbuild to PATH
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64
+    - name: Basic test
+      working-directory: ./
+      run: |
+        $env:KUN_DEBUG_JIT=1
+        python tests/test.py
+        python tests/test2.py
+        python tests/test_runtime.py
+    - name: Alpha158 test
+      working-directory: ./
+      run: |
+        python ./tests/test_alpha158.py --inputs ./input.npz --ref ./alpha158.npz --action run_avx2
