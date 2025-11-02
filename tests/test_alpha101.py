@@ -17,11 +17,11 @@ isx86 = platform.machine() != "aarch64"
 def get_simd_len(avx: str, dtype: str = "float"):
     element_width = 32 if dtype == "float" else 64
     if avx == "avx512":
-        return 512/element_width
+        return 512//element_width
     elif not isx86: # arm
-        return 128/element_width
+        return 128//element_width
     else:
-        return 256/element_width
+        return 256//element_width
 
 def check_alpha101(avx: str):
     builder = Builder()
