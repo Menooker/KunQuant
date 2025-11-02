@@ -1,4 +1,3 @@
-from numpy.core.shape_base import block
 from KunQuant.Driver import KunCompilerConfig
 import numpy as np
 import pandas as pd
