@@ -117,11 +117,11 @@ INLINE vec_f32x4 sc_fnmadd(vec_f32x4 const &a, vec_f32x4 const &b,
 
 INLINE vec_f32x4 sc_max(vec_f32x4 const &a, vec_f32x4 const &b) {
     // vminnmq_f32 has different behavior when NAN is involved
-    return sc_select(a > b, a.v, b.v);
+    return sc_select(a > b, a, b);
 }
 INLINE vec_f32x4 sc_min(vec_f32x4 const &a, vec_f32x4 const &b) {
     // vminnmq_f32 has different behavior when NAN is involved
-    return sc_select(a < b, a.v, b.v);
+    return sc_select(a < b, a, b);
 }
 
 INLINE vec_f32x4 sc_round(vec_f32x4 const &a) {
