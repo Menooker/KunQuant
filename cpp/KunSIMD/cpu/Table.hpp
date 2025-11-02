@@ -9,8 +9,8 @@ struct LogLookupTable {
     KUN_API static const T logr_table[32];
 };
 
-template <> const double LogLookupTable<double>::r_table[32];
-template <> const double LogLookupTable<double>::logr_table[32];
-template <> const float LogLookupTable<float>::r_table[32];
-template <> const float LogLookupTable<float>::logr_table[32];
+extern template <> const double LogLookupTable<double>::r_table[32];
+extern template <> const double LogLookupTable<double>::logr_table[32];
+extern template <> const float LogLookupTable<float>::r_table[32];
+extern template <> const float LogLookupTable<float>::logr_table[32];
 }
