@@ -56,7 +56,7 @@ target_link_libraries(KunRunner PUBLIC KunRuntime)
 
 file(GLOB_RECURSE KunTestSrc ${PROJECT_SOURCE_DIR}/tests/cpp/*.cpp)
 add_library(KunTest SHARED EXCLUDE_FROM_ALL ${KunTestSrc})
-target_link_libraries(KunTest KunRunner)
+target_link_libraries(KunTest KunRuntime)
 
 
 file(GLOB_RECURSE KunCApiTestSrc ${PROJECT_SOURCE_DIR}/tests/capi/*.cpp)
