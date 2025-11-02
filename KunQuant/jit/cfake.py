@@ -131,7 +131,7 @@ def call_cpp_compiler(cmd: List[str], outpath: str) -> str:
         print("[KUN_JIT] cmd:", cmd)
     subprocess.check_call(cmd, shell=False, env=get_compiler_env(), stderr=subprocess.STDOUT,
             universal_newlines=True,
-            creationflags=(subprocess.CREATE_NO_WINDOW if _win32 else 0))
+            creationflags=(subprocess.CREATE_NO_WINDOW if _win32 and not Util.jit_debug_mode else 0))
     return outpath
 
 def call_cpp_compiler_src(source: str, module_name: str, compiler: CppCompilerConfig, tempdir: str) -> str:

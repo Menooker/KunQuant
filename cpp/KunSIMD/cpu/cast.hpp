@@ -15,7 +15,7 @@ inline T1 bitcast(T2 v) {
 
 } // namespace kun_simd
 
-#if defined(__SSE__)
+#if defined(__AVX__)
 #include "x86/cast.hpp"
 #else
 #include "neon/cast.hpp"

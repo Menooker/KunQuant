@@ -91,7 +91,7 @@ def _deprecation_check(name: str, argname: str) -> str:
 
 def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "float", blocking_len = None, input_layout = "STs", output_layout = "STs", allow_unaligned: Union[bool, None] = None, split_source = 0, options = {}) -> List[str]:
     element_size = {"float": 32, "double": 64}
-    if _cpu_arch in ["x86_64", "i386"]:
+    if _cpu_arch in ["x86_64", "i386", "AMD64"]:
         suggested_len = {"float": 8, "double": 4}
         simd_len = {256, 512}
     elif _cpu_arch == "aarch64":

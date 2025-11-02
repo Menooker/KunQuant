@@ -14,13 +14,14 @@ from KunQuant.runner import KunRunner as kr
 import platform
 isx86 = platform.machine() != "aarch64"
 
-def get_simd_len(avx: str):
+def get_simd_len(avx: str, dtype: str = "float"):
+    element_width = 32 if dtype == "float" else 64
     if avx == "avx512":
-        return 16
-    elif avx == "arm":
-        return 4
+        return 512/element_width
+    elif not isx86: # arm
+        return 128/element_width
     else:
-        return 8
+        return 256/element_width
 
 def check_alpha101(avx: str):
     builder = Builder()
@@ -42,7 +43,7 @@ def check_alpha101_double(avx: str):
             #     continue
             out = f(all_data)
             Output(out, f.__name__)
-    simd_len = get_simd_len(avx)
+    simd_len = get_simd_len(avx, "double")
     f = Function(builder.ops)
     return "alpha_101_double", f, KunCompilerConfig(blocking_len=simd_len, input_layout="TS", output_layout="TS", dtype="double", options={"opt_reduce": True, "fast_log": True})
 
