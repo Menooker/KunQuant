@@ -9,6 +9,15 @@ import sys
 import copy
 from KunQuant.passes.Util import jit_debug_mode
 
+def _normalize_arch() -> str:
+    arch = platform.machine().lower()
+    if arch in ('x86_64', 'amd64', 'i386'):
+        return 'x86_64'
+    if arch in ('aarch64', 'arm64'):
+        return 'aarch64'
+    return arch
+
+cpu_arch = _normalize_arch()
 _win32 = sys.platform.startswith('win32')
 def _get_extra_path_for_msvc():
     cl_exe = shutil.which('cl.exe')

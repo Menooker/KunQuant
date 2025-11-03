@@ -83,6 +83,8 @@ class GCCCommandLineBuilder:
     @staticmethod
     def build_compile_options(cfg: 'CppCompilerConfig', srcpath: str, outpath: str) -> List[str]:
         cmd = [cfg.compiler, "-std=c++11", f"-O{cfg.opt_level}", "-c", "-fPIC", "-fvisibility=hidden", "-fvisibility-inlines-hidden"] + list(cfg.other_flags)
+        if 'clang' in cfg.compiler:
+            cmd += ["-Wno-unused-value"]
         if isinstance(cfg.machine, NativeCPUFlags):
             cmd += ["-march=native"]
         else:
@@ -108,7 +110,8 @@ class GCCCommandLineBuilder:
 
 _config = {
     "Windows": ("cl.exe", "obj", "dll", MSVCCommandLineBuilder),
-    "Linux": ("g++", "o", "so", GCCCommandLineBuilder)
+    "Linux": ("g++", "o", "so", GCCCommandLineBuilder),
+    "Darwin": ("clang++", "o", "dylib", GCCCommandLineBuilder)
 }
 @dataclass
 class CppCompilerConfig:

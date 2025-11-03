@@ -10,9 +10,9 @@ from KunQuant.Op import Builder, Input, Output
 from KunQuant.Stage import Function
 from KunQuant.predefined.Alpha101 import AllData, all_alpha
 from KunQuant.runner import KunRunner as kr
+from KunQuant.jit.env import cpu_arch
 
-import platform
-isx86 = platform.machine() != "aarch64"
+isx86 = cpu_arch != "aarch64"
 
 def get_simd_len(avx: str, dtype: str = "float"):
     element_width = 32 if dtype == "float" else 64

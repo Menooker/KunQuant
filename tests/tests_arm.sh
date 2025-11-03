@@ -1,4 +1,17 @@
 set -e
+
+OS="$(uname -s)"
+if [ "$OS" = "Linux" ]; then
+    SYSTEM_TRIPPLE="linux-aarch64"
+    DYN_LIB_EXT="so"
+elif [ "$OS" = "Darwin" ]; then
+    SYSTEM_TRIPPLE="macosx-10.9-universal2"
+    DYN_LIB_EXT="dylib"
+else
+    SYSTEM_TRIPPLE="$OS"
+fi
+echo "SYSTEM_TRIPPLE=${SYSTEM_TRIPPLE}"
+
 echo "KunQuant compiler tests"
 python tests/test.py
 python tests/test2.py
@@ -10,5 +23,12 @@ python tests/test_alpha101.py arm
 #python ./tests/test_alpha158.py --inputs /tmp/input.npz --ref /tmp/alpha158.npz --action run_avx2
 echo "KunQuant CAPI tests"
 python ./tests/gen_alpha101_stream.py /tmp/
-LD_LIBRARY_PATH=./build/lib.linux-aarch64-cpython-39/KunQuant/runner/:${LD_LIBRARY_PATH} ./build/temp.linux-aarch64-cpython-39/KunCApiTest ./build/lib.linux-aarch64-cpython-39/KunQuant/runner/libKunTest.so /tmp/alpha101_stream/alpha101_stream.so
+
+
+if [ "$OS" = "Linux" ]; then
+    export LD_LIBRARY_PATH=./build/lib.${SYSTEM_TRIPPLE}-cpython-39/KunQuant/runner/:${LD_LIBRARY_PATH}
+elif [ "$OS" = "Darwin" ]; then
+    export DYLD_LIBRARY_PATH=./build/lib.${SYSTEM_TRIPPLE}-cpython-39/KunQuant/runner/:${DYLD_LIBRARY_PATH}
+fi
+./build/temp.${SYSTEM_TRIPPLE}-cpython-39/KunCApiTest ./build/lib.${SYSTEM_TRIPPLE}-cpython-39/KunQuant/runner/libKunTest.${DYN_LIB_EXT} /tmp/alpha101_stream/alpha101_stream.${DYN_LIB_EXT}
 echo "All test done"

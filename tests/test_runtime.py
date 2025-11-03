@@ -12,6 +12,7 @@ from KunQuant.ops import *
 from KunQuant.predefined.Alpha101 import *
 from  KunQuant.runner import KunRunner as kr
 import sys
+from KunQuant.jit.env import cpu_arch
 
 def test_generic_cross_sectional():
     builder = Builder()
@@ -98,7 +99,7 @@ def test_runtime(libpath):
         raise RuntimeError("")
 
 def ST_ST8t(data: np.ndarray = 8, is_double = False) -> np.ndarray:
-    blocking = 4 if platform.machine() == "aarch64" else 8
+    blocking = 4 if cpu_arch == "aarch64" else 8
     if is_double:
         blocking = blocking // 2
 
@@ -545,8 +546,7 @@ funclist = [
     check_argmin(),
     create_loop_index()
     ]
-import platform
-if platform.machine() != "aarch64":
+if cpu_arch != "aarch64":
     funclist.append(check_log("double", "64"))
     funclist.append(create_stream_double())
     funclist.append(check_rank2())
@@ -567,7 +567,7 @@ test_pow(lib)
 test_ema(lib)
 test_argmin_issue19(lib)
 test_generic_cross_sectional()
-if platform.machine() != "aarch64":
+if cpu_arch != "aarch64":
     test_stream_double()
     test_log(lib, "float64", "64")
     test_rank2(lib)

@@ -4,7 +4,11 @@ cmake_minimum_required(VERSION 3.5)
 add_subdirectory(3rdparty/pybind11)
 include_directories(${pybind11_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/cpp)
 
-set(CMAKE_INSTALL_RPATH "\$ORIGIN")
+if(APPLE)
+    set(CMAKE_INSTALL_RPATH "@loader_path")
+else()
+    set(CMAKE_INSTALL_RPATH "\$ORIGIN")
+endif()
 set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
 
 option(KUN_AVX512 "Enable AVX512 instruction set" OFF)
@@ -52,7 +56,7 @@ target_link_libraries(KunRunner PUBLIC KunRuntime)
 
 file(GLOB_RECURSE KunTestSrc ${PROJECT_SOURCE_DIR}/tests/cpp/*.cpp)
 add_library(KunTest SHARED EXCLUDE_FROM_ALL ${KunTestSrc})
-target_link_libraries(KunTest KunRunner)
+target_link_libraries(KunTest KunRuntime)
 
 
 file(GLOB_RECURSE KunCApiTestSrc ${PROJECT_SOURCE_DIR}/tests/capi/*.cpp)

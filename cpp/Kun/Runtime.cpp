@@ -334,7 +334,7 @@ template <typename T>
 char *StreamBuffer<T>::make(size_t stock_count, size_t window_size,
                             size_t simd_len) {
     auto ret = kunAlignedAlloc(
-        64, StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
+        sizeof(T) * simd_len, StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
     auto buf = (StreamBuffer *)ret;
     auto data = buf->getBuffer();
     auto rounded_stock_count = roundUp(stock_count, simd_len);

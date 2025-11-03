@@ -8,8 +8,7 @@ from dataclasses import dataclass, field
 from KunQuant.passes import Util as PassUtil
 
 # get the cpu architecture of the machine
-import platform
-_cpu_arch = platform.machine()
+from KunQuant.jit.env import cpu_arch as _cpu_arch
 
 required_version = "0x64100003"
 @dataclass
@@ -91,7 +90,7 @@ def _deprecation_check(name: str, argname: str) -> str:
 
 def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "float", blocking_len = None, input_layout = "STs", output_layout = "STs", allow_unaligned: Union[bool, None] = None, split_source = 0, options = {}) -> List[str]:
     element_size = {"float": 32, "double": 64}
-    if _cpu_arch in ["x86_64", "i386", "AMD64"]:
+    if _cpu_arch == "x86_64":
         suggested_len = {"float": 8, "double": 4}
         simd_len = {256, 512}
     elif _cpu_arch == "aarch64":
