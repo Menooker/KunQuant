@@ -18,6 +18,12 @@
 #define kunAlignedFree(x) free(x)
 #endif
 
+#ifdef __AVX__
+#define MALLOC_ALIGNMENT 64  // AVX-512 alignment
+#else
+#define MALLOC_ALIGNMENT 16  // NEON alignment
+#endif
+
 #if CHECKED_PTR
 #include <assert.h>
 #include <sys/mman.h>
@@ -74,7 +80,7 @@ static const uint64_t VERSION = 0x64100003;
 
 void Buffer::alloc(size_t count, size_t use_count, size_t elem_size) {
     if (!ptr) {
-        ptr = (float *)kunAlignedAlloc(64, count * elem_size);
+        ptr = (float *)kunAlignedAlloc(MALLOC_ALIGNMENT, count * elem_size);
         refcount = (int)use_count;
 #if CHECKED_PTR
         size = count * elem_size;
