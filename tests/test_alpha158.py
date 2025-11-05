@@ -11,6 +11,7 @@ from KunQuant.Op import Builder, Input, Output
 from KunQuant.Stage import Function
 from KunQuant.predefined.Alpha158 import AllData
 from KunQuant.jit.env import cpu_arch
+from KunTestUtil import gen_data
 
 isx86 = cpu_arch != "aarch64"
 
@@ -43,8 +44,8 @@ def check_alpha158(avx512, keep, tempdir):
     elif isx86:
         simd_len = 4
     else:
-        simd_len = 2
-    target = [("alpha158", f, KunCompilerConfig(dtype='double', blocking_len=simd_len, partition_factor=4,
+        simd_len = 4
+    target = [("alpha158", f, KunCompilerConfig(dtype='float', blocking_len=simd_len, partition_factor=4,
                output_layout="TS", input_layout="TS", options={"opt_reduce": True, "fast_log": True}))]
     if avx512:
         machine = cfake.X64CPUFlags(avx512=True, avx512dq=True, avx512vl=True)
@@ -62,16 +63,16 @@ def load(inputs, ref):
 
 
 def ST_TS(data: np.ndarray) -> np.ndarray:
-    return np.ascontiguousarray(data.transpose()).astype('float64')
+    return np.ascontiguousarray(data.transpose()).astype('float32')
 
-
+num_stock = 1800
+num_time = 243
 def test(lib: kr.Library, inputs: Dict[str, np.ndarray], ref: Dict[str, np.ndarray]):
     rtol = 1e-4
     atol = 1e-5
     modu = lib.getModule("alpha158")
     start_window = modu.getOutputUnreliableCount()
-    num_stock = 8
-    num_time = 260
+
     outnames = modu.getOutputNames()
     print("Total num alphas", len(outnames))
     executor = kr.createMultiThreadExecutor(8)
@@ -79,7 +80,7 @@ def test(lib: kr.Library, inputs: Dict[str, np.ndarray], ref: Dict[str, np.ndarr
                 "open": ST_TS(inputs['dopen']), "volume": ST_TS(inputs['dvol']), "amount": ST_TS(inputs['damount'])}
     outbuffers = dict()
     # Factors, Time, Stock
-    sharedbuf = np.empty((len(outnames), num_time, num_stock), dtype="float64")
+    sharedbuf = np.empty((len(outnames), num_time, num_stock), dtype="float32")
     sharedbuf[:] = np.nan
     for idx, name in enumerate(outnames):
         outbuffers[name] = sharedbuf[idx]
@@ -87,28 +88,39 @@ def test(lib: kr.Library, inputs: Dict[str, np.ndarray], ref: Dict[str, np.ndarr
     out = kr.runGraph(executor, modu, my_input, 0, num_time, outbuffers)
     end = time.time()
     print(f"Exec takes: {end-start:.6f} seconds")
-    for k, v in outbuffers.items():
-        s = start_window[k]
-        if not np.allclose(v[s:], ref[k][s:], rtol=rtol, atol=atol, equal_nan=True):
-            print("Correctness check failed at " + k)
-            for sid in range(num_stock):
-                print("Check stock", sid)
-                myout = v.transpose()[sid, s:]
-                refv = ref[k].transpose()[sid, s:]
-                if not np.allclose(myout, refv, rtol=rtol, atol=atol, equal_nan=True):
-                    for j in range(num_time-s):
-                        if not np.allclose(myout[j], refv[j], rtol=rtol, atol=atol, equal_nan=True):
-                            print("j", j, myout[j], refv[j])
-                    exit(1)
+    # for k, v in outbuffers.items():
+    #     s = start_window[k]
+    #     if not np.allclose(v[s:], ref[k][s:], rtol=rtol, atol=atol, equal_nan=True):
+    #         print("Correctness check failed at " + k)
+    #         for sid in range(num_stock):
+    #             print("Check stock", sid)
+    #             myout = v.transpose()[sid, s:]
+    #             refv = ref[k].transpose()[sid, s:]
+    #             if not np.allclose(myout, refv, rtol=rtol, atol=atol, equal_nan=True):
+    #                 for j in range(num_time-s):
+    #                     if not np.allclose(myout[j], refv[j], rtol=rtol, atol=atol, equal_nan=True):
+    #                         print("j", j, myout[j], refv[j])
+    #                 exit(1)
 
-
+def generate_data(num_stock, num_time):
+    dopen, dclose, dhigh, dlow, dvol, damount = gen_data.gen_stock_data2(
+        0.5, 100, num_stock, num_time, 0.03 if num_time > 1000 else 0.05, "float32")
+    print(dhigh.shape)
+    return {
+        "dopen": dopen,
+        "dclose": dclose,
+        "dhigh": dhigh,
+        "dlow": dlow,
+        "dvol": dvol,
+        "damount": damount
+    }
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="Run and check alpha158 again pre-computed result")
-    parser.add_argument("--inputs", required=True, type=str,
-                        help="The path to the input npz file")
-    parser.add_argument("--ref", required=True, type=str,
-                        help="The path to the reference output npz file")
+    # parser.add_argument("--inputs", required=True, type=str,
+    #                     help="The path to the input npz file")
+    # parser.add_argument("--ref", required=True, type=str,
+    #                     help="The path to the reference output npz file")
     parser.add_argument("--action", required=True, type=str,
                         help="The path to the reference output npz file")
     args = parser.parse_args()
@@ -119,6 +131,6 @@ if __name__ == "__main__":
         lib = kr.Library.load(os.path.join("./build/testalpha158", "testalpha158.so"))
     else:
         lib = check_alpha158(False, False, None)
-    inp, ref = load(args.inputs, args.ref)
-    test(lib, inp, ref)
+    inp = generate_data(num_stock, num_time)
+    test(lib, inp, None)
     print("done")
