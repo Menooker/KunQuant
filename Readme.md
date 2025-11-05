@@ -30,9 +30,16 @@ g++=11.4.0
  * Double and single precision float point data type
  * TS or STs memory layout as input/output in batch mode
  * Python/C/C++ interfaces to call the factor computation functions
- * Only x86 CPU are supported
+ * x86 and ARM CPUs are supported. Linux, Windows and macOS are supported.
 
 **Important node**: For better performance compared with Pandas, KunQuant suggests to use a multiple of `{blocking_len}` as the number of stocks in inputs. For single-precision float type and AVX2 instruction set, `blocking_len=8`. That is, you are suggested to input 8, 16, 24, ..., etc. stocks in a batch, if your code is compiled with AVX2 (without AVX512) and `float` datatype. Other numbers of stocks **are supported**, with lower execution performance.
+
+The support matrix of KunQuant
+
+| OS(CPU) | macOS (Apple Silicon)  |  macOS (x86)  |  Windows (x86) | Linux (Ubuntu,x86) | Linux (Ubuntu,aarch64) |
+|---|---|---|---|---|---|
+| Install via `pip install KunQuant` | ✅ |  ✅  |  ✅  | ✅ | ❌ |
+| Tested in CI                       | ✅ |  ❌  |  ✅  | ✅ | ✅ |
 
 ## Why KunQuant is fast
 
@@ -257,6 +264,7 @@ If you would like to install KunQuant and edit it. You can use `editable` mode o
 Linux:
 
 ```shell
+# export KUN_BUILD_TYPE=Debug    # to build debug version of KunQuant Runtime
 # in the root directory of KunQuant
 KUN_BUILD_TESTS=1 pip install -e . 
 ```
