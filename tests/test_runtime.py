@@ -289,7 +289,8 @@ def check_rank_alpha029():
         Output(inner, "ou1")
         Output(v, "ou2")
     f = Function(builder.ops)
-    return "test_rank_alpha029", f, KunCompilerConfig(input_layout="TS", output_layout="TS", allow_unaligned = True, dtype="double", options={"opt_reduce": True, "fast_log": True})
+    allow_unaligned = cpu_arch != "aarch64"
+    return "test_rank_alpha029", f, KunCompilerConfig(input_layout="TS", output_layout="TS", allow_unaligned = allow_unaligned, dtype="double", options={"opt_reduce": True, "fast_log": True})
 
 def test_rank029(lib):
     modu = lib.getModule("test_rank_alpha029")
@@ -544,15 +545,14 @@ funclist = [
     # check_alpha101_double(),
     check_ema(),
     check_argmin(),
-    create_loop_index()
+    create_loop_index(),
+    check_log("double", "64"),
+    create_stream_double(),
+    check_rank2(),
+    check_skew_kurt(),
+    check_aligned(),
+    check_rank_alpha029(),
     ]
-if cpu_arch != "aarch64":
-    funclist.append(check_log("double", "64"))
-    funclist.append(create_stream_double())
-    funclist.append(check_rank2())
-    funclist.append(check_skew_kurt())
-    funclist.append(check_aligned())
-    funclist.append(check_rank_alpha029())
 lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
 
 test_cfake()
@@ -567,12 +567,11 @@ test_pow(lib)
 test_ema(lib)
 test_argmin_issue19(lib)
 test_generic_cross_sectional()
-if cpu_arch != "aarch64":
-    test_stream_double()
-    test_log(lib, "float64", "64")
-    test_rank2(lib)
-    test_rank029(lib)
-    test_skew_kurt()
-    test_aligned(lib)
+test_stream_double()
+test_log(lib, "float64", "64")
+test_rank2(lib)
+test_rank029(lib)
+test_skew_kurt()
+test_aligned(lib)
 test_loop_index()
 print("done")

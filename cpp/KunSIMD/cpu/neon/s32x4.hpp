@@ -65,8 +65,11 @@ INLINE vec_s32x4 operator*(vec_s32x4 const &a, vec_s32x4 const &b) {
     return vmulq_s32(a.v, b.v);
 }
 
+INLINE vec_s32x4 operator!(vec_s32x4 const &a) {
+    return vmvnq_s32(a.v);
+}
 INLINE vec_s32x4 operator~(vec_s32x4 const &a) {
-    return veorq_s32(a.v, vdupq_n_s32(-1));
+    return !a;
 }
 INLINE vec_s32x4 operator&(vec_s32x4 const &a, vec_s32x4 const &b) {
     return vandq_s32(a.v, b.v);
@@ -98,9 +101,6 @@ INLINE vec_s32x4 operator>>(vec_s32x4 const &a, vec_s32x4 const &b) {
     return vshlq_s32(a.v, neg);
 }
 
-INLINE vec_s32x4 operator!(vec_s32x4 const &a) {
-    return vmvnq_s32(a.v);
-}
 
 INLINE vec_s32x4 logical_shr(vec_s32x4 const &a, vec_s32x4 const &b) {
     uint32x4_t ua = vreinterpretq_u32_s32(a.v);

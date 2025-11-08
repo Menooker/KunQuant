@@ -19,8 +19,8 @@ echo "KunQuant runtime tests"
 python tests/test_runtime.py
 echo "KunQuant alpha101 tests"
 python tests/test_alpha101.py arm
-#echo "KunQuant alpha158 tests"
-#python ./tests/test_alpha158.py --inputs /tmp/input.npz --ref /tmp/alpha158.npz --action run_avx2
+echo "KunQuant alpha158 tests"
+python ./tests/test_alpha158.py --inputs /tmp/input.npz --ref /tmp/alpha158.npz --action run_arm
 echo "KunQuant CAPI tests"
 python ./tests/gen_alpha101_stream.py /tmp/
 

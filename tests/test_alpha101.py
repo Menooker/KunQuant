@@ -443,10 +443,9 @@ action = sys.argv[1]
 def do_compile(avx, keep, tempdir):
     funclist = [
         check_alpha101(avx),
-        check_alpha101_stream(avx)
+        check_alpha101_stream(avx),
+        check_alpha101_double(avx)
         ]
-    if isx86:
-        funclist.append(check_alpha101_double(avx))
     if avx == "avx512":
         machine = cfake.X64CPUFlags(avx512=True, avx512dq=True, avx512vl=True)
     else:
@@ -460,9 +459,8 @@ elif action == "run_avx512":
 else:
     lib = do_compile(action, False, None)
 
-if isx86:
-    print("Check f64 batch")
-    main(True, True)
+print("Check f64 batch")
+main(True, True)
 print("======================================")
 print("Check f32 batch")
 main(False, True)
