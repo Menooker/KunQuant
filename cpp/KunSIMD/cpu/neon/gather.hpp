@@ -34,7 +34,7 @@ template<int scale>
 INLINE vec_f64x2 gather(const double* ptr, vec_s64x2 v) {
     double out[2];
     for (int i = 0; i < 2; ++i) {
-        out[i] = *reinterpret_cast<const float*>(reinterpret_cast<const char*>(ptr) + v.raw[i] * scale);
+        out[i] = *reinterpret_cast<const double*>(reinterpret_cast<const char*>(ptr) + v.raw[i] * scale);
     }
     return vld1q_f64(out);
 }
