@@ -121,3 +121,5 @@ INLINE vec_s64x2 sc_abs(vec_s64x2 const &a) {
 }
 
 } // namespace
+
+#endif

@@ -133,11 +133,11 @@ INLINE vec_f32x4 sc_round(vec_f32x4 const &a) {
 }
 
 INLINE vec_f32x4 sc_ceil(vec_f32x4 const &a) {
-    return vcvtq_f32_s32(vrndpq_f32(a.v));
+    return vrndpq_f32(a.v);
 }
 
 INLINE vec_f32x4 sc_floor(vec_f32x4 const &a) {
-    return vcvtq_f32_s32(vrndmq_f32(a.v));
+    return vrndmq_f32(a.v);
 }
 
 INLINE vec_f32x4 sc_sqrt(vec_f32x4 const &a) {

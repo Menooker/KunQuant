@@ -128,11 +128,11 @@ INLINE vec_f64x2 sc_round(vec_f64x2 const &a) {
 }
 
 INLINE vec_f64x2 sc_ceil(vec_f64x2 const &a) {
-    return vcvtq_f64_s64(vrndpq_f64(a.v));
+    return vrndpq_f64(a.v);
 }
 
 INLINE vec_f64x2 sc_floor(vec_f64x2 const &a) {
-    return vcvtq_f64_s64(vrndmq_f64(a.v));
+    return vrndmq_f64(a.v);
 }
 
 INLINE vec_f64x2 sc_sqrt(vec_f64x2 const &a) {
