@@ -66,7 +66,7 @@ INLINE vec_s64x2 operator*(vec_s64x2 const &a, vec_s64x2 const &b) {
 }
 
 INLINE vec_s64x2 operator!(vec_s64x2 const &a) {
-    return vreinterpretq_s64_s32(vmvnq_s64(vreinterpretq_s32_s64(a.v)));
+    return vreinterpretq_s64_s32(vmvnq_s32(vreinterpretq_s32_s64(a.v)));
 }
 INLINE vec_s64x2 operator~(vec_s64x2 const &a) {
     return !a;
