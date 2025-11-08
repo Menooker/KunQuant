@@ -65,8 +65,11 @@ INLINE vec_s64x2 operator*(vec_s64x2 const &a, vec_s64x2 const &b) {
     return {a.raw[0] * b.raw[0], a.raw[1] * b.raw[1]};
 }
 
+INLINE vec_s64x2 operator!(vec_s64x2 const &a) {
+    return vreinterpretq_s64_s32(vmvnq_s64(vreinterpretq_s32_s64(a.v)));
+}
 INLINE vec_s64x2 operator~(vec_s64x2 const &a) {
-    return veorq_s64(a.v, vdupq_n_s64(-1));
+    return !a;
 }
 INLINE vec_s64x2 operator&(vec_s64x2 const &a, vec_s64x2 const &b) {
     return vandq_s64(a.v, b.v);
@@ -98,9 +101,6 @@ INLINE vec_s64x2 operator>>(vec_s64x2 const &a, vec_s64x2 const &b) {
     return vshlq_s64(a.v, neg);
 }
 
-INLINE vec_s64x2 operator!(vec_s64x2 const &a) {
-    return vmvnq_s64(a.v);
-}
 
 INLINE vec_s64x2 logical_shr(vec_s64x2 const &a, vec_s64x2 const &b) {
     uint64x2_t ua = vreinterpretq_u64_s64(a.v);
@@ -109,16 +109,6 @@ INLINE vec_s64x2 logical_shr(vec_s64x2 const &a, vec_s64x2 const &b) {
     return vreinterpretq_s64_u64(r);
 }
 
-INLINE vec_s64x2 sc_max(vec_s64x2 const &a, vec_s64x2 const &b) {
-    return vmaxq_s64(a.v, b.v);
-}
-INLINE vec_s64x2 sc_min(vec_s64x2 const &a, vec_s64x2 const &b) {
-    return vminq_s64(a.v, b.v);
-}
-
-INLINE vec_s64x2 sc_abs(vec_s64x2 const &a) {
-    return vabsq_s64(a.v);
-}
 
 } // namespace
 

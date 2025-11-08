@@ -80,7 +80,7 @@ INLINE vec_s64x2 operator==(vec_f64x2 const &a, vec_f64x2 const &b) {
 }
 INLINE vec_s64x2 operator!=(vec_f64x2 const &a, vec_f64x2 const &b) {
     uint64x2_t cmp = vceqq_f64(a.v, b.v);
-    return vreinterpretq_s64_u64(vmvnq_u64(cmp));
+    return !vec_s64x2{cmp};
 }
 INLINE vec_s64x2 operator>(vec_f64x2 const &a, vec_f64x2 const &b) {
     return vreinterpretq_s64_u64(vcgtq_f64(a.v, b.v));
@@ -144,10 +144,8 @@ INLINE vec_f64x2 sc_abs(vec_f64x2 const &a) {
 }
 
 INLINE vec_s64x2 sc_isnan(vec_f64x2 v1) {
-    vec_s64x2 ret;
     uint64x2_t cmp = vceqq_f64(v1.v, v1.v);
-    uint64x2_t nan_u = vmvnq_u64(cmp);
-    return vreinterpretq_s64_u64(nan_u);
+    return !vec_s64x2{cmp};
 }
 
 INLINE vec_s64x2 sc_isnan(vec_f64x2 v1, vec_f64x2 v2) {
