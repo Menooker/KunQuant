@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [windows-2022, macos-15, ubuntu-22.04]
+        os: [windows-2022, macos-14, ubuntu-22.04]
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
     environment:
       name: pypi
@@ -123,7 +123,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [windows-2022, macos-15, ubuntu-22.04]
+        os: [windows-2022, macos-14, ubuntu-22.04]
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
     environment:
       name: testpypi
