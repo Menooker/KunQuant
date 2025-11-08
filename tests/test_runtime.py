@@ -289,7 +289,8 @@ def check_rank_alpha029():
         Output(inner, "ou1")
         Output(v, "ou2")
     f = Function(builder.ops)
-    return "test_rank_alpha029", f, KunCompilerConfig(input_layout="TS", output_layout="TS", allow_unaligned = True, dtype="double", options={"opt_reduce": True, "fast_log": True})
+    allow_unaligned = cpu_arch != "aarch64"
+    return "test_rank_alpha029", f, KunCompilerConfig(input_layout="TS", output_layout="TS", allow_unaligned = allow_unaligned, dtype="double", options={"opt_reduce": True, "fast_log": True})
 
 def test_rank029(lib):
     modu = lib.getModule("test_rank_alpha029")
