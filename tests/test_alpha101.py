@@ -443,10 +443,9 @@ action = sys.argv[1]
 def do_compile(avx, keep, tempdir):
     funclist = [
         check_alpha101(avx),
-        check_alpha101_stream(avx)
+        check_alpha101_stream(avx),
+        check_alpha101_double(avx)
         ]
-    if isx86:
-        funclist.append(check_alpha101_double(avx))
     if avx == "avx512":
         machine = cfake.X64CPUFlags(avx512=True, avx512dq=True, avx512vl=True)
     else:
