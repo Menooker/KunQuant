@@ -102,17 +102,19 @@ INLINE vec_s32x4 operator<=(vec_f32x4 const &a, vec_f32x4 const &b) {
 /* keep float bitwise ops (reinterpreted) for completeness */
 INLINE vec_f32x4 sc_fmadd(vec_f32x4 const &a, vec_f32x4 const &b,
                           vec_f32x4 const &c) {
-    return vmlaq_f32(c.v, a.v, b.v);
+    return vfmaq_f32(c.v, a.v, b.v);
 }
 
 INLINE vec_f32x4 sc_fmsub(vec_f32x4 const &a, vec_f32x4 const &b,
                           vec_f32x4 const &c) {
-    return vsubq_f32(vmulq_f32(a.v, b.v), c.v);
+    // a*b-c                
+    return vfmaq_f32(vnegq_f32(c.v), a.v, b.v);
 }
 
 INLINE vec_f32x4 sc_fnmadd(vec_f32x4 const &a, vec_f32x4 const &b,
                            vec_f32x4 const &c) {
-    return vsubq_f32(c.v, vmulq_f32(a.v, b.v));
+    // c-a*b
+    return vfmsq_f32(c.v, a.v, b.v);
 }
 
 INLINE vec_f32x4 sc_max(vec_f32x4 const &a, vec_f32x4 const &b) {
@@ -131,27 +133,11 @@ INLINE vec_f32x4 sc_round(vec_f32x4 const &a) {
 }
 
 INLINE vec_f32x4 sc_ceil(vec_f32x4 const &a) {
-    // compute trunc (toward zero) then add 1 where a > trunc
-    int32x4_t t = vcvtq_s32_f32(a.v); // truncate toward zero
-    float32x4_t tf = vcvtq_f32_s32(t);
-    uint32x4_t gt_mask = vcgtq_f32(a.v, tf);
-    uint32x4_t one_u = vdupq_n_u32(1);
-    uint32x4_t adjust_u = vandq_u32(gt_mask, one_u);
-    int32x4_t adjust_s = vreinterpretq_s32_u32(adjust_u);
-    int32x4_t t_adj = vaddq_s32(t, adjust_s);
-    return vcvtq_f32_s32(t_adj);
+    return vcvtq_f32_s32(vrndpq_f32(a.v));
 }
 
 INLINE vec_f32x4 sc_floor(vec_f32x4 const &a) {
-    // compute trunc (toward zero) then subtract 1 where a < trunc
-    int32x4_t t = vcvtq_s32_f32(a.v); // truncate toward zero
-    float32x4_t tf = vcvtq_f32_s32(t);
-    uint32x4_t lt_mask = vcltq_f32(a.v, tf);
-    uint32x4_t one_u = vdupq_n_u32(1);
-    uint32x4_t adjust_u = vandq_u32(lt_mask, one_u);
-    int32x4_t adjust_s = vreinterpretq_s32_u32(adjust_u);
-    int32x4_t t_adj = vsubq_s32(t, adjust_s);
-    return vcvtq_f32_s32(t_adj);
+    return vcvtq_f32_s32(vrndmq_f32(a.v));
 }
 
 INLINE vec_f32x4 sc_sqrt(vec_f32x4 const &a) {
