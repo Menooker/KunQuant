@@ -460,9 +460,8 @@ elif action == "run_avx512":
 else:
     lib = do_compile(action, False, None)
 
-if isx86:
-    print("Check f64 batch")
-    main(True, True)
+print("Check f64 batch")
+main(True, True)
 print("======================================")
 print("Check f32 batch")
 main(False, True)

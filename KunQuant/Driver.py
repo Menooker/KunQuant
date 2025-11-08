@@ -96,8 +96,6 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
     elif _cpu_arch == "aarch64":
         suggested_len = {"float": 4, "double": 2}
         simd_len = {128}
-        if dtype == "double":
-            raise RuntimeError("Double precision is not supported on aarch64")
     else:
         raise RuntimeError(f"Unsupported CPU architecture: {_cpu_arch}")
     input_layout = _deprecation_check(input_layout, "input_layout")
