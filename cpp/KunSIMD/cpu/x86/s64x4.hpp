@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *******************************************************************************/
+#ifdef __AVX2__
 #ifndef GRAPH_BACKEND_GRAPH_COMPILER_CORE_SRC_RUNTIME_KERNEL_INCLUDE_X86SIMD_VEC_S64X4_HPP
 #define GRAPH_BACKEND_GRAPH_COMPILER_CORE_SRC_RUNTIME_KERNEL_INCLUDE_X86SIMD_VEC_S64X4_HPP
 #include <immintrin.h>
@@ -140,5 +141,5 @@ INLINE vec_s64x4 logical_shr(vec_s64x4 const &a, vec_s64x4 const &b) {
     return _mm256_srlv_epi64(a.v, b.v);
 }
 }
-
+#endif
 #endif

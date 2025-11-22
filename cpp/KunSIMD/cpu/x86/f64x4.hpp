@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *******************************************************************************/
+#ifdef __AVX2__
 #ifndef GRAPH_BACKEND_GRAPH_COMPILER_CORE_SRC_RUNTIME_KERNEL_INCLUDE_X86SIMD_VEC_F64X4_HPP
 #define GRAPH_BACKEND_GRAPH_COMPILER_CORE_SRC_RUNTIME_KERNEL_INCLUDE_X86SIMD_VEC_F64X4_HPP
 #include <immintrin.h>
@@ -163,4 +164,5 @@ inline vec_f64x4 sc_isnan(vec_f64x4 v1) {
 }
 
 } // namespace kun_simd
+#endif
 #endif

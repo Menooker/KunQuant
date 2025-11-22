@@ -15,6 +15,7 @@
  *******************************************************************************/
 #ifndef GRAPH_BACKEND_GRAPH_COMPILER_CORE_SRC_RUNTIME_KERNEL_INCLUDE_X86SIMD_VEC_F32X8_HPP
 #define GRAPH_BACKEND_GRAPH_COMPILER_CORE_SRC_RUNTIME_KERNEL_INCLUDE_X86SIMD_VEC_F32X8_HPP
+#ifdef __AVX2__
 #include <immintrin.h>
 #include <stdint.h>
 #ifndef __AVX512F__
@@ -166,4 +167,5 @@ INLINE vec_f32x8 sc_isnan(vec_f32x8 v1) {
 }
 
 } // namespace kun_simd
+#endif
 #endif

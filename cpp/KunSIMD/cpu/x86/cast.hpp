@@ -11,6 +11,7 @@ namespace kun_simd {
 template <typename T1, typename T2>
 T1 bitcast(T2 v);
 
+#ifdef __AVX2__
 template <>
 INLINE vec_f32x8 bitcast(vec_s32x8 v) {
     return _mm256_castsi256_ps(v.v);
@@ -30,6 +31,7 @@ template <>
 INLINE vec_s64x4 bitcast(vec_f64x4 v) {
     return _mm256_castpd_si256(v.v);
 }
+#endif
 
 #ifdef __AVX512F__
 
@@ -72,6 +74,28 @@ template <typename T1, typename T2>
 T1 fast_cast(T2 v);
 
 /////// start of f32 <==> s32
+
+template <>
+INLINE vec_f32x4 cast(vec_s32x4 v) {
+    return _mm_cvtepi32_ps(v.v);
+}
+
+template <>
+INLINE vec_s32x4 cast(vec_f32x4 v) {
+    return _mm_cvtps_epi32(v.v);
+}
+
+template <>
+INLINE vec_f32x4 fast_cast(vec_s32x4 v) {
+    return cast<vec_f32x4>(v);
+}
+
+template <>
+INLINE vec_s32x4 fast_cast(vec_f32x4 v) {
+    return cast<vec_s32x4>(v);
+}
+
+#ifdef __AVX2__
 template <>
 INLINE vec_f32x8 cast(vec_s32x8 v) {
     return _mm256_cvtepi32_ps(v.v);
@@ -91,6 +115,7 @@ template <>
 INLINE vec_s32x8 fast_cast(vec_f32x8 v) {
     return cast<vec_s32x8>(v);
 }
+#endif
 
 #ifdef __AVX512F__
 template <>
@@ -117,6 +142,7 @@ INLINE vec_s32x16 fast_cast(vec_f32x16 v) {
 /////// end of f32 <==> s32
 
 /////// start of f64x4 <==> s64x4
+#ifdef __AVX2__
 #if !defined(__AVX512DQ__) || !defined(__AVX512VL__)
 
 // https://stackoverflow.com/a/77376595
@@ -175,6 +201,7 @@ template <>
 INLINE vec_f64x4 fast_cast(vec_s64x4 v) {
     return _mm256_cvtepi64_pd(v.v);
 }
+#endif
 #endif
 
 /////// end of f64x4 <==> s64x4
@@ -237,6 +264,7 @@ INLINE vec_s64x8 cast(vec_f64x8 v) {
 }
 #endif
 
+#ifdef __AVX2__
 INLINE vec_f32x8::Masktype vec_f32x8::make_mask(int N) {
     return bitcast<vec_f32x8::Masktype>(vec_s32x8{N} >
                                         vec_s32x8{0, 1, 2, 3, 4, 5, 6, 7});
@@ -244,6 +272,12 @@ INLINE vec_f32x8::Masktype vec_f32x8::make_mask(int N) {
 
 INLINE vec_f64x4::Masktype vec_f64x4::make_mask(int N) {
     return bitcast<vec_f64x4::Masktype>(vec_s64x4{N} > vec_s64x4{0, 1, 2, 3});
+}
+#endif
+
+
+INLINE vec_f32x4::Masktype vec_f32x4::make_mask(int N) {
+    return bitcast<vec_f32x4::Masktype>(vec_s32x4{N} > vec_s32x4{0, 1, 2, 3});
 }
 
 } // namespace kun_simd
