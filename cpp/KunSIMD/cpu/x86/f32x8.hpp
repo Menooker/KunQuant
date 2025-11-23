@@ -123,17 +123,32 @@ INLINE vec_f32x8 operator!(vec_f32x8 a) {
 
 INLINE vec_f32x8 sc_fmadd(vec_f32x8 const &a, vec_f32x8 const &b,
                           vec_f32x8 const &c) {
+#ifdef __FMA__
     return _mm256_fmadd_ps(a.v, b.v, c.v);
+#else
+    // Fallback to manual multiplication and addition if FMA is not available
+    return _mm256_add_ps(_mm256_mul_ps(a.v, b.v), c.v);
+#endif
 }
 
 INLINE vec_f32x8 sc_fmsub(vec_f32x8 const &a, vec_f32x8 const &b,
                           vec_f32x8 const &c) {
+#ifdef __FMA__
     return _mm256_fmsub_ps(a.v, b.v, c.v);
+#else
+    // Fallback to manual multiplication and subtraction if FMA is not available
+    return _mm256_sub_ps(_mm256_mul_ps(a.v, b.v), c.v);
+#endif
 }
 
 INLINE vec_f32x8 sc_fnmadd(vec_f32x8 const &a, vec_f32x8 const &b,
                            vec_f32x8 const &c) {
+#ifdef __FMA__
     return _mm256_fnmadd_ps(a.v, b.v, c.v);
+#else
+    // Fallback to manual multiplication and negation if FMA is not available
+    return _mm256_sub_ps(c.v, _mm256_mul_ps(a.v, b.v));
+#endif
 }
 
 INLINE vec_f32x8 sc_max(vec_f32x8 const &a, vec_f32x8 const &b) {

@@ -18,6 +18,7 @@
 #include <immintrin.h>
 #include <stdint.h>
 #include "../common.hpp"
+#include <KunSIMD/cpu/x86/common.hpp>
 #include <KunSIMD/Vector.hpp>
 
 namespace kun_simd {
@@ -59,15 +60,27 @@ public:
 using vec_s64x4 = vec<int64_t, 4>;
 
 INLINE vec_s64x4 operator+(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_add_epi64(a.v, b.v);
+    AVX_IMPL(_mm_add_epi64, _mm256_add_epi64, a.v, b.v);
 }
 
 INLINE vec_s64x4 operator-(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_sub_epi64(a.v, b.v);
+    AVX_IMPL(_mm_sub_epi64, _mm256_sub_epi64, a.v, b.v);
 }
+
+INLINE vec_s64x4 operator>(vec_s64x4 const &a, vec_s64x4 const &b) {
+    AVX_IMPL(_mm_cmpgt_epi64, _mm256_cmpgt_epi64, a.v, b.v);
+}
+
+INLINE vec_s64x4 operator==(vec_s64x4 const &a, vec_s64x4 const &b) {
+    AVX_IMPL(_mm_cmpeq_epi64, _mm256_cmpeq_epi64, a.v, b.v);
+}
+
+#ifdef __AVX2__
+
 INLINE vec_s64x4 operator-(vec_s64x4 const &a) {
     return _mm256_sub_epi64(_mm256_setzero_si256(), a.v);
 }
+#endif
 
 #if defined(__AVX512DQ__) && defined(__AVX512VL__)
 
@@ -87,30 +100,27 @@ INLINE vec_s64x4 sc_abs(vec_s64x4 const &a) {
 }
 #endif
 
-INLINE vec_s64x4 operator>(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_cmpgt_epi64(a.v, b.v);
-}
 // INLINE vec_s64x4 operator/(vec_s64x4 const &a, vec_s64x4 const &b) {
 //     return _mm256_div_epi64(a.v, b.v);
 // }
 
+INLINE vec_s64x4 operator&(vec_s64x4 const &a, vec_s64x4 const &b) {
+    AVX_USE_FP_OP(and, pd, a.v, b.v);
+}
+INLINE vec_s64x4 operator|(vec_s64x4 const &a, vec_s64x4 const &b) {
+    AVX_USE_FP_OP(or, pd, a.v, b.v);
+}
+
+INLINE vec_s64x4 operator^(vec_s64x4 const &a, vec_s64x4 const &b) {
+    AVX_USE_FP_OP(xor, pd, a.v, b.v);
+}
+#ifdef __AVX2__
 INLINE vec_s64x4 operator~(vec_s64x4 const &a) {
     return _mm256_xor_si256(a.v, _mm256_set1_epi64x(-1));
 }
-INLINE vec_s64x4 operator&(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_and_si256(a.v, b.v);
-}
-INLINE vec_s64x4 operator|(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_or_si256(a.v, b.v);
-}
-INLINE vec_s64x4 operator^(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_xor_si256(a.v, b.v);
-}
+#endif
 
 
-INLINE vec_s64x4 operator==(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_cmpeq_epi64(a, b);
-}
 
 namespace {
 INLINE vec_s64x4 blendvpd_si256(__m256i a, __m256i b, __m256i mask) {
@@ -126,9 +136,15 @@ INLINE vec_s64x4 sc_select(
     return blendvpd_si256(b, a, mask);
 }
 
+#ifdef __AVX2__
 INLINE vec_s64x4 operator<<(vec_s64x4 const &a, vec_s64x4 const &b) {
     return _mm256_sllv_epi64(a.v, b.v);
 }
+
+INLINE vec_s64x4 logical_shr(vec_s64x4 const &a, vec_s64x4 const &b) {
+    return _mm256_srlv_epi64(a.v, b.v);
+}
+#endif
 
 #ifdef __AVX512F__
 INLINE vec_s64x4 operator>>(vec_s64x4 const &a, vec_s64x4 const &b) {
@@ -136,9 +152,17 @@ INLINE vec_s64x4 operator>>(vec_s64x4 const &a, vec_s64x4 const &b) {
 }
 #endif
 
-INLINE vec_s64x4 logical_shr(vec_s64x4 const &a, vec_s64x4 const &b) {
-    return _mm256_srlv_epi64(a.v, b.v);
+
+template <int v>
+INLINE vec_s64x4 logical_shl(vec_s64x4 const &a) {
+    AVX_CONST_IMPL(_mm_slli_epi64, _mm256_slli_epi64, a.v, v);
 }
+
+template <int v>
+INLINE vec_s64x4 logical_shr(vec_s64x4 const &a) {
+    AVX_CONST_IMPL(_mm_srli_epi64, _mm256_srli_epi64, a.v, v);
+}
+
 }
 
 #endif

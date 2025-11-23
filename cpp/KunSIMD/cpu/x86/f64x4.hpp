@@ -121,17 +121,32 @@ INLINE vec_f64x4 operator!(vec_f64x4 a) {
 
 INLINE vec_f64x4 sc_fmadd(vec_f64x4 const &a, vec_f64x4 const &b,
                           vec_f64x4 const &c) {
+#ifdef __FMA__
     return _mm256_fmadd_pd(a.v, b.v, c.v);
+#else
+    // Fallback to manual multiplication and addition if FMA is not available
+    return _mm256_add_pd(_mm256_mul_pd(a.v, b.v), c.v);
+#endif
 }
 
 INLINE vec_f64x4 sc_fmsub(vec_f64x4 const &a, vec_f64x4 const &b,
                           vec_f64x4 const &c) {
+#ifdef __FMA__
     return _mm256_fmsub_pd(a.v, b.v, c.v);
+#else
+    // Fallback to manual multiplication and subtraction if FMA is not available
+    return _mm256_sub_pd(_mm256_mul_pd(a.v, b.v), c.v);
+#endif
 }
 
 INLINE vec_f64x4 sc_fnmadd(vec_f64x4 const &a, vec_f64x4 const &b,
                            vec_f64x4 const &c) {
+#ifdef __FMA__
     return _mm256_fnmadd_pd(a.v, b.v, c.v);
+#else
+    // Fallback to manual multiplication and negation if FMA is not available
+    return _mm256_sub_pd(c.v, _mm256_mul_pd(a.v, b.v));
+#endif
 }
 
 INLINE vec_f64x4 sc_max(vec_f64x4 const &a, vec_f64x4 const &b) {

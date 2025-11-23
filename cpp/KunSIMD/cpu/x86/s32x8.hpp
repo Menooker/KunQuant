@@ -18,6 +18,7 @@
 #include <immintrin.h>
 #include <stdint.h>
 #include "../common.hpp"
+#include <KunSIMD/cpu/x86/common.hpp>
 #include <KunSIMD/Vector.hpp>
 
 namespace kun_simd {
@@ -59,12 +60,15 @@ public:
 using vec_s32x8 = vec<int32_t, 8>;
 
 INLINE vec_s32x8 operator+(vec_s32x8 const &a, vec_s32x8 const &b) {
-    return _mm256_add_epi32(a.v, b.v);
+    AVX_IMPL(_mm_add_epi32, _mm256_add_epi32, a.v, b.v);
 }
 
 INLINE vec_s32x8 operator-(vec_s32x8 const &a, vec_s32x8 const &b) {
-    return _mm256_sub_epi32(a.v, b.v);
+    AVX_IMPL(_mm_sub_epi32, _mm256_sub_epi32, a.v, b.v);
 }
+
+
+#ifdef __AVX2__
 INLINE vec_s32x8 operator-(vec_s32x8 const &a) {
     return _mm256_sub_epi32(_mm256_setzero_si256(), a.v);
 }
@@ -72,22 +76,24 @@ INLINE vec_s32x8 operator-(vec_s32x8 const &a) {
 INLINE vec_s32x8 operator*(vec_s32x8 const &a, vec_s32x8 const &b) {
     return _mm256_mullo_epi32(a.v, b.v);
 }
+#endif
 
 // INLINE vec_s32x8 operator/(vec_s32x8 const &a, vec_s32x8 const &b) {
 //     return _mm256_div_epi32(a.v, b.v);
 // }
-
+#ifdef __AVX2__
 INLINE vec_s32x8 operator~(vec_s32x8 const &a) {
     return _mm256_xor_si256(a.v, _mm256_set1_epi32(-1));
 }
+#endif
 INLINE vec_s32x8 operator&(vec_s32x8 const &a, vec_s32x8 const &b) {
-    return _mm256_and_si256(a.v, b.v);
+    AVX_USE_FP_OP(and, ps, a.v, b.v);
 }
 INLINE vec_s32x8 operator|(vec_s32x8 const &a, vec_s32x8 const &b) {
-    return _mm256_or_si256(a.v, b.v);
+    AVX_USE_FP_OP(or, ps, a.v, b.v);
 }
 INLINE vec_s32x8 operator^(vec_s32x8 const &a, vec_s32x8 const &b) {
-    return _mm256_xor_si256(a.v, b.v);
+    AVX_USE_FP_OP(xor, ps, a.v, b.v);
 }
 
 #if 0
@@ -118,10 +124,10 @@ INLINE vec_s32x8 sc_select(
 }
 #else
 INLINE vec_s32x8 operator==(vec_s32x8 const &a, vec_s32x8 const &b) {
-    return _mm256_cmpeq_epi32(a, b);
+    AVX_IMPL(_mm_cmpeq_epi32, _mm256_cmpeq_epi32, a.v, b.v);
 }
 INLINE vec_s32x8 operator>(vec_s32x8 const &a, vec_s32x8 const &b) {
-    return _mm256_cmpgt_epi32(a.v, b.v);
+    AVX_IMPL(_mm_cmpgt_epi32, _mm256_cmpgt_epi32, a.v, b.v);
 }
 #endif
 
@@ -139,6 +145,7 @@ INLINE vec_s32x8 sc_select(
     return blendvps_si256(b, a, mask);
 }
 
+#ifdef __AVX2__
 INLINE vec_s32x8 operator<<(vec_s32x8 const &a, vec_s32x8 const &b) {
     return _mm256_sllv_epi32(a.v, b.v);
 }
@@ -148,6 +155,17 @@ INLINE vec_s32x8 operator>>(vec_s32x8 const &a, vec_s32x8 const &b) {
 
 INLINE vec_s32x8 logical_shr(vec_s32x8 const &a, vec_s32x8 const &b) {
     return _mm256_srlv_epi32(a.v, b.v);
+}
+#endif
+
+template <int v>
+INLINE vec_s32x8 logical_shl(vec_s32x8 const &a) {
+    AVX_CONST_IMPL(_mm_slli_epi32, _mm256_slli_epi32, a.v, v);
+}
+
+template <int v>
+INLINE vec_s32x8 logical_shr(vec_s32x8 const &a) {
+    AVX_CONST_IMPL(_mm_srli_epi32, _mm256_srli_epi32, a.v, v);
 }
 
 // operator /

@@ -48,16 +48,16 @@ inline vec<T, lanes> log(vec<T, lanes> inval) {
     // int representation of the FP value
     auto inval_int = bitcast<VecInt>(inval);
     // the higher order 5 bits of mantissa
-    auto mantissa_high5 = logical_shr(inval_int, mantissa_bits - approx_bits) &
+    auto mantissa_high5 = logical_shr<mantissa_bits - approx_bits>(inval_int) &
                           makeNTailingOnes<int_t>(approx_bits);
     // the highest order 1 bit of mantissa
-    auto mantissa_high1 = logical_shr(mantissa_high5, (approx_bits - 1));
+    auto mantissa_high1 = logical_shr<(approx_bits - 1)>(mantissa_high5);
     // prepare the exponent bits for M. It should be (0 or -1) + 127, based on
     // rounding bit mantissa_high1. If mantissa_high1, the exponent value will
     // be -1. Otherwise, exponent value will be 0.
     // makeNTailingOnes(exponent_bits-1) is for exponent value 0 in FP format
-    auto E_1 = (mantissa_high1 ^ makeNTailingOnes<int_t>(exponent_bits - 1))
-               << mantissa_bits;
+    auto E_1 = logical_shl<mantissa_bits>(
+        mantissa_high1 ^ makeNTailingOnes<int_t>(exponent_bits - 1));
     // get value of M: expontential be 0/-1, and keep the mantissa same of X
     auto M = (inval_int & makeNTailingOnes<int_t>(mantissa_bits)) | E_1;
     auto Ri = gather<sizeof(T)>(LogLookupTable<T>::r_table, mantissa_high5);
@@ -72,7 +72,7 @@ inline vec<T, lanes> log(vec<T, lanes> inval) {
     auto minus_log_Ri_minus_127_mul_ln2 =
         gather<sizeof(T)>(LogLookupTable<T>::logr_table, mantissa_high5);
     // the exponential value + mantissa_high1 for rounding
-    auto expo_rounded = logical_shr(inval_int, mantissa_bits) + mantissa_high1;
+    auto expo_rounded = logical_shr<mantissa_bits>(inval_int) + mantissa_high1;
     // Cast the exponential value in FP format. Note that IEEE single precision
     // Float point format stores E+127 instead of E in the data
     auto E_plus_127 = fast_cast<Vec>(expo_rounded);
@@ -130,7 +130,7 @@ inline vec<T, lanes> exp(vec<T, lanes> inval) {
     Tn = sc_fmadd(Tn, r, ONE_f);
 
     // 2^k_int, shift to exponent bits position
-    auto p = k_int << fp_trait<T>::fraction_bits;
+    auto p = logical_shl<fp_trait<T>::fraction_bits>(k_int);
     auto result = p + bitcast<VecInt>(Tn);
     auto res = bitcast<Vec>(result);
     res = sc_select(inval > overflow_x, ret_infinity, res);
