@@ -124,16 +124,14 @@ INLINE vec_s32x16 fast_cast(vec_f32x16 v) {
 template <>
 INLINE vec_s64x4 fast_cast(vec_f64x4 v) {
     auto x = _mm256_add_pd(v.v, _mm256_set1_pd(0x0018000000000000));
-    return _mm256_sub_epi64(
-        _mm256_castpd_si256(x),
-        _mm256_castpd_si256(_mm256_set1_pd(0x0018000000000000)));
+    return vec_s64x4(_mm256_castpd_si256(x)) -
+           _mm256_castpd_si256(_mm256_set1_pd(0x0018000000000000));
 }
 
 // Only works for inputs in the range: [-2^51, 2^51]
 template <>
 INLINE vec_f64x4 fast_cast(vec_s64x4 v) {
-    auto x = _mm256_add_epi64(
-        v.v, _mm256_castpd_si256(_mm256_set1_pd(0x0018000000000000)));
+    auto x = v + _mm256_castpd_si256(_mm256_set1_pd(0x0018000000000000));
     return _mm256_sub_pd(_mm256_castsi256_pd(x),
                          _mm256_set1_pd(0x0018000000000000));
 }

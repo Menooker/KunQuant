@@ -29,9 +29,13 @@ class CMakeBuildExtension(build_ext):
         ]
         build_args = ["cmake", "--build", "."]
         devbuild = False
-        if "KUN_BUILD_TESTS" in os.environ and os.environ["KUN_BUILD_TESTS"] != "":
+        if "KUN_BUILD_TESTS" in os.environ and os.environ["KUN_BUILD_TESTS"] != "0":
             devbuild = True
             build_args += ["--target", "TestingTargets"]
+        DKUN_NO_AVX = "OFF"
+        if "KUN_NO_AVX2" in os.environ and os.environ["KUN_NO_AVX2"] != "0":
+            DKUN_NO_AVX = "ON"
+        cmake_args += [f"-DKUN_NO_AVX2={DKUN_NO_AVX}"]
         if is_windows:
             cmake_args += [f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={ext_dir}",
                 f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={ext_dir}",

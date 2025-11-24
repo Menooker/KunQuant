@@ -50,6 +50,8 @@ def multi_thread_compile(lst: FunctionList, func: CallableOnFunction) -> List[st
 
 @dataclass
 class X64CPUFlags:
+    avx2: bool = True
+    fma: bool = True
     avx512: bool = False
     avx512dq: bool = False
     avx512vl: bool = False
@@ -65,6 +67,10 @@ class MSVCCommandLineBuilder:
             # todo: should use native cpu flags
             cmd.append("/arch:AVX2")
         else:
+            if cfg.machine.fma or cfg.machine.avx2:
+                cmd.append("/arch:AVX2")
+            else:
+                cmd.append("/arch:AVX")
             if cfg.machine.avx512 or cfg.machine.avx512dq or cfg.machine.avx512vl:
                 cmd.append("/arch:AVX512")
             cmd.append("/arch:AVX2")
@@ -88,7 +94,12 @@ class GCCCommandLineBuilder:
         if isinstance(cfg.machine, NativeCPUFlags):
             cmd += ["-march=native"]
         else:
-            cmd += ["-mavx2", "-mfma"]
+            if cfg.machine.avx2:
+                cmd.append("-mavx2")
+            else:
+                cmd.append("-mavx")
+            if cfg.machine.fma:
+                cmd.append("-mfma")
             if cfg.machine.avx512:
                 cmd.append("-mavx512f")
             if cfg.machine.avx512dq:

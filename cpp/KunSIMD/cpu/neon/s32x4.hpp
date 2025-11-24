@@ -120,6 +120,16 @@ INLINE vec_s32x4 sc_abs(vec_s32x4 const &a) {
     return vabsq_s32(a.v);
 }
 
+template <int v>
+INLINE vec_s32x4 logical_shl(vec_s32x4 const &a) {
+    return a << vec_s32x4{v};
+}
+
+template <int v>
+INLINE vec_s32x4 logical_shr(vec_s32x4 const &a) {
+    return logical_shr(a, vec_s32x4(v));
+}
+
 } // namespace kun_simd
 
 #endif

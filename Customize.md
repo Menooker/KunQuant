@@ -86,7 +86,7 @@ Like the example above, and by default, the compiled factor library is stored in
 In the above alpha101 example, you can run 
 
 ```python
-cfake.compileit([("my_library_name", f, KunCompilerConfig(input_layout="TS", output_layout="TS"))], "your_lib_name", cfake.CppCompilerConfig(), tempdir="/path/to/a/dir", keep_files=keep, load=False)
+cfake.compileit([("my_library_name", f, KunCompilerConfig(input_layout="TS", output_layout="TS"))], "your_lib_name", cfake.CppCompilerConfig(), tempdir="/path/to/a/dir", keep_files=True, load=False)
 ```
 
 This will create a directory `/path/to/a/dir/your_lib_name`, and the generated C++ file will be at `your_lib_name.cpp` and the shared library file will be at `your_lib_name.{so,dll}` in the directory.

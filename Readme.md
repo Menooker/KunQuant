@@ -63,6 +63,8 @@ Or install the latest version on `main` branch
 
 KunQuant supports Windows (MSVC needs to be installed) and Linux (g++ or clang needs to be installed). Please make sure a working C++ compiler with C++11 support is properly installed and configured in your system
 
+On x86-64 CPUs, AVX2-FMA is used by default in the installed KunQuant core library. To run on older CPUs with AVX and without AVX2, you need to build and install KunQuant from source and set environment variable `KUN_NO_AVX2=1` before building. See `Build from source and developing tips` below.
+
 ## Example: Build & Run Alpha101
 
 This section serves as am example for compiling an existing factor library: Alpha101 and running it. Building and running your own factors will be similar. If you are only interested in how you can run Alpha101 factors, this section is all you need.
@@ -247,7 +249,7 @@ This section is for developer who would like to build KunQuant from source, inst
 * Python (3.7+ with f-string and dataclass support)
 * cmake
 * A working C++ compiler with C++11 support (e.g. clang, g++, msvc)
-* x86-64 CPU with at least AVX2-FMA instruction set
+* x86-64 CPU with at least AVX instruction set (AVX2-FMA is preferred and required by default), or ARM CPU with NEON instruction set.
 * Optionally requires AVX512 on CPU for better performance
 
 ### Build and install
@@ -279,10 +281,12 @@ pip install -e .
 
 You can also set environment variable `KUN_BUILD_TYPE=Debug` before `pip install -e .` to enable debug build of KunQuant. It will provide debug info of the KunQuant runtime but also slow down the execution.
 
+On x86-64 CPUs, AVX2-FMA is used by default in the built KunQuant core library. To run on older CPUs with AVX and without AVX2, you need to export environment variable `KUN_NO_AVX2=1` before `pip install -e .`.
+
 ### Useful environment variables
 
  * `KUN_DEBUG=1` Print the internal results of each compiler pass
- * `KUN_DEBUG_JIT=1` Print the C++ compilation internals, including command lines, temp results and etc. 
+ * `KUN_DEBUG_JIT=1` Print the C++ compilation internals, including command lines, temp results and etc.
 
 ## Streaming mode
 
