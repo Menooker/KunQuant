@@ -109,6 +109,15 @@ INLINE vec_s64x2 logical_shr(vec_s64x2 const &a, vec_s64x2 const &b) {
     return vreinterpretq_s64_u64(r);
 }
 
+template <int v>
+INLINE vec_s64x2 logical_shl(vec_s64x2 const &a) {
+    return a << vec_s64x2{v};
+}
+
+template <int v>
+INLINE vec_s64x2 logical_shr(vec_s64x2 const &a) {
+    return logical_shr(a, vec_s64x2(v));
+}
 
 } // namespace
 

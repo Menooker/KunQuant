@@ -124,6 +124,17 @@ INLINE vec_s32x16 sc_min(vec_s32x16 const &a, vec_s32x16 const &b) {
 INLINE vec_s32x16 sc_abs(vec_s32x16 const &a) {
     return _mm512_abs_epi32(a.v);
 }
+
+template <int v>
+INLINE vec_s32x16 logical_shl(vec_s32x16 const &a) {
+    return _mm512_slli_epi32(a.v, v);
+}
+
+template <int v>
+INLINE vec_s32x16 logical_shr(vec_s32x16 const &a) {
+    return _mm512_srli_epi32(a.v, v);
+}
+
 }
 #endif
 #endif
