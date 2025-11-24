@@ -69,6 +69,8 @@ class MSVCCommandLineBuilder:
         else:
             if cfg.machine.fma or cfg.machine.avx2:
                 cmd.append("/arch:AVX2")
+            else:
+                cmd.append("/arch:AVX")
             if cfg.machine.avx512 or cfg.machine.avx512dq or cfg.machine.avx512vl:
                 cmd.append("/arch:AVX512")
             cmd.append("/arch:AVX2")
@@ -94,6 +96,8 @@ class GCCCommandLineBuilder:
         else:
             if cfg.machine.avx2:
                 cmd.append("-mavx2")
+            else:
+                cmd.append("-mavx")
             if cfg.machine.fma:
                 cmd.append("-mfma")
             if cfg.machine.avx512:

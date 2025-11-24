@@ -14,6 +14,13 @@ from  KunQuant.runner import KunRunner as kr
 import sys
 from KunQuant.jit.env import cpu_arch
 
+def get_compiler_flags():
+    if os.environ.get("KUN_TEST_NO_AVX2", "0") != "0":
+        print("building AVX without AVX2")
+        return cfake.X64CPUFlags(avx2=False, fma=False)
+    else:
+        return cfake.NativeCPUFlags()
+
 def test_generic_cross_sectional():
     builder = Builder()
     with builder:
@@ -23,7 +30,7 @@ def test_generic_cross_sectional():
         Output(DiffWithWeightedSum(inp1 - inp2, inp3), "out")
     f = Function(builder.ops)
     lib = cfake.compileit([("test1", f, cfake.KunCompilerConfig(input_layout="TS", output_layout="TS"))],
-                          "cfaketest", cfake.CppCompilerConfig())
+                          "cfaketest", cfake.CppCompilerConfig(machine=get_compiler_flags()))
 
     a = np.random.rand(24, 16).astype("float32")
     b = np.random.rand(24, 16).astype("float32")
@@ -67,7 +74,8 @@ def test_cfake():
         inp2 = Input("b")
         Output(inp1 * inp2 + 10, "out")
     f = Function(builder.ops)
-    lib = cfake.compileit([("test1", f, cfake.KunCompilerConfig(input_layout="TS", output_layout="TS"))], "cfaketest", cfake.CppCompilerConfig())
+    lib = cfake.compileit([("test1", f, cfake.KunCompilerConfig(input_layout="TS", output_layout="TS"))],
+        "cfaketest", cfake.CppCompilerConfig(machine=get_compiler_flags()))
     mod = lib.getModule("test1")
     inp = np.random.rand(10, 24).astype("float32")
     inp2 = np.random.rand(10, 24).astype("float32")
@@ -460,7 +468,8 @@ def create_stream_gh_issue_41():
         inp1 = Input("a")
         out2 = Output(inp1 * inp1, "ou2")
     f = Function(builder.ops)
-    lib = cfake.compileit([("test_stream", f, KunCompilerConfig(input_layout="STREAM", output_layout="STREAM"))], "test2", cfake.CppCompilerConfig())
+    lib = cfake.compileit([("test_stream", f, KunCompilerConfig(input_layout="STREAM", output_layout="STREAM"))],
+        "test2", cfake.CppCompilerConfig(machine=get_compiler_flags()))
     modu = lib.getModule("test_stream")
     executor = kr.createSingleThreadExecutor()
     return kr.StreamContext(executor, modu, 8)
@@ -553,7 +562,7 @@ funclist = [
     check_aligned(),
     check_rank_alpha029(),
     ]
-lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig())
+lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig(machine=get_compiler_flags()))
 
 test_cfake()
 test_avg_stddev_TS(lib)
