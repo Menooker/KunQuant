@@ -159,8 +159,6 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
     if not aligned:
         toplevel.scope.append(_CppSingleLine(toplevel, f'''auto todo_count = __ctx->stock_count - __stock_idx  * {simd_lanes};'''))
         toplevel.scope.append(_CppSingleLine(toplevel, f'''auto mask = kun_simd::vec<{elem_type}, {simd_lanes}>::make_mask(todo_count > {simd_lanes} ? {simd_lanes} : todo_count);'''))
-    else:
-        toplevel.scope.append(_CppSingleLine(toplevel, f'''auto mask = kun_simd::vec<{elem_type}, {simd_lanes}>::make_mask({simd_lanes});'''))
     for idx, (outp, is_tmp) in enumerate(outputs):
         name = outp.attrs["name"]
         layout = outp.attrs["layout"]
@@ -266,7 +264,7 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             loop_parent = loop.parent
             assert(isinstance(loop_parent, _CppScope))
             vargs = [f"v{inpv}" for inpv in inp]
-            loop_parent.scope.insert(loop_parent.scope.index(loop), _CppSingleLine(loop_parent, op.generate_init_code(idx, elem_type, simd_lanes, vargs)))
+            loop_parent.scope.insert(loop_parent.scope.index(loop), _CppSingleLine(loop_parent, op.generate_init_code(idx, elem_type, simd_lanes, vargs, aligned)))
             # insert a step in the for-loop
             loop_body.scope.append(_CppSingleLine(loop_body, op.generate_step_code(idx, "iter", vargs)))
         elif isinstance(op, BackRef):
@@ -287,7 +285,7 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
                 buf_name = _get_buffer_name(op.inputs[0], inp[0])
                 args["buf_name"] = buf_name
             vargs = [f"v{inpv}" for inpv in inp]
-            toplevel.scope.insert(-1, _CppSingleLine(toplevel, op.generate_init_code(idx, elem_type, simd_lanes, vargs)))
+            toplevel.scope.insert(-1, _CppSingleLine(toplevel, op.generate_init_code(idx, elem_type, simd_lanes, vargs, aligned)))
             scope.scope.append(_CppSingleLine(scope, op.generate_step_code(idx, "i", vargs, **args)))
         elif isinstance(op, Select):
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))

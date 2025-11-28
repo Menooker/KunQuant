@@ -62,10 +62,11 @@ class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait):
     def get_state_variable_name_prefix(self) -> str:
         return "ema_"
 
-    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str]) -> str:
+    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str], aligned: bool) -> str:
         initv = "NAN"
         if len(self.inputs) == 2:
-            initv = f"buf_{self.inputs[1].attrs['name']}.step(0, mask)"
+            mask_or_empty = ", mask" if not aligned else ""
+            initv = f"buf_{self.inputs[1].attrs['name']}.step(0{mask_or_empty})"
         return f"{self.get_func_or_class_full_name(elem_type, simd_lanes)} {self.get_state_variable_name_prefix()}{idx} {{ {initv} }};"
     
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:

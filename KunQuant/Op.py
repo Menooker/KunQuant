@@ -454,7 +454,7 @@ class StatefulOpTrait(GenericCppCodegenTrait):
         return the prefix of the state variable name, for better readability
         '''
         return "v"
-    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str]) -> str:
+    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str], aligned: bool) -> str:
         '''
         generate the code for the initialization of the state variable
         idx: the output variable name index
@@ -496,7 +496,7 @@ class ReductionOp(OpBase, StatefulOpTrait):
             raise RuntimeError(
                 f"verify() failed: ReductionOp not in parent of input: {self}\nself._parent_loop = {self._parent_loop}\nloop.get_parent() = {loop.get_parent()}")
     
-    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str]) -> str:
+    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str], aligned: bool) -> str:
         init_val = "" if len(self.inputs) == 1 else inputs[1]
         return f"{self.get_func_or_class_full_name(elem_type, simd_lanes)} {self.get_state_variable_name_prefix()}{idx}{{{init_val}}};"
     

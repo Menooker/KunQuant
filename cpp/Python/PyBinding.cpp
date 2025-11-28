@@ -229,7 +229,7 @@ PYBIND11_MODULE(KunRunner, m) {
                         mod->dtype, info, name.c_str(),
                         {known_S, known_T, (py::ssize_t)mod->blocking_len});
                 } else if (mod->input_layout == kun::MemoryLayout::TS) {
-                                            // TS layout
+                    // TS layout
                     if (info.ndim != 2) {
                         throw std::runtime_error("Bad TS shape at " + name);
                     }
