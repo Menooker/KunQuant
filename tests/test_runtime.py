@@ -167,6 +167,9 @@ def test_avg_stddev_TS(lib):
 
 ####################################
 
+def RefExpMovingAvg(v: pd.DataFrame):
+    return v.ewm(span=5, adjust=False, ignore_na=True).mean()
+
 def check_ema():
     builder = Builder()
     with builder:
@@ -181,16 +184,38 @@ def test_ema(lib):
     assert(modu)
     inp = np.random.rand(20, 24).astype("float32")
     inp[5,:] = np.nan
-    def ExpMovingAvg(v: pd.DataFrame):
-        return v.ewm(span=5, adjust=False, ignore_na=True).mean()
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
     output = out["ou2"]
     df = pd.DataFrame(inp)
-    expected = ExpMovingAvg(df)
-    expected2 = ExpMovingAvg(ExpMovingAvg(ExpMovingAvg(df.shift(1))))
+    expected = RefExpMovingAvg(df)
+    expected2 = RefExpMovingAvg(RefExpMovingAvg(RefExpMovingAvg(df.shift(1))))
     np.testing.assert_allclose(output, expected, rtol=1e-6, equal_nan=True)    
     np.testing.assert_allclose(out["gh_issue_26"], expected2, rtol=1e-6, equal_nan=True)
+
+####################################
+
+def check_ema_init():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        init = Input("__init_1")
+        init.attrs["single_value"] = True
+        out2 = Output(ExpMovingAvg(inp1, 5, init), "ou2")
+    f = Function(builder.ops)
+    return "test_ema_init", f, KunCompilerConfig(input_layout="TS", output_layout="TS")
+
+def test_ema_init(lib):
+    modu = lib.getModule("test_ema_init")
+    assert(modu)
+    inp = np.random.rand(21, 23).astype("float32")
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": inp, '__init_1': inp[0]}, 1, 20)
+    output = out["ou2"]
+    df = pd.DataFrame(inp)
+    expected = RefExpMovingAvg(df)
+    np.testing.assert_allclose(output, expected[1:], rtol=1e-6, equal_nan=True)
+
 
 ####################################
 
@@ -553,6 +578,7 @@ funclist = [
     check_pow(),
     # check_alpha101_double(),
     check_ema(),
+    check_ema_init(),
     check_argmin(),
     create_loop_index(),
     check_log("double", "64"),
@@ -574,6 +600,7 @@ test_rank(lib)
 test_log(lib, "float32", "")
 test_pow(lib)
 test_ema(lib)
+test_ema_init(lib)
 test_argmin_issue19(lib)
 test_generic_cross_sectional()
 test_stream_double()

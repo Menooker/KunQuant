@@ -177,7 +177,8 @@ PYBIND11_MODULE(KunRunner, m) {
                 auto info = buf_obj.request();
                 bufs[name] = (float *)info.ptr;
                 if (skip_check) {
-                    if (known_S == 0) {
+                    // if S is not known and it is not init buffer
+                    if (known_S == 0 && strncmp(name.c_str(), "__init", 6)) {
                         if (mod->input_layout == kun::MemoryLayout::STs) {
                             auto S = info.shape[0];
                             auto T = info.shape[1];
@@ -201,7 +202,17 @@ PYBIND11_MODULE(KunRunner, m) {
                     throw std::runtime_error("Expecting double buffer at " +
                                              name);
                 }
-                if (mod->input_layout == kun::MemoryLayout::STs) {
+                if (!strncmp(name.c_str(), "__init", 6)) {
+                    if (info.ndim != 1) {
+                        throw std::runtime_error("Bad Init shape at " + name);
+                    }
+                    auto S = info.shape[0];
+                    if(!knownNumStocks)
+                        knownNumStocks = S;
+                    expectContiguousShape(mod->dtype, info, name.c_str(),
+                                          {knownNumStocks});
+                    
+                } else if (mod->input_layout == kun::MemoryLayout::STs) {
                     // ST8t layout
                     if (info.ndim != 3) {
                         throw std::runtime_error("Bad STs shape at " + name);
@@ -211,26 +222,28 @@ PYBIND11_MODULE(KunRunner, m) {
                     if (known_S == 0) {
                         known_S = S;
                         known_T = T;
-                        knownNumStocks = known_S * simd_len;
+                        if (!knownNumStocks)
+                            knownNumStocks = known_S * simd_len;
                     }
                     expectContiguousShape(
                         mod->dtype, info, name.c_str(),
                         {known_S, known_T, (py::ssize_t)mod->blocking_len});
                 } else if (mod->input_layout == kun::MemoryLayout::TS) {
-                    // TS layout
-                    if (info.ndim != 2) {
-                        throw std::runtime_error("Bad TS shape at " + name);
-                    }
+                                            // TS layout
+                        if (info.ndim != 2) {
+                            throw std::runtime_error("Bad TS shape at " + name);
+                        }
                     auto S = info.shape[1];
                     auto T = info.shape[0];
                     if (known_S == 0) {
                         known_S = S / simd_len;
                         known_T = T;
-                        knownNumStocks = S;
+                        if (!knownNumStocks)
+                            knownNumStocks = S;
                         if (mod->aligned) {
                             if (knownNumStocks % simd_len != 0) {
                                 throw std::runtime_error("Bad shape at " +
-                                                         name);
+                                                        name);
                             }
                         }
                     }

@@ -144,7 +144,8 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
         name = inp.attrs["name"]
         layout = inp.attrs["layout"]
         idx_in_ctx = input_name_to_idx[name]
-        not_user_input = buf_kind != "INPUT" # if is user input, the time should start from __start and length of time is __total_time
+        # if is user input, the time should start from __start and length of time is __total_time
+        not_user_input = buf_kind != "INPUT" or inp.attrs.get("single_value", False)
         start_str = "0" if not_user_input else "__start"
         total_str = "__length" if not_user_input else "__total_time"
         if stream_mode:
@@ -158,6 +159,8 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
     if not aligned:
         toplevel.scope.append(_CppSingleLine(toplevel, f'''auto todo_count = __ctx->stock_count - __stock_idx  * {simd_lanes};'''))
         toplevel.scope.append(_CppSingleLine(toplevel, f'''auto mask = kun_simd::vec<{elem_type}, {simd_lanes}>::make_mask(todo_count > {simd_lanes} ? {simd_lanes} : todo_count);'''))
+    else:
+        toplevel.scope.append(_CppSingleLine(toplevel, f'''auto mask = kun_simd::vec<{elem_type}, {simd_lanes}>::make_mask({simd_lanes});'''))
     for idx, (outp, is_tmp) in enumerate(outputs):
         name = outp.attrs["name"]
         layout = outp.attrs["layout"]
@@ -195,12 +198,15 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
         inp = [f.get_op_idx(inpv) for inpv in op.inputs]
         scope = loop_to_cpp_loop[op.get_parent()]
         if isinstance(op, Input):
+            str_i = "i"
+            if op.attrs.get("single_value", False):
+                str_i = '0'
             name = op.attrs["name"]
             if not aligned and op.attrs["layout"] == "TS":
                 mask_str = ", mask"
             else:
                 mask_str = ""
-            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = buf_{name}.step(i{mask_str});"))
+            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = buf_{name}.step({str_i}{mask_str});"))
         elif isinstance(op, Output):
             name = op.attrs["name"]
             if not aligned and op.attrs["layout"] == "TS":

@@ -73,6 +73,10 @@ def traverse_replace_map(op: 'OpBase', replace_map: Dict['OpBase', 'OpBase']) ->
         return op
     return traverse_replace_map(found, replace_map)
 
+class AcceptSingleValueInputTrait(ABC):
+    @abstractmethod
+    def get_single_value_input_id() -> int:
+        pass
 
 class OpBase:
     def __init__(self, inputs: List['OpBase'], attrs: Union[List[Tuple[str, object]], OrderedDict, None]) -> None:
@@ -160,7 +164,13 @@ class OpBase:
     def verify(self, func: 'KunQuant.Stage.Function') -> None:
         if isinstance(self, _clazzWindowedTrait):
             _clazzWindowedTrait.verify(self, func)
-        for inp in self.inputs:
+        allowed_single_value = -1
+        if isinstance(self, AcceptSingleValueInputTrait):
+            allowed_single_value = self.get_single_value_input_id()
+        for idx, inp in enumerate(self.inputs):
+            if isinstance(inp, Input):
+                if allowed_single_value != idx and inp.attrs.get("single_value", False):
+                    raise RuntimeError("verify() failed: using single value input: " + str(self))
             # if an input is in a loop, we must be in it too
             loop = inp.get_parent()
             if loop is not None:

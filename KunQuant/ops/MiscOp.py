@@ -1,6 +1,6 @@
 import KunQuant
-from KunQuant.Op import OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GloablStatefulOpTrait, UnaryElementwiseOp, BinaryElementwiseOp
-from typing import List
+from KunQuant.Op import AcceptSingleValueInputTrait, Input, OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GloablStatefulOpTrait, UnaryElementwiseOp, BinaryElementwiseOp
+from typing import List, Union
 
 class BackRef(OpBase, WindowedTrait):
     '''
@@ -40,16 +40,33 @@ class FastWindowedSum(OpBase, WindowedTrait, GloablStatefulOpTrait):
         return f"auto v{idx} = sum_{idx}.step({buf_name}, {inputs[0]}, {time_idx});"
 
 
-class ExpMovingAvg(OpBase, GloablStatefulOpTrait):
+class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait):
     '''
     Exponential Moving Average (EMA)
     Similar to pd.DataFrame.ewm(span=window, adjust=False, ignore_na=True).mean()
+    optional parameter: init_val, the initial values for EMA. It must be an Input op with attr
+    {"single_value":True}. The name of the Input op should starts with "__init".
+    It should be an input of shape (num_stocks,)
     '''
-    def __init__(self, v: OpBase, window: int) -> None:
-        super().__init__([v], [("window", window)])
+    def __init__(self, v: OpBase, window: int, init_val: Union[Input, None] = None) -> None:
+        args = [v]
+        if init_val is not None:
+            if not isinstance(init_val, Input) or not init_val.attrs.get("single_value", False) or not init_val.attrs.get('name', '').startswith("__init") :
+                raise RuntimeError("EMA expects init_val to be Input op with single_value=True and name starting with __init")
+            args.append(init_val)
+        super().__init__(args, [("window", window)])
+
+    def get_single_value_input_id(self) -> int:
+        return 1
 
     def get_state_variable_name_prefix(self) -> str:
         return "ema_"
+
+    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str]) -> str:
+        initv = "NAN"
+        if len(self.inputs) == 2:
+            initv = f"buf_{self.inputs[1].attrs['name']}.step(0, mask)"
+        return f"{self.get_func_or_class_full_name(elem_type, simd_lanes)} {self.get_state_variable_name_prefix()}{idx} {{ {initv} }};"
     
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:
         return f"auto v{idx} = ema_{idx}.step({inputs[0]}, {time_idx});"
