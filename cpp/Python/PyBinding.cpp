@@ -230,9 +230,9 @@ PYBIND11_MODULE(KunRunner, m) {
                         {known_S, known_T, (py::ssize_t)mod->blocking_len});
                 } else if (mod->input_layout == kun::MemoryLayout::TS) {
                                             // TS layout
-                        if (info.ndim != 2) {
-                            throw std::runtime_error("Bad TS shape at " + name);
-                        }
+                    if (info.ndim != 2) {
+                        throw std::runtime_error("Bad TS shape at " + name);
+                    }
                     auto S = info.shape[1];
                     auto T = info.shape[0];
                     if (known_S == 0) {
@@ -243,7 +243,7 @@ PYBIND11_MODULE(KunRunner, m) {
                         if (mod->aligned) {
                             if (knownNumStocks % simd_len != 0) {
                                 throw std::runtime_error("Bad shape at " +
-                                                        name);
+                                                         name);
                             }
                         }
                     }
