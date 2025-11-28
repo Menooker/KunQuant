@@ -208,7 +208,7 @@ def check_ema_init():
 def test_ema_init(lib):
     modu = lib.getModule("test_ema_init")
     assert(modu)
-    inp = np.random.rand(21, 23).astype("float32")
+    inp = np.random.rand(21, 24).astype("float32")
     executor = kr.createSingleThreadExecutor()
     out = kr.runGraph(executor, modu, {"a": inp, '__init_1': inp[0]}, 1, 20)
     output = out["ou2"]
