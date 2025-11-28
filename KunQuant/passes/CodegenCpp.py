@@ -144,7 +144,8 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
         name = inp.attrs["name"]
         layout = inp.attrs["layout"]
         idx_in_ctx = input_name_to_idx[name]
-        not_user_input = buf_kind != "INPUT" # if is user input, the time should start from __start and length of time is __total_time
+        # if is user input, the time should start from __start and length of time is __total_time
+        not_user_input = buf_kind != "INPUT" or inp.attrs.get("single_value", False)
         start_str = "0" if not_user_input else "__start"
         total_str = "__length" if not_user_input else "__total_time"
         if stream_mode:
@@ -195,12 +196,15 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
         inp = [f.get_op_idx(inpv) for inpv in op.inputs]
         scope = loop_to_cpp_loop[op.get_parent()]
         if isinstance(op, Input):
+            str_i = "i"
+            if op.attrs.get("single_value", False):
+                str_i = '0'
             name = op.attrs["name"]
             if not aligned and op.attrs["layout"] == "TS":
                 mask_str = ", mask"
             else:
                 mask_str = ""
-            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = buf_{name}.step(i{mask_str});"))
+            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = buf_{name}.step({str_i}{mask_str});"))
         elif isinstance(op, Output):
             name = op.attrs["name"]
             if not aligned and op.attrs["layout"] == "TS":
@@ -260,7 +264,7 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             loop_parent = loop.parent
             assert(isinstance(loop_parent, _CppScope))
             vargs = [f"v{inpv}" for inpv in inp]
-            loop_parent.scope.insert(loop_parent.scope.index(loop), _CppSingleLine(loop_parent, op.generate_init_code(idx, elem_type, simd_lanes, vargs)))
+            loop_parent.scope.insert(loop_parent.scope.index(loop), _CppSingleLine(loop_parent, op.generate_init_code(idx, elem_type, simd_lanes, vargs, aligned)))
             # insert a step in the for-loop
             loop_body.scope.append(_CppSingleLine(loop_body, op.generate_step_code(idx, "iter", vargs)))
         elif isinstance(op, BackRef):
@@ -281,7 +285,7 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
                 buf_name = _get_buffer_name(op.inputs[0], inp[0])
                 args["buf_name"] = buf_name
             vargs = [f"v{inpv}" for inpv in inp]
-            toplevel.scope.insert(-1, _CppSingleLine(toplevel, op.generate_init_code(idx, elem_type, simd_lanes, vargs)))
+            toplevel.scope.insert(-1, _CppSingleLine(toplevel, op.generate_init_code(idx, elem_type, simd_lanes, vargs, aligned)))
             scope.scope.append(_CppSingleLine(scope, op.generate_step_code(idx, "i", vargs, **args)))
         elif isinstance(op, Select):
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))

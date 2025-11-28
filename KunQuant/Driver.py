@@ -147,6 +147,9 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
         if stream_mode:
             op.attrs["layout"] = "STREAM"
             return
+        if op.attrs.get("single_value", False):
+            op.attrs["layout"] = "TS"
+            return
         if buf.kind == "TEMP":
             op.attrs["layout"] = "STs"
         elif buf.kind == "INPUT":

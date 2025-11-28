@@ -421,8 +421,11 @@ class ExpMovingAvg(OpBase, GloablStatefulOpTrait):
     '''
     Exponential Moving Average (EMA)
     Similar to pd.DataFrame.ewm(span=window, adjust=False, ignore_na=True).mean()
+    optional parameter: init_val, the initial values for EMA. It must be an Input op with attr
+    {"single_value":True}. The name of the Input op should starts with "__init".
+    It should be an input of shape (num_stocks,)
     '''
-    def __init__(self, v: OpBase, window: int) -> None:
+    def __init__(self, v: OpBase, window: int, init_val: Union[Input, None] = None) -> None:
         pass
 class DiffWithWeightedSum(GenericCrossSectionalOp):
     '''
