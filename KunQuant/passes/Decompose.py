@@ -4,7 +4,7 @@ from typing import List, Dict
 from .Util import kun_pass
 
 
-def decompose_impl(ops: List[OpBase]) -> List[OpBase]:
+def decompose_impl(ops: List[OpBase], options) -> List[OpBase]:
     replace_map = dict()
     out = []
     changed = False
@@ -12,9 +12,9 @@ def decompose_impl(ops: List[OpBase]) -> List[OpBase]:
         op.replace_inputs(replace_map)
         if isinstance(op, CompositiveOp):
             changed = True
-            decomposed = op.decompose()
+            decomposed = op.decompose(options)
             # recursively call decompose
-            inner = decompose_impl(decomposed)
+            inner = decompose_impl(decomposed, options)
             if inner is not None:
                 decomposed = inner
             out.extend(decomposed)
@@ -76,7 +76,7 @@ def decompose_rank_impl(ops: List[OpBase], info: Dict[OpBase, OpInfo]) -> List[O
 
 @kun_pass
 def decompose(f: Function, options: dict = {}):
-    newops = decompose_impl(f.ops)
+    newops = decompose_impl(f.ops, options)
     f.strict_window = True
     if newops is not None:
         f.set_ops(newops)

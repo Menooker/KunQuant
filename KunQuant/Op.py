@@ -278,7 +278,7 @@ class BinaryElementwiseOp(OpBase):
 
 class CompositiveOp(OpBase):
     @abstractmethod
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         pass
 
 

@@ -99,6 +99,8 @@ class Function:
                 raise RuntimeError(
                     f"Bad op: {str(op)}, because the input has not been executed: {str(op.get_parent())}")
             op_to_id[op] = OpInfo(idx, OrderedDict())
+        self.op_to_id = op_to_id
+        for idx, op in enumerate(ops):
             op.verify(self)
 
         # garbage collect

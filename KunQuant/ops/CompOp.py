@@ -1,10 +1,13 @@
 from .ReduceOp import ReduceAdd, ReduceMul, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax, ReduceDecayLinear, ReduceArgMin
 from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue, WindowLoopIndex
-from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp, Exp, Log, Min, Max
-from .MiscOp import WindowedLinearRegression, WindowedLinearRegressionResiImpl, WindowedLinearRegressionRSqaureImpl, WindowedLinearRegressionSlopeImpl
+from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp, Exp, Log, Min, Max, Equals, Abs
+from .MiscOp import Accumulator, BackRef, SetAccumulator, WindowedLinearRegression, WindowedLinearRegressionResiImpl, WindowedLinearRegressionRSqaureImpl, WindowedLinearRegressionSlopeImpl
 from collections import OrderedDict
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Dict
 import math
+
+def _is_fast_stat(opt: dict, attrs: dict) -> bool:
+    return not opt.get("no_fast_stat", False) and not attrs.get("no_fast_stat", False)
 
 class WindowedCompositiveOp(CompositiveOp, WindowedTrait):
     def __init__(self, v: OpBase, window: int, v2 = None) -> None:
@@ -17,7 +20,7 @@ class WindowedReduce(WindowedCompositiveOp):
     def make_reduce(self, v: OpBase) -> OpBase:
         raise RuntimeError("Not implemented")
     
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         b = Builder(self.get_parent())
         with b:
             v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
@@ -62,17 +65,52 @@ class WindowedMax(WindowedReduce):
     def make_reduce(self, v: OpBase) -> OpBase:
         return ReduceMax(v)
 
+def _kahan_add(mask: OpBase, sum: OpBase, small: OpBase, compensation: OpBase) -> Union[OpBase, OpBase]:
+    y = small - compensation
+    t = sum + y
+    compensation = SetAccumulator(compensation, mask, t - sum - y)
+    return t, compensation
+
 class WindowedAvg(WindowedCompositiveOp):
     '''
     Average of a rolling look back window, including the current newest data.
     For indices < window-1, the output will be NaN
     similar to pandas.DataFrame.rolling(n).mean()
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         b = Builder(self.get_parent())
+        x = self.inputs[0]
         with b:
-            v0 = WindowedSum(self.inputs[0], self.attrs["window"])
-            v1 = DivConst(v0, self.attrs["window"])
+            if _is_fast_stat(options, self.attrs):
+                # remove
+                window = self.attrs["window"]
+                oldx = BackRef(x, window)
+                notnan_old = Equals(oldx, oldx)
+                new_observed_acc = Accumulator(notnan_old, f"avg_obs_{window}")
+                new_observed = Select(notnan_old, new_observed_acc - 1, new_observed_acc)
+                new_observed_not_0 = Abs(new_observed) > 0.001
+                can_update = And(new_observed_not_0, notnan_old)
+                mean_acc = Accumulator(oldx, "avg")
+                mean = mean_acc
+                compensation_remove = Accumulator(mean, f"avg_comp_remove_{window}")
+                # delta = oldx - mean
+                delta, compensation_remove = _kahan_add(can_update, 0 - mean, oldx, compensation_remove)
+                mean = Select(can_update, mean - delta / new_observed, mean)
+
+                # 
+                notnan = Equals(x, x)
+                new_observed = SetAccumulator(new_observed_acc, notnan, new_observed + 1)
+                new_observed_not_0 = Abs(new_observed) > 0.001
+                compensation_add = Accumulator(new_observed_not_0, f"avg_comp_add_{window}")
+                # delta = x - mean
+                delta, compensation_add = _kahan_add(notnan, 0 - mean, x, compensation_add)
+                mean = SetAccumulator(mean_acc, notnan, Select(new_observed_not_0, mean + delta / new_observed, ConstantOp(0)))
+                # if new_observed != window, return NAN
+                Select(Abs(new_observed - window) < 0.001, mean, ConstantOp(float('nan')))
+
+            else:
+                v0 = WindowedSum(x, self.attrs["window"])
+                v1 = DivConst(v0, self.attrs["window"])
         return b.ops
 
 class WindowedStddev(WindowedCompositiveOp):
@@ -81,7 +119,7 @@ class WindowedStddev(WindowedCompositiveOp):
     For indices < window-1, the output will be NaN
     similar to pandas.DataFrame.rolling(n).std()
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         window = self.attrs["window"]
         b = Builder(self.get_parent())
         with b:
@@ -102,7 +140,7 @@ class WindowedCovariance(WindowedCompositiveOp):
     For indices < window-1, the output will be NaN
     similar to pandas.DataFrame.rolling(n).cov(y)
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         window = self.attrs["window"]
         x = self.inputs[0]
         y = self.inputs[1]
@@ -127,7 +165,7 @@ class WindowedCorrelation(WindowedCompositiveOp):
     For indices < window-1, the output will be NaN
     similar to pandas.DataFrame.rolling(n).corr(y)
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         window = self.attrs["window"]
         x = self.inputs[0]
         y = self.inputs[1]
@@ -160,7 +198,7 @@ class WindowedSkew(WindowedCompositiveOp):
     similar to pandas.DataFrame.rolling(n).skew()
     The bias adjustion factor is math.sqrt(window-1)*window/(window-2)
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         window = self.attrs["window"]
         x = self.inputs[0]
         b = Builder(self.get_parent())
@@ -184,7 +222,7 @@ class WindowedKurt(WindowedCompositiveOp):
     For indices < window-1, the output will be NaN
     similar to pandas.DataFrame.rolling(n).kurt()
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         n = self.attrs["window"]
         x = self.inputs[0]
         b = Builder(self.get_parent())
@@ -209,7 +247,7 @@ class TsArgMax(WindowedCompositiveOp):
     The result should be the index of the max element in the rolling window. The index of the oldest element of the rolling window is 1.
     Similar to df.rolling(window).apply(np.argmax) + 1 
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         b = Builder(self.get_parent())
         with b:
             v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
@@ -224,7 +262,7 @@ class TsArgMin(WindowedCompositiveOp):
     The result should be the index of the min element in the rolling window. The index of the oldest element of the rolling window is 1.
     Similar to df.rolling(window).apply(np.argmin) + 1 
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         b = Builder(self.get_parent())
         with b:
             v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
@@ -241,7 +279,7 @@ class TsRank(WindowedCompositiveOp):
     rank = num_values_less + (num_values_eq + 1) / 2
     Similar to df.rolling(window).rank()
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         b = Builder(self.get_parent())
         with b:
             v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
@@ -259,7 +297,7 @@ class Clip(CompositiveOp):
         inputs = [v]
         super().__init__(inputs, [("value", eps)])
 
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         eps = self.attrs["value"]
         inp = self.inputs[0]
         b = Builder(self.get_parent())
@@ -276,7 +314,7 @@ class DecayLinear(WindowedCompositiveOp):
     weight[i] = (i+1) * step_size
     DecayLinear = sum([weight[i] for i in 0 to window])
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         b = Builder(self.get_parent())
         window = self.attrs["window"]
         with b:
@@ -327,7 +365,7 @@ class Pow(CompositiveOp):
         inputs = [base, expo]
         super().__init__(inputs, None)
 
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         # pow(x,y) = exp(log(x)*y)
         b = Builder(self.get_parent())
         (base, expo) = self.inputs
@@ -361,7 +399,7 @@ class WindowedLinearRegressionBase(WindowedCompositiveOp):
     def make_extract(self, v: OpBase) -> OpBase:
         raise RuntimeError("Not implemented")
     
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         b = Builder(self.get_parent())
         window = self.attrs["window"]
         with b:
@@ -402,7 +440,7 @@ class WindowedMaxDrawdown(WindowedCompositiveOp):
     where hwm is the highest of the input v in the rolling window and v is the lowest value of input with
     index larger than or equal to the index of highest value.
     '''
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         b = Builder(self.get_parent())
         window = self.attrs["window"]
         v = self.inputs[0]

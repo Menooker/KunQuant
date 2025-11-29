@@ -207,8 +207,9 @@ struct StreamWindow : DataSource<true> {
     // window slots of floatx8
     T *buf;
     StreamWindow(StreamBuffer<T> *buf, size_t stock_idx, size_t num_stock)
-        : pos{*buf->getPos(stock_idx, roundUp(num_stock, stride), window)}, stock_idx{stock_idx},
-          num_stock{roundUp(num_stock, stride)}, buf{buf->getBuffer()} {}
+        : pos{*buf->getPos(stock_idx, roundUp(num_stock, stride), window)},
+          stock_idx{stock_idx}, num_stock{roundUp(num_stock, stride)},
+          buf{buf->getBuffer()} {}
     void store(size_t index, const simd_t &in) {
         simd_t::store(in, &buf[pos * num_stock + stock_idx * stride]);
         pos += 1;
@@ -283,6 +284,30 @@ kahanAdd(kun_simd::vec<T, stride> sum, kun_simd::vec<T, stride> small,
     return t;
 }
 
+template <typename T, int stride>
+struct Accumulator {
+    using simd_t = kun_simd::vec<T, stride>;
+    using float_mask_t = typename simd_t::Masktype;
+    simd_t v = 0;
+    struct Value {
+        simd_t v;
+        Accumulator& acc;
+        operator simd_t() const { return v; }
+    };
+    Value asValue() {
+        return Value{v, *this};
+    }
+};
+
+template <typename T, int stride>
+typename Accumulator<T, stride>::Value
+SetAccumulator(const typename Accumulator<T, stride>::Value& accu,
+               const typename Accumulator<T, stride>::float_mask_t &mask,
+               const kun_simd::vec<T, stride> &v) {
+    accu.acc.v = sc_select(mask, v, accu.acc.v);
+    return accu.acc.asValue();
+}
+
 template <typename T, int stride, int window>
 struct FastWindowedSum {
     using simd_t = kun_simd::vec<T, stride>;
@@ -311,7 +336,7 @@ struct FastWindowedSum {
                                  simd_int_t{1}, simd_int_t{0});
         num_nans =
             num_nans + sc_select(kun_simd::bitcast<int_mask_t>(new_is_nan),
-                                 simd_int_t{1}, simd_int_t{0});
+                                      simd_int_t{1}, simd_int_t{0});
         auto out_is_normal = kun_simd::bitcast<float_mask_t>(num_nans == 0);
         return sc_select(out_is_normal, v, simd_t{NAN});
     }
@@ -323,7 +348,7 @@ struct ExpMovingAvg {
     using simd_int_t =
         kun_simd::vec<typename kun_simd::fp_trait<T>::int_t, stride>;
     simd_t v;
-    ExpMovingAvg(const simd_t& init): v{init} {}
+    ExpMovingAvg(const simd_t &init) : v{init} {}
     static constexpr T weight_latest = T(2.0) / (window + 1);
     simd_t step(simd_t cur, size_t index) {
         auto is_nan = sc_isnan(cur);
@@ -417,8 +442,7 @@ kun_simd::vec<T, stride> WindowedLinearRegressionResiImpl(
 
 template <typename T, int stride, int window, typename T2>
 kun_simd::vec<T, stride> WindowedLinearRegressionResiImpl(
-    const WindowedLinearRegression<T, stride, window> &v,
-    T2 val) {
+    const WindowedLinearRegression<T, stride, window> &v, T2 val) {
     auto N = kun_simd::fast_cast<kun_simd::vec<T, stride>>(window - v.num_nans);
     auto slope = WindowedLinearRegressionSlopeImpl(v);
     auto x_mean = v.x_sum / N;

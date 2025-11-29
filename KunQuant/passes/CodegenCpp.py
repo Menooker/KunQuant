@@ -289,6 +289,8 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             scope.scope.append(_CppSingleLine(scope, op.generate_step_code(idx, "i", vargs, **args)))
         elif isinstance(op, Select):
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
+        elif isinstance(op, SetAccumulator):
+            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = SetAccumulator(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
         else:
             raise RuntimeError(f"Cannot generate {op} of function {f}")
     return header + str(toplevel), decl
