@@ -117,6 +117,12 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
 
     if stream_mode and options.get("opt_reduce", False):
         raise RuntimeError("Currently opt_reduce in stream mode is not supported.")
+    if stream_mode:
+        if 'no_fast_stat' not in options:
+            options['no_fast_stat'] = True
+        else:
+            if not options['no_fast_stat']:
+                raise RuntimeError("no_fast_stat=False is not supported in stream mode.")
     if stream_mode and allow_unaligned is None:
         allow_unaligned = False
     elif allow_unaligned is None:

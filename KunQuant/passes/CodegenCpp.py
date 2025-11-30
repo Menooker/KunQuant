@@ -57,7 +57,7 @@ def _get_buffer_name(op: OpBase, idx: int) -> str:
         return f"temp_{idx}"
     raise RuntimeError("Bad buffer" + str(op))
 
-def _float_value_to_float(v: float, dtype: str) -> str:
+def _float_value_to_float(v: Union[float, str], dtype: str) -> str:
     ret = str(v)
     if 'inf' == ret:
         return f"std::numeric_limits<{dtype}>::infinity()"

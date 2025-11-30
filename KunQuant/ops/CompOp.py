@@ -65,11 +65,47 @@ class WindowedMax(WindowedReduce):
     def make_reduce(self, v: OpBase) -> OpBase:
         return ReduceMax(v)
 
-def _kahan_add(mask: OpBase, sum: OpBase, small: OpBase, compensation: OpBase) -> Union[OpBase, OpBase]:
+# small - sum
+def _kahan_sub(mask: OpBase, sum: OpBase, small: OpBase, compensation: OpBase) -> Union[OpBase, OpBase]:
     y = small - compensation
-    t = sum + y
-    compensation = SetAccumulator(compensation, mask, t - sum - y)
+    t = y - sum
+    compensation = SetAccumulator(compensation, mask, t + sum - y)
     return t, compensation
+
+def _avg_remove_window(oldx: OpBase, window: int):
+    '''
+    remove a value from a rolling average.
+    Return observed count accumulator, new observed value, notnan_old,
+        mean_accumulator, new mean, compensation before remove
+    '''
+    notnan_old = Equals(oldx, oldx)
+    new_observed_acc = Accumulator(notnan_old, f"avg_obs_{window}")
+    new_observed = Select(notnan_old, new_observed_acc - 1, new_observed_acc)
+    new_observed_not_0 = Abs(new_observed) > 0.001
+    can_update = And(new_observed_not_0, notnan_old)
+    mean_acc = Accumulator(oldx, f"avg_{window}")
+    mean = mean_acc
+    compensation_remove = Accumulator(mean, f"avg_comp_remove_{window}")
+    # delta = oldx - mean
+    delta, _ = _kahan_sub(can_update, mean, oldx, compensation_remove)
+    mean = Select(can_update, mean - delta / new_observed, mean)
+    
+    return new_observed_acc, new_observed, notnan_old, mean_acc, mean, compensation_remove
+
+def _avg_add_window(x: OpBase, window: int, observed_acc: Accumulator, new_observed: OpBase, mean: OpBase, mean_acc: Accumulator):
+    '''
+    add a value from a rolling average.
+    Return new observed value, notnan, new mean, compensation before add
+    '''
+    notnan = Equals(x, x)
+    new_observed = SetAccumulator(observed_acc, notnan, new_observed + 1)
+    new_observed_not_0 = Abs(new_observed) > 0.001
+    compensation_add = None
+    compensation_add = Accumulator(new_observed_not_0, f"avg_comp_add_{window}")
+    # delta = x - mean
+    delta, _ = _kahan_sub(notnan, mean, x, compensation_add)
+    mean = SetAccumulator(mean_acc, notnan, Select(new_observed_not_0, mean + delta / new_observed, ConstantOp(0)))
+    return new_observed, notnan, mean, compensation_add
 
 class WindowedAvg(WindowedCompositiveOp):
     '''
@@ -85,33 +121,42 @@ class WindowedAvg(WindowedCompositiveOp):
                 # remove
                 window = self.attrs["window"]
                 oldx = BackRef(x, window)
-                notnan_old = Equals(oldx, oldx)
-                new_observed_acc = Accumulator(notnan_old, f"avg_obs_{window}")
-                new_observed = Select(notnan_old, new_observed_acc - 1, new_observed_acc)
-                new_observed_not_0 = Abs(new_observed) > 0.001
-                can_update = And(new_observed_not_0, notnan_old)
-                mean_acc = Accumulator(oldx, "avg")
-                mean = mean_acc
-                compensation_remove = Accumulator(mean, f"avg_comp_remove_{window}")
-                # delta = oldx - mean
-                delta, compensation_remove = _kahan_add(can_update, 0 - mean, oldx, compensation_remove)
-                mean = Select(can_update, mean - delta / new_observed, mean)
+                new_observed_acc, new_observed, notnan_old, mean_acc, mean, compensation_remove = _avg_remove_window(oldx, window)
 
-                # 
-                notnan = Equals(x, x)
-                new_observed = SetAccumulator(new_observed_acc, notnan, new_observed + 1)
-                new_observed_not_0 = Abs(new_observed) > 0.001
-                compensation_add = Accumulator(new_observed_not_0, f"avg_comp_add_{window}")
-                # delta = x - mean
-                delta, compensation_add = _kahan_add(notnan, 0 - mean, x, compensation_add)
-                mean = SetAccumulator(mean_acc, notnan, Select(new_observed_not_0, mean + delta / new_observed, ConstantOp(0)))
+                # add
+                new_observed, notnan, mean, compensation_add = _avg_add_window(x, window, new_observed_acc, new_observed, mean, mean_acc)
                 # if new_observed != window, return NAN
-                Select(Abs(new_observed - window) < 0.001, mean, ConstantOp(float('nan')))
+                Select(Abs(new_observed - window) < 0.001, mean, ConstantOp('nan'))
 
             else:
                 v0 = WindowedSum(x, self.attrs["window"])
                 v1 = DivConst(v0, self.attrs["window"])
         return b.ops
+
+def _stddev_remove_window(oldx: OpBase, window: int):
+    '''
+    remove a value from a rolling average.
+    Return observed count accumulator, new observed value, notnan_old,
+        mean_accumulator, new mean, compensation before remove, var_accumulator, new var
+    '''
+    observed_acc, new_observed, notnan_old, mean_acc, mean, compensation_remove = _avg_remove_window(oldx, window)
+    prev_mean = mean_acc - compensation_remove
+    var_acc = Accumulator(mean, f"var_{window}")
+    var = var_acc
+    var = var - (oldx - prev_mean) * (oldx - mean)
+    return observed_acc, new_observed, notnan_old, mean_acc, mean, compensation_remove, var_acc, var
+
+def _stddev_add_window(x: OpBase, window: int, observed_acc: Accumulator, new_observed: OpBase, oldmean: OpBase, mean_acc: Accumulator, var: OpBase, var_acc: Accumulator):
+    '''
+    add a value from a rolling average.
+    Return new observed value, notnan, new mean, new var
+    '''
+    new_observed, notnan, new_mean, compensation_add = _avg_add_window(x, window, observed_acc, new_observed, oldmean, mean_acc)
+    prev_mean = oldmean - compensation_add
+    var = var + (x - prev_mean) * (x - new_mean)
+    var = SetAccumulator(var_acc, notnan, var)
+    return new_observed, notnan, new_mean, var
+
 
 class WindowedStddev(WindowedCompositiveOp):
     '''
@@ -123,15 +168,27 @@ class WindowedStddev(WindowedCompositiveOp):
         window = self.attrs["window"]
         b = Builder(self.get_parent())
         with b:
-            avg = WindowedAvg(self.inputs[0], window)
-            v0 = WindowedTempOutput(self.inputs[0], window)
-            each = ForeachBackWindow(v0, window)
-            b.set_loop(each)
-            diff = Sub(IterValue(each, v0), avg)
-            sqr = Mul(diff, diff)
-            b.set_loop(self.get_parent())
-            vsum = ReduceAdd(sqr)
-            out = Sqrt(DivConst(vsum, window - 1))
+            # if _is_fast_stat(options, self.attrs):
+            #     x = self.inputs[0]
+            #     # remove
+            #     oldx = BackRef(x, window)
+            #     observed_acc, new_observed, notnan_old, mean_acc, mean, compensation_remove, var_acc, var = _stddev_remove_window(oldx, window)
+
+            #     # add
+            #     new_observed, notnan, mean, var = _stddev_add_window(x, window, observed_acc, new_observed, mean, mean_acc, var, var_acc)
+            #     # if new_observed != window, return NAN
+            #     stddev = Sqrt(DivConst(var, window - 1))
+            #     out = Select(Abs(new_observed - window) < 0.001, stddev, ConstantOp('nan'))
+            # else:
+                avg = WindowedAvg(self.inputs[0], window)
+                v0 = WindowedTempOutput(self.inputs[0], window)
+                each = ForeachBackWindow(v0, window)
+                b.set_loop(each)
+                diff = Sub(IterValue(each, v0), avg)
+                sqr = Mul(diff, diff)
+                b.set_loop(self.get_parent())
+                vsum = ReduceAdd(sqr)
+                out = Sqrt(DivConst(vsum, window - 1))
         return b.ops
 
 class WindowedCovariance(WindowedCompositiveOp):

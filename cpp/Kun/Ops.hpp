@@ -300,12 +300,12 @@ struct Accumulator {
 };
 
 template <typename T, int stride>
-typename Accumulator<T, stride>::Value
+kun_simd::vec<T, stride>
 SetAccumulator(const typename Accumulator<T, stride>::Value& accu,
                const typename Accumulator<T, stride>::float_mask_t &mask,
                const kun_simd::vec<T, stride> &v) {
-    accu.acc.v = sc_select(mask, v, accu.acc.v);
-    return accu.acc.asValue();
+    accu.acc.v = sc_select(mask, v, accu.v);
+    return accu.acc.v;
 }
 
 template <typename T, int stride, int window>
