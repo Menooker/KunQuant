@@ -148,7 +148,7 @@ def test_avg_stddev(lib):
 ####################################
 
 def check_TS():
-    return "avg_and_stddev_TS", build_avg_and_stddev(), KunCompilerConfig(input_layout="TS", output_layout="TS")
+    return "avg_and_stddev_TS", build_avg_and_stddev(), KunCompilerConfig(input_layout="TS", output_layout="TS", options={"no_fast_stat": False})
 
 def test_avg_stddev_TS(lib):
     modu = lib.getModule("avg_and_stddev_TS")

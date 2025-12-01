@@ -75,7 +75,7 @@ def _kahan_sub(mask: OpBase, sum: OpBase, small: OpBase, compensation: OpBase) -
 def _avg_remove_window(oldx: OpBase, window: int):
     '''
     remove a value from a rolling average.
-    Return observed count accumulator, new observed value, notnan_old,
+    Return observed count accumulator, new observed value, can_update (old not nan and new observed not 0),
         mean_accumulator, new mean, compensation before remove
     '''
     notnan_old = Equals(oldx, oldx)
@@ -90,7 +90,7 @@ def _avg_remove_window(oldx: OpBase, window: int):
     delta, _ = _kahan_sub(can_update, mean, oldx, compensation_remove)
     mean = Select(can_update, mean - delta / new_observed, mean)
     
-    return new_observed_acc, new_observed, notnan_old, mean_acc, mean, compensation_remove
+    return new_observed_acc, new_observed, can_update, mean_acc, mean, compensation_remove
 
 def _avg_add_window(x: OpBase, window: int, observed_acc: Accumulator, new_observed: OpBase, mean: OpBase, mean_acc: Accumulator):
     '''
@@ -106,6 +106,11 @@ def _avg_add_window(x: OpBase, window: int, observed_acc: Accumulator, new_obser
     delta, _ = _kahan_sub(notnan, mean, x, compensation_add)
     mean = SetAccumulator(mean_acc, notnan, Select(new_observed_not_0, mean + delta / new_observed, ConstantOp(0)))
     return new_observed, notnan, mean, compensation_add
+
+def with_same_opt_flag(target: OpBase, current: dict) -> bool:
+    if 'no_fast_stat' in current:
+        target.attrs['no_fast_stat'] = current['no_fast_stat']
+    return target
 
 class WindowedAvg(WindowedCompositiveOp):
     '''
@@ -136,15 +141,15 @@ class WindowedAvg(WindowedCompositiveOp):
 def _stddev_remove_window(oldx: OpBase, window: int):
     '''
     remove a value from a rolling average.
-    Return observed count accumulator, new observed value, notnan_old,
+    Return observed count accumulator, new observed value, can_update,
         mean_accumulator, new mean, compensation before remove, var_accumulator, new var
     '''
-    observed_acc, new_observed, notnan_old, mean_acc, mean, compensation_remove = _avg_remove_window(oldx, window)
+    observed_acc, new_observed, can_update, mean_acc, mean, compensation_remove = _avg_remove_window(oldx, window)
     prev_mean = mean_acc - compensation_remove
     var_acc = Accumulator(mean, f"var_{window}")
     var = var_acc
-    var = var - (oldx - prev_mean) * (oldx - mean)
-    return observed_acc, new_observed, notnan_old, mean_acc, mean, compensation_remove, var_acc, var
+    var = Select(can_update, var - (oldx - prev_mean) * (oldx - mean), var)
+    return observed_acc, new_observed, can_update, mean_acc, mean, compensation_remove, var_acc, var
 
 def _stddev_add_window(x: OpBase, window: int, observed_acc: Accumulator, new_observed: OpBase, oldmean: OpBase, mean_acc: Accumulator, var: OpBase, var_acc: Accumulator):
     '''
@@ -157,7 +162,39 @@ def _stddev_add_window(x: OpBase, window: int, observed_acc: Accumulator, new_ob
     var = SetAccumulator(var_acc, notnan, var)
     return new_observed, notnan, new_mean, var
 
+class WindowedVar(WindowedCompositiveOp):
+    '''
+    Unbiased variance of a rolling look back window, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).var()
+    '''
+    def decompose(self, options: dict) -> List[OpBase]:
+        window = self.attrs["window"]
+        b = Builder(self.get_parent())
+        with b:
+            if _is_fast_stat(options, self.attrs):
+                x = self.inputs[0]
+                # remove
+                oldx = BackRef(x, window)
+                observed_acc, new_observed, notnan_old, mean_acc, mean, compensation_remove, var_acc, var = _stddev_remove_window(oldx, window)
 
+                # add
+                new_observed, notnan, mean, var = _stddev_add_window(x, window, observed_acc, new_observed, mean, mean_acc, var, var_acc)
+                # if new_observed != window, return NAN
+                var = DivConst(var, window - 1)
+                out = Select(Abs(new_observed - window) < 0.001, var, ConstantOp('nan'))
+            else:
+                avg = with_same_opt_flag(WindowedAvg(self.inputs[0], window), self.attrs)
+                v0 = WindowedTempOutput(self.inputs[0], window)
+                each = ForeachBackWindow(v0, window)
+                b.set_loop(each)
+                diff = Sub(IterValue(each, v0), avg)
+                sqr = Mul(diff, diff)
+                b.set_loop(self.get_parent())
+                vsum = ReduceAdd(sqr)
+                out = DivConst(vsum, window - 1)
+        return b.ops
+    
 class WindowedStddev(WindowedCompositiveOp):
     '''
     Unbiased standard deviation of a rolling look back window, including the current newest data.
@@ -168,27 +205,8 @@ class WindowedStddev(WindowedCompositiveOp):
         window = self.attrs["window"]
         b = Builder(self.get_parent())
         with b:
-            # if _is_fast_stat(options, self.attrs):
-            #     x = self.inputs[0]
-            #     # remove
-            #     oldx = BackRef(x, window)
-            #     observed_acc, new_observed, notnan_old, mean_acc, mean, compensation_remove, var_acc, var = _stddev_remove_window(oldx, window)
-
-            #     # add
-            #     new_observed, notnan, mean, var = _stddev_add_window(x, window, observed_acc, new_observed, mean, mean_acc, var, var_acc)
-            #     # if new_observed != window, return NAN
-            #     stddev = Sqrt(DivConst(var, window - 1))
-            #     out = Select(Abs(new_observed - window) < 0.001, stddev, ConstantOp('nan'))
-            # else:
-                avg = WindowedAvg(self.inputs[0], window)
-                v0 = WindowedTempOutput(self.inputs[0], window)
-                each = ForeachBackWindow(v0, window)
-                b.set_loop(each)
-                diff = Sub(IterValue(each, v0), avg)
-                sqr = Mul(diff, diff)
-                b.set_loop(self.get_parent())
-                vsum = ReduceAdd(sqr)
-                out = Sqrt(DivConst(vsum, window - 1))
+            var = with_same_opt_flag(WindowedVar(self.inputs[0], window), self.attrs)
+            Sqrt(var)
         return b.ops
 
 class WindowedCovariance(WindowedCompositiveOp):
@@ -203,8 +221,8 @@ class WindowedCovariance(WindowedCompositiveOp):
         y = self.inputs[1]
         b = Builder(self.get_parent())
         with b:
-            avgX = WindowedAvg(x, window)
-            avgY = WindowedAvg(y, window)
+            avgX = with_same_opt_flag(WindowedAvg(x, window), self.attrs)
+            avgY = with_same_opt_flag(WindowedAvg(y, window), self.attrs)
             wX = WindowedTempOutput(x, window)
             wY = WindowedTempOutput(y, window)
             each = ForeachBackWindow(wX, window, wY)
@@ -228,23 +246,35 @@ class WindowedCorrelation(WindowedCompositiveOp):
         y = self.inputs[1]
         b = Builder(self.get_parent())
         with b:
-            avgX = WindowedAvg(x, window)
-            avgY = WindowedAvg(y, window)
-            wX = WindowedTempOutput(x, window)
-            wY = WindowedTempOutput(y, window)
-            each = ForeachBackWindow(wX, window, wY)
-            b.set_loop(each)
-            diffX = Sub(IterValue(each, wX), avgX)
-            diffY = Sub(IterValue(each, wY), avgY)
-            sqrX = Mul(diffX, diffX)
-            sqrY = Mul(diffY, diffY)
-            xy = Mul(diffX, diffY)
-            b.set_loop(self.get_parent())
-            vsum1 = ReduceAdd(xy)
-            vsum_x = Sqrt(ReduceAdd(sqrX))
-            vsum_y = Sqrt(ReduceAdd(sqrY))
-            sum_xy = Mul(vsum_x, vsum_y)
-            out = Div(vsum1, sum_xy)
+            if _is_fast_stat(options, self.attrs):
+                mean_x_y = WindowedAvg(x * y, window)
+                mean_x = WindowedAvg(x, window)
+                mean_y = WindowedAvg(y, window)
+                x_var = WindowedVar(x, window)
+                y_var = WindowedVar(y, window)
+                numerator = (mean_x_y - mean_x * mean_y) * (
+                    window / (window - 1)
+                )
+                denominator = Sqrt(x_var * y_var)
+                result = numerator / denominator
+            else:
+                avgX = with_same_opt_flag(WindowedAvg(x, window), self.attrs)
+                avgY = with_same_opt_flag(WindowedAvg(y, window), self.attrs)
+                wX = WindowedTempOutput(x, window)
+                wY = WindowedTempOutput(y, window)
+                each = ForeachBackWindow(wX, window, wY)
+                b.set_loop(each)
+                diffX = Sub(IterValue(each, wX), avgX)
+                diffY = Sub(IterValue(each, wY), avgY)
+                sqrX = Mul(diffX, diffX)
+                sqrY = Mul(diffY, diffY)
+                xy = Mul(diffX, diffY)
+                b.set_loop(self.get_parent())
+                vsum1 = ReduceAdd(xy)
+                vsum_x = Sqrt(ReduceAdd(sqrX))
+                vsum_y = Sqrt(ReduceAdd(sqrY))
+                sum_xy = Mul(vsum_x, vsum_y)
+                out = Div(vsum1, sum_xy)
         return b.ops
 
 
