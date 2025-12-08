@@ -117,6 +117,22 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
 
     if stream_mode and options.get("opt_reduce", False):
         raise RuntimeError("Currently opt_reduce in stream mode is not supported.")
+    stats_no_warn = False
+    if options.get('no_fast_stat', False) == "no_warn":
+        options['no_fast_stat'] = False
+        stats_no_warn = True
+    if stream_mode:
+        if 'no_fast_stat' not in options:
+            options['no_fast_stat'] = True
+        else:
+            if not options['no_fast_stat']:
+                raise RuntimeError("no_fast_stat=False is not supported in stream mode.")
+    else:
+        if 'no_fast_stat' not in options:
+            options['no_fast_stat'] = dtype == "float"
+        if not options['no_fast_stat'] and not stats_no_warn:
+            print(f"Warning: fast stat optimization is ON for {module_name}. This may result in lower precision and faster execution in windowed statistics functions. You can turn it off by setting options['no_fast_stat'] = True. If you are sure about the precision, you can set options['no_fast_stat'] = 'no_warn' to disable this warning.")
+
     if stream_mode and allow_unaligned is None:
         allow_unaligned = False
     elif allow_unaligned is None:

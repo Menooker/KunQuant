@@ -1,5 +1,5 @@
 from KunQuant.Op import OpBase, Output, Input, CrossSectionalOp, GraphSourceTrait, ConstantOp, ReductionOp, BoolOpTrait
-from KunQuant.ops.MiscOp import WindowedLinearRegressionConsumerTrait, WindowedLinearRegression
+from KunQuant.ops.MiscOp import Accumulator, SetAccumulator, WindowedLinearRegressionConsumerTrait, WindowedLinearRegression, ReturnFirstValue
 from KunQuant.Stage import Function, OpInfo
 from KunQuant.ops import GenericPartition
 from typing import List, Dict, Set, Tuple
@@ -17,7 +17,7 @@ def _is_non_output_op(op: OpBase) -> bool:
     '''
     return true if the op cannot be at the edge of a partition as output
     '''
-    if op.get_parent() is not None or isinstance(op, WindowedLinearRegression) or isinstance(op, BoolOpTrait):
+    if op.get_parent() is not None or isinstance(op, (WindowedLinearRegression, BoolOpTrait, Accumulator)):
         return True
     return False
 
@@ -25,7 +25,7 @@ def _is_fast_select_op(op: OpBase) -> bool:
     '''
     return true if the op should be selected ASAP
     '''
-    if isinstance(op, ReductionOp) or isinstance(op, WindowedLinearRegressionConsumerTrait) or _is_non_output_op(op):
+    if isinstance(op, (ReductionOp, WindowedLinearRegressionConsumerTrait, SetAccumulator, ReturnFirstValue)) or _is_non_output_op(op):
         return True
     else:
         # don't stop at boolean op

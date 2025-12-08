@@ -39,6 +39,54 @@ class FastWindowedSum(OpBase, WindowedTrait, GloablStatefulOpTrait):
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str], buf_name: str) -> str:
         return f"auto v{idx} = sum_{idx}.step({buf_name}, {inputs[0]}, {time_idx});"
 
+class Accumulator(OpBase, GloablStatefulOpTrait):
+    '''
+    Accumulator is a stateful op that accumulates the input value over time.
+    It can be used to compute running totals, moving averages, etc.'''
+    def __init__(self, v: OpBase, name: str) -> None:
+        super().__init__([v], [("name", name)])
+    def get_state_variable_name_prefix(self) -> str:
+        return "accu_"
+    
+    def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:
+        return f"auto v{idx} = accu_{idx}.asValue();"
+
+
+    def verify(self, func) -> None:
+        num_set = None
+        for user in func.op_to_id[self].uses:
+            if isinstance(user, SetAccumulator):
+                if num_set is not None:
+                    raise RuntimeError(f"Accumulator {self.attrs['name']} can only be used with one SetAccumulator: " + str(user) + "\nand  " + str(num_set) )
+                else:
+                    num_set = user
+        if num_set is None:
+            raise RuntimeError(f"Accumulator {self.attrs['name']} is not used with any SetAccumulator")
+        return super().verify(func)
+
+class SetAccumulator(OpBase):
+    '''
+    Set the value of an Accumulator to a value, if mask is set. Otherwise, it does nothing.
+    '''
+    def __init__(self, accu: OpBase, mask: OpBase, value: OpBase) -> None:
+        super().__init__([accu, mask, value], [])
+        self.check()
+    
+    def check(self):
+        if not isinstance(self.inputs[0], Accumulator):
+            raise RuntimeError("SetAccumulator expects the first input to be an Accumulator op")
+
+    def verify(self, func: 'KunQuant.Stage.Function') -> None:
+        self.check()
+        return super().verify(func)
+    
+class ReturnFirstValue(OpBase):
+    '''
+    Return the first value of the input. It is used keep the dependency of the input op, like SetAccumulator.
+    '''
+    def __init__(self, v: List[OpBase]) -> None:
+        super().__init__(v, [])
+    
 
 class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait):
     '''

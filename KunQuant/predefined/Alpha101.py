@@ -40,8 +40,11 @@ def ts_min(v: OpBase, window: int) -> OpBase:
 def ts_max(v: OpBase, window: int) -> OpBase:
     return WindowedMax(v, window)
 
-def correlation(v1: OpBase, v2: OpBase, window: int) -> OpBase:
-    return WindowedCorrelation(v1, window, v2)
+def correlation(v1: OpBase, v2: OpBase, window: int, no_optimization: bool = False) -> OpBase:
+    ret = WindowedCorrelation(v1, window, v2)
+    if no_optimization:
+        ret.attrs['no_fast_stat'] = True
+    return ret
 
 def delta(v1: OpBase, window: int = 1) -> OpBase:
     return Sub(v1, BackRef(v1, window))
@@ -55,8 +58,11 @@ def sign(v: OpBase)-> OpBase:
 def covariance(v: OpBase, v2: OpBase, window: int) -> OpBase:
     return WindowedCovariance(v, window, v2)
 
-def sma(v: OpBase, window: int) -> OpBase:
-    return WindowedAvg(v, window)
+def sma(v: OpBase, window: int, no_optimization: bool = False) -> OpBase:
+    ret = WindowedAvg(v, window)
+    if no_optimization:
+        ret.attrs['no_fast_stat'] = True
+    return ret
 
 def bool_to_10(v: OpBase) -> OpBase:
     return Select(v, ConstantOp(1), ConstantOp(0))
@@ -141,7 +147,7 @@ def alpha014(d: AllData):
 
 def alpha015(d: AllData):
     # due to corr on Rank data, the rank result will be different from pandas's reference
-    df = SetInfOrNanToValue(correlation(rank(d.high), rank(d.volume), 3))
+    df = SetInfOrNanToValue(correlation(rank(d.high), rank(d.volume), 3, no_optimization=True))
     return -1 * ts_sum(rank(df), 3)
 
 def alpha016(d: AllData):
@@ -202,12 +208,12 @@ def alpha025(self: AllData):
     return rank(((((-1 * self.returns) * adv20) * self.vwap) * (self.high - self.close)))
 
 def alpha026(self: AllData):
-    df = correlation(ts_rank(self.volume, 5), ts_rank(self.high, 5), 5)
+    df = correlation(ts_rank(self.volume, 5), ts_rank(self.high, 5), 5, no_optimization=True)
     df = SetInfOrNanToValue(df)
     return -1 * ts_max(df, 3)
 
 def alpha027(self: AllData):
-    alpha = rank((sma(correlation(rank(self.volume), rank(self.vwap), 6), 2) / 2.0))
+    alpha = rank((sma(correlation(rank(self.volume), rank(self.vwap), 6), 2, no_optimization=True) / 2.0))
     return Select(alpha > 0.5, ConstantOp(-1), ConstantOp(1))
 
 # Alpha#28	 scale(((correlation(adv20, low, 5) + ((high + low) / 2)) - close))
@@ -441,7 +447,7 @@ def alpha073(self: AllData):
 def alpha074(self: AllData):
     adv30 = sma(self.volume, 30)
     a = rank(correlation(self.close, sma(adv30, 37), 15))
-    b = rank(correlation(rank(((self.high * 0.0261661) + (self.vwap * (1 - 0.0261661)))), rank(self.volume), 11))
+    b = rank(correlation(rank(((self.high * 0.0261661) + (self.vwap * (1 - 0.0261661)))), rank(self.volume), 11, no_optimization=True))
     return (bool_to_10(a < b)* -1)
 
 # Alpha#75	 (rank(correlation(vwap, volume, 4.24304)) < rank(correlation(rank(low), rank(adv50),12.4413)))

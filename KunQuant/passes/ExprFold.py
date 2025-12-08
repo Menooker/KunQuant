@@ -15,6 +15,12 @@ class _OpProxy:
     def __eq__(self, o: '_OpProxy') -> bool:
         if self.parent != o.parent:
             return False
+        if self.op.__class__ != o.op.__class__:
+            return False
+        if self.op.attrs != o.op.attrs:
+            return False
+        if self.op.inputs == o.op.inputs:
+            return True
         for x,y in zip(self.op.items(), o.op.items()):
             if x != y:
                 return False

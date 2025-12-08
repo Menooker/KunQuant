@@ -106,7 +106,7 @@ def _is_mul_1(ranges: _ValueRangeManager, op: OpBase) -> OpBase:
     return None
 
 def _is_div_cmp_1(ranges: _ValueRangeManager, op: OpBase) -> OpBase:
-    if isinstance(op, CmpOp):
+    if isinstance(op, CmpOp) and not isinstance(op, Equals):
         lhs, rhs = op.inputs
         if isinstance(lhs, Div):
             inner_lhs, inner_rhs = lhs.inputs

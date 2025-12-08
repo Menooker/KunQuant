@@ -1,5 +1,5 @@
 from os import path
-from typing import List, Dict, Optional, Tuple, Union
+from typing import List, Dict, Literal, Optional, Tuple, Union
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 import threading
@@ -263,8 +263,16 @@ class GraphSourceTrait:
     pass
 
 class ConstantOp(OpBase, GraphSourceTrait):
-    def __init__(self, v: float) -> None:
+    def __init__(self, v: Union[float, Literal['nan']]) -> None:
         super().__init__([], [("value", v)])
+        self.check()
+
+    def check(self):
+        if self.attrs['value'] != self.attrs['value']:
+            raise RuntimeError("ConstantOp value cannot be float('nan'), use 'nan' string literal instead")
+    def verify(self, func: 'KunQuant.Stage.Function') -> None:
+        self.check()
+        return super().verify(func)
 
 class UnaryElementwiseOp(OpBase):
     def __init__(self, lhs: OpBase, attrs: Union[List[Tuple[str, object]], OrderedDict, None] = None) -> None:
@@ -278,7 +286,7 @@ class BinaryElementwiseOp(OpBase):
 
 class CompositiveOp(OpBase):
     @abstractmethod
-    def decompose(self) -> List[OpBase]:
+    def decompose(self, options: dict) -> List[OpBase]:
         pass
 
 

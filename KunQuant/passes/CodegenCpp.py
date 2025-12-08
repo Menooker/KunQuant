@@ -57,7 +57,7 @@ def _get_buffer_name(op: OpBase, idx: int) -> str:
         return f"temp_{idx}"
     raise RuntimeError("Bad buffer" + str(op))
 
-def _float_value_to_float(v: float, dtype: str) -> str:
+def _float_value_to_float(v: Union[float, str], dtype: str) -> str:
     ret = str(v)
     if 'inf' == ret:
         return f"std::numeric_limits<{dtype}>::infinity()"
@@ -289,6 +289,10 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             scope.scope.append(_CppSingleLine(scope, op.generate_step_code(idx, "i", vargs, **args)))
         elif isinstance(op, Select):
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
+        elif isinstance(op, SetAccumulator):
+            scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = SetAccumulator(v{inp[0]}, v{inp[1]}, v{inp[2]});"))
+        elif isinstance(op, ReturnFirstValue):
+            scope.scope.append(_CppSingleLine(scope, f"auto& v{idx} = v{inp[0]};"))
         else:
             raise RuntimeError(f"Cannot generate {op} of function {f}")
     return header + str(toplevel), decl
