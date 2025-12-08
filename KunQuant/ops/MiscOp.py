@@ -60,6 +60,8 @@ class Accumulator(OpBase, GloablStatefulOpTrait):
                     raise RuntimeError(f"Accumulator {self.attrs['name']} can only be used with one SetAccumulator: " + str(user) + "\nand  " + str(num_set) )
                 else:
                     num_set = user
+        if num_set is None:
+            raise RuntimeError(f"Accumulator {self.attrs['name']} is not used with any SetAccumulator")
         return super().verify(func)
 
 class SetAccumulator(OpBase):
@@ -77,6 +79,14 @@ class SetAccumulator(OpBase):
     def verify(self, func: 'KunQuant.Stage.Function') -> None:
         self.check()
         return super().verify(func)
+    
+class ReturnFirstValue(OpBase):
+    '''
+    Return the first value of the input. It is used keep the dependency of the input op, like SetAccumulator.
+    '''
+    def __init__(self, v: List[OpBase]) -> None:
+        super().__init__(v, [])
+    
 
 class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait):
     '''

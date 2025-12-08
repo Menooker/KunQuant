@@ -45,7 +45,7 @@ def check_alpha101_double(avx: str):
             Output(out, f.__name__)
     simd_len = get_simd_len(avx, "double")
     f = Function(builder.ops)
-    return "alpha_101_double", f, KunCompilerConfig(blocking_len=simd_len, input_layout="TS", output_layout="TS", dtype="double", options={"opt_reduce": True, "fast_log": True})
+    return "alpha_101_double", f, KunCompilerConfig(blocking_len=simd_len, input_layout="TS", output_layout="TS", dtype="double", options={"opt_reduce": True, "fast_log": True, 'no_fast_stat': 'no_warn'})
 
 def check_alpha101_stream(avx):
     builder = Builder()

@@ -130,6 +130,14 @@ If `split_source` is not 0, KunQuant will split the generated C++ source code in
 
 The `CppCompilerConfig` controls how KunQuant calls the C++ compiler. To choose the non-default compiler, you can pass `CppCompilerConfig(compiler="/path/to/your/C++/compiler")` to `cfake.compileit`. You can also enable/disable AVX512 by this config class.
 
+`options` is a dict to specify the flags and configurations of KunQuant internal IR transforms and passes. Supported keys/values of `options`
+
+| Key | Comments  |  Value type  |  Default value |
+|---|---|---|---|
+| opt_reduce | optimize WindowedSum by rolling sum algorithm |  bool  |  If in stream mode, False. Otherwise, True  |
+| fast_log | Use KunQuant's implementation of math log function instead of `std::log` |  bool  |  True  |
+| no_fast_stat | Disable fast rolling algorithm for statistics functions like stddev/corr/etc. Setting this flag to True may help to get better precision with the cost of performance. KunQuant will warn the precision issue if `options['no_fast_stat']==False`. To disable the warning and set no_fast_stat to False, set `options['no_fast_stat']=='no_warn'` |  bool or Literal\["no_warn"\]  |  If dtype is float or in stream mode, True. Otherwise, False |
+
 ## Specifing Memory layouts and data types and enabling AVX512
 
 ### Enabling AVX512 and choosing blocking_len

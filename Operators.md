@@ -237,6 +237,13 @@ class WindowedStddev(WindowedCompositiveOp):
     similar to pandas.DataFrame.rolling(n).std()
     '''
 
+class WindowedVar(WindowedCompositiveOp):
+    '''
+    Unbiased variance of a rolling look back window, including the current newest data.
+    For indices < window-1, the output will be NaN
+    similar to pandas.DataFrame.rolling(n).var()
+    '''
+
 class TsArgMax(WindowedCompositiveOp):
     '''
     ArgMax in a rolling look back window, including the current newest data.
@@ -436,6 +443,27 @@ class DiffWithWeightedSum(GenericCrossSectionalOp):
     '''
     def __init__(self, v: OpBase, w: OpBase) -> None:
         super().__init__([v, w], None)
+
+class ReturnFirstValue(OpBase):
+    '''
+    Return the first value of the input. It is used keep the dependency of the input op, like SetAccumulator.
+    '''    
+    def __init__(self, v: List[OpBase]) -> None:
+        pass
+
+class Accumulator(OpBase, GloablStatefulOpTrait):
+    '''
+    Accumulator is a stateful op that accumulates the input value over time.
+    It can be used to compute running totals, moving averages, etc.'''
+    def __init__(self, v: OpBase, name: str) -> None:
+        pass
+
+class SetAccumulator(OpBase):
+    '''
+    Set the value of an Accumulator to a value, if mask is set. Otherwise, it does nothing.
+    '''
+    def __init__(self, accu: OpBase, mask: OpBase, value: OpBase) -> None:
+        pass
 ```
 
 ## Internal ops

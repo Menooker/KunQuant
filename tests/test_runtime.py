@@ -148,7 +148,7 @@ def test_avg_stddev(lib):
 ####################################
 
 def check_TS():
-    return "avg_and_stddev_TS", build_avg_and_stddev(), KunCompilerConfig(input_layout="TS", output_layout="TS", options={"no_fast_stat": False})
+    return "avg_and_stddev_TS", build_avg_and_stddev(), KunCompilerConfig(input_layout="TS", output_layout="TS", options={"no_fast_stat": 'no_warn'})
 
 def test_avg_stddev_TS(lib):
     modu = lib.getModule("avg_and_stddev_TS")
@@ -164,6 +164,33 @@ def test_avg_stddev_TS(lib):
     outstd = out["ou2"].transpose()
     np.testing.assert_allclose(outmean, expected_mean, rtol=1e-6, equal_nan=True)
     np.testing.assert_allclose(outstd, expected_stddev, rtol=1e-6, equal_nan=True)
+####################################
+
+def check_covar():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        inp2 = Input("b")
+        out1 = Output(WindowedCovariance(inp1, 10, inp2), "ou1")
+        out2 = Output(WindowedCorrelation(inp1, 10, inp2), "ou2")
+    f = Function(builder.ops)
+    return "test_covar", f, KunCompilerConfig(input_layout="TS", output_layout="TS", dtype="double", options={"no_fast_stat": 'no_warn'})
+
+def test_covar(lib):
+    modu = lib.getModule("test_covar")
+    assert(modu)
+    inp = np.random.rand(200, 24).astype("float64")
+    inp2 = np.random.rand(200, 24).astype("float64")
+    df = pd.DataFrame(inp)
+    df2 = pd.DataFrame(inp2)
+    expected_covar = df.rolling(10).cov(df2).to_numpy()
+    expected_corr = df.rolling(10).corr(df2).to_numpy()
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": inp, "b": inp2}, 0, 200)
+    outcovar = out["ou1"]
+    outcorr = out["ou2"]
+    np.testing.assert_allclose(outcovar, expected_covar, rtol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(outcorr, expected_corr, rtol=1e-6, equal_nan=True)
 
 ####################################
 
@@ -289,7 +316,7 @@ def check_rank2():
         v3 = Add(v2, v1)
         Output(v3, "out")
     f = Function(builder.ops)
-    return "test_rank2", f, KunCompilerConfig(dtype="double", input_layout="TS", output_layout="TS")
+    return "test_rank2", f, KunCompilerConfig(dtype="double", input_layout="TS", output_layout="TS", options={'no_fast_stat': 'no_warn'})
 
 def test_rank2(lib):
     modu = lib.getModule("test_rank2")
@@ -323,7 +350,7 @@ def check_rank_alpha029():
         Output(v, "ou2")
     f = Function(builder.ops)
     allow_unaligned = cpu_arch != "aarch64"
-    return "test_rank_alpha029", f, KunCompilerConfig(input_layout="TS", output_layout="TS", allow_unaligned = allow_unaligned, dtype="double", options={"opt_reduce": True, "fast_log": True})
+    return "test_rank_alpha029", f, KunCompilerConfig(input_layout="TS", output_layout="TS", allow_unaligned = allow_unaligned, dtype="double", options={"opt_reduce": True, "fast_log": True, 'no_fast_stat': 'no_warn'})
 
 def test_rank029(lib):
     modu = lib.getModule("test_rank_alpha029")
@@ -362,7 +389,7 @@ def check_log(dtype, name):
         inp1 = Input("a")
         Output(Log(inp1), "outlog")
     f = Function(builder.ops)
-    return (f"test_log{name}", f, KunCompilerConfig(dtype=dtype))
+    return (f"test_log{name}", f, KunCompilerConfig(dtype=dtype, options={'no_fast_stat': 'no_warn'}))
 
 def test_log(lib, dtype, name):
     modu = lib.getModule(f"test_log{name}")
@@ -467,8 +494,15 @@ def check_skew_kurt():
         inp1 = Input("a")
         out2 = Output(WindowedSkew(inp1, 5), "ou2")
         out2 = Output(WindowedKurt(inp1, 5), "ou3")
+        # test both fast and slow mode
+        skew2 = WindowedSkew(inp1, 5)
+        kurt2 = WindowedKurt(inp1, 5)
+        skew2.attrs['no_fast_stat'] = True
+        kurt2.attrs['no_fast_stat'] = True
+        Output(skew2, "ou4")
+        Output(kurt2, "ou5")
     f = Function(builder.ops)
-    return "test_skew", f, KunCompilerConfig(input_layout="TS", output_layout="TS", dtype="double")
+    return "test_skew", f, KunCompilerConfig(input_layout="TS", output_layout="TS", dtype="double", options={'no_fast_stat': 'no_warn'})
 
 def test_skew_kurt():
     modu = lib.getModule("test_skew")
@@ -480,10 +514,13 @@ def test_skew_kurt():
     df = pd.DataFrame(inp)
     expected = df.rolling(5).skew()
     np.testing.assert_allclose(output, expected, equal_nan=True)
+    np.testing.assert_allclose(out["ou4"], expected, equal_nan=True)
+
     
     output = out["ou3"]
     expected = df.rolling(5).kurt()
     np.testing.assert_allclose(output, expected, equal_nan=True)
+    np.testing.assert_allclose(out["ou5"], expected, equal_nan=True)
 
 ######################################################
 
@@ -587,6 +624,7 @@ funclist = [
     check_skew_kurt(),
     check_aligned(),
     check_rank_alpha029(),
+    check_covar(),
     ]
 lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig(machine=get_compiler_flags()))
 
@@ -610,4 +648,5 @@ test_rank029(lib)
 test_skew_kurt()
 test_aligned(lib)
 test_loop_index()
+test_covar(lib)
 print("done")
