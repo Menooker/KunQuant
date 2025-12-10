@@ -1,5 +1,5 @@
 import KunQuant
-from KunQuant.Op import AcceptSingleValueInputTrait, Input, OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GloablStatefulOpTrait, UnaryElementwiseOp, BinaryElementwiseOp
+from KunQuant.Op import AcceptSingleValueInputTrait, Input, OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GlobalStatefulProducerTrait, GloablStatefulOpTrait, StateConsumerTrait, UnaryElementwiseOp, BinaryElementwiseOp
 from typing import List, Union
 
 class BackRef(OpBase, WindowedTrait):
@@ -12,16 +12,6 @@ class BackRef(OpBase, WindowedTrait):
     def required_input_window(self) -> int:
         return self.attrs["window"] + 1
 
-class WindowedQuantile(OpBase, WindowedTrait):
-    '''
-    Quantile in `window` rows ago.
-    Similar to pd.rolling(window).quantile(q, interpolation='linear')
-    '''
-    def __init__(self, v: OpBase, window: int, q: float) -> None:
-        super().__init__([v], [("window", window), ("q", q)])
-        
-    def required_input_window(self) -> int:
-        return self.attrs["window"] + 1
 
 class FastWindowedSum(OpBase, WindowedTrait, GloablStatefulOpTrait):
     '''
@@ -39,7 +29,7 @@ class FastWindowedSum(OpBase, WindowedTrait, GloablStatefulOpTrait):
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str], buf_name: str) -> str:
         return f"auto v{idx} = sum_{idx}.step({buf_name}, {inputs[0]}, {time_idx});"
 
-class Accumulator(OpBase, GloablStatefulOpTrait):
+class Accumulator(OpBase, GlobalStatefulProducerTrait):
     '''
     Accumulator is a stateful op that accumulates the input value over time.
     It can be used to compute running totals, moving averages, etc.'''
@@ -64,7 +54,7 @@ class Accumulator(OpBase, GloablStatefulOpTrait):
             raise RuntimeError(f"Accumulator {self.attrs['name']} is not used with any SetAccumulator")
         return super().verify(func)
 
-class SetAccumulator(OpBase):
+class SetAccumulator(OpBase, StateConsumerTrait):
     '''
     Set the value of an Accumulator to a value, if mask is set. Otherwise, it does nothing.
     '''
@@ -120,7 +110,7 @@ class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait):
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:
         return f"auto v{idx} = ema_{idx}.step({inputs[0]}, {time_idx});"
 
-class WindowedLinearRegression(OpBase, WindowedTrait, GloablStatefulOpTrait):
+class WindowedLinearRegression(OpBase, WindowedTrait, GlobalStatefulProducerTrait):
     '''
     Compute states of Windowed Linear Regression
     '''
@@ -135,8 +125,12 @@ class WindowedLinearRegression(OpBase, WindowedTrait, GloablStatefulOpTrait):
     
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str], buf_name: str) -> str:
         return f"const auto& v{idx} = linear_{idx}.step({buf_name}, {inputs[0]}, {time_idx});"
-    
-class WindowedLinearRegressionImplBase(OpBase):
+
+
+class WindowedLinearRegressionConsumerTrait(StateConsumerTrait):
+    pass
+
+class WindowedLinearRegressionImplBase(UnaryElementwiseOp, WindowedLinearRegressionConsumerTrait):
     def __init__(self, v: OpBase) -> None:
         super().__init__([v])
     
@@ -145,26 +139,60 @@ class WindowedLinearRegressionImplBase(OpBase):
             raise RuntimeError("WindowedLinearRegressionImpl expects WindowedLinearRegression Op as input")
         return super().verify(func)
 
-class WindowedLinearRegressionConsumerTrait:
-    pass
 
-class WindowedLinearRegressionRSqaureImpl(UnaryElementwiseOp, WindowedLinearRegressionConsumerTrait):
+class WindowedLinearRegressionRSqaureImpl(WindowedLinearRegressionImplBase):
     '''
     Compute RSqaure of Windowed Linear Regression
     '''
     pass
 
-class WindowedLinearRegressionSlopeImpl(UnaryElementwiseOp, WindowedLinearRegressionConsumerTrait):
+class WindowedLinearRegressionSlopeImpl(WindowedLinearRegressionImplBase):
     '''
     Compute RSqaure of Windowed Linear Regression
     '''
     pass
 
-class WindowedLinearRegressionResiImpl(BinaryElementwiseOp, WindowedLinearRegressionConsumerTrait):
+class WindowedLinearRegressionResiImpl(WindowedLinearRegressionImplBase):
     '''
     Compute RSqaure of Windowed Linear Regression
     '''
     pass
+
+class SkipListState(OpBase, GlobalStatefulProducerTrait):
+    '''
+    SkipListState is a stateful op that maintains a skip list of the input values.
+    '''
+    def __init__(self, oldvalue: OpBase, value: OpBase, window: int) -> None:
+        super().__init__([oldvalue, value], [("window", window)])
+    
+    def get_state_variable_name_prefix(self) -> str:
+        return "skip_list_"
+    
+    def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:
+        return f"auto& v{idx} = skip_list_{idx}.step({inputs[0]}, {inputs[1]}, {time_idx});"
+
+class SkipListConsumerOp(StateConsumerTrait):    
+    def verify(self, func: 'KunQuant.Stage.Function') -> None:
+        if len(self.inputs) < 1 or not isinstance(self.inputs[0], SkipListState):
+            raise RuntimeError("SkipListConsumerOp expects SkipListState Op as input")
+        return super().verify(func)
+
+class SkipListQuantile(SkipListConsumerOp, OpBase):
+    def __init__(self, v: OpBase, q: float) -> None:
+        super().__init__([v], [("q", q)])
+
+class SkipListRank(SkipListConsumerOp, BinaryElementwiseOp):
+    pass
+
+class SkipListMin(SkipListConsumerOp, UnaryElementwiseOp):
+    pass
+
+class SkipListMax(SkipListConsumerOp, UnaryElementwiseOp):
+    pass
+
+class SkipListArgMin(SkipListConsumerOp, OpBase):
+    pass
+
 
 class GenericCrossSectionalOp(CrossSectionalOp):
     '''

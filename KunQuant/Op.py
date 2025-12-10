@@ -74,6 +74,9 @@ def traverse_replace_map(op: 'OpBase', replace_map: Dict['OpBase', 'OpBase']) ->
     return traverse_replace_map(found, replace_map)
 
 class AcceptSingleValueInputTrait(ABC):
+    '''
+    The ops that accept a time_len=1 array as input
+    '''
     @abstractmethod
     def get_single_value_input_id() -> int:
         pass
@@ -476,6 +479,18 @@ class StatefulOpTrait(GenericCppCodegenTrait):
 class GloablStatefulOpTrait(StatefulOpTrait):
     '''
     The ops that have an internal state, and the state is carried between different time steps
+    '''
+    pass
+
+class GlobalStatefulProducerTrait(GloablStatefulOpTrait):
+    '''
+    The ops that have an internal state, and the state is carried between different time steps, and the state must be consumed by a StateConsumerTrait
+    '''
+    pass
+
+class StateConsumerTrait:
+    '''
+    The ops that consume a state from a GlobalStatefulProducerTrait
     '''
     pass
 

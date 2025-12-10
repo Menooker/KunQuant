@@ -194,6 +194,59 @@ def test_covar(lib):
 
 ####################################
 
+def check_quantile():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out1 = Output(WindowedQuantile(inp1, 10, 0.49), "ou1")
+    f = Function(builder.ops)
+    return "test_quantile", f, KunCompilerConfig(input_layout="TS", output_layout="TS", dtype="double", options={"no_fast_stat": 'no_warn'})
+
+def test_quantile(lib):
+    modu = lib.getModule("test_quantile")
+    assert(modu)
+    inp = np.random.rand(200, 24).astype("float64")
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": inp}, 0, 200)
+    outquantile = out["ou1"]
+    df = pd.DataFrame(inp)
+    expected_quantile = df.rolling(10).quantile(0.49, interpolation='linear').to_numpy()
+    np.testing.assert_allclose(outquantile, expected_quantile, rtol=1e-6, equal_nan=True)
+
+####################################
+
+def check_large_rank():
+    builder = Builder()
+    with builder:
+        inp1 = Input("a")
+        out1 = Output(TsRank(inp1, 200), "ou1")
+        out2 = Output(WindowedMin(inp1, 200), "min")
+        out3 = Output(WindowedMax(inp1, 200), "max")
+        out4 = Output(TsArgMin(inp1, 200), "argmin")
+        out5 = Output(TsArgMax(inp1, 200), "argmax")
+    f = Function(builder.ops)
+    return "test_large_rank", f, KunCompilerConfig(input_layout="TS", output_layout="TS", dtype="double", options={"no_fast_stat": 'no_warn'})
+
+def test_large_rank(lib):
+    modu = lib.getModule("test_large_rank")
+    assert(modu)
+    inp = np.random.rand(2000, 24).astype("float64")
+    # test with duplicates
+    inp[400:410,:] = -1
+    # inp[1400:1410,:] = 10
+    executor = kr.createSingleThreadExecutor()
+    out = kr.runGraph(executor, modu, {"a": inp}, 0, 2000)
+    outrank = out["ou1"]
+    df = pd.DataFrame(inp)
+    expected_rank = df.rolling(200).rank().to_numpy()
+    np.testing.assert_allclose(outrank, expected_rank, rtol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(out["min"], df.rolling(200).min().to_numpy(), rtol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(out["max"], df.rolling(200).max().to_numpy(), rtol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(out["argmin"], df.rolling(200).apply(np.argmin)+1, rtol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(out["argmax"], df.rolling(200).apply(np.argmax)+1, rtol=1e-6, equal_nan=True)
+
+####################################
+
 def RefExpMovingAvg(v: pd.DataFrame):
     return v.ewm(span=5, adjust=False, ignore_na=True).mean()
 
@@ -625,6 +678,8 @@ funclist = [
     check_aligned(),
     check_rank_alpha029(),
     check_covar(),
+    check_quantile(),
+    check_large_rank(),
     ]
 lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig(machine=get_compiler_flags()))
 
@@ -649,4 +704,6 @@ test_skew_kurt()
 test_aligned(lib)
 test_loop_index()
 test_covar(lib)
+test_quantile(lib)
+test_large_rank(lib)
 print("done")

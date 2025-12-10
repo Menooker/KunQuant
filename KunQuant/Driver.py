@@ -106,6 +106,7 @@ def compileit(f: Function, module_name: str, partition_factor = 3, dtype = "floa
         blocking_len = suggested_len[dtype]
     if element_size[dtype] * blocking_len not in simd_len:
         raise RuntimeError(f"Blocking length {blocking_len} is not supported for {dtype} on {_cpu_arch}")
+    options['blocking_len'] = blocking_len
     if output_layout not in ["STs", "TS", "STREAM"]:
         raise RuntimeError("Bad output_layout name " + output_layout)
     if input_layout not in ["STs", "TS", "STREAM"]:
