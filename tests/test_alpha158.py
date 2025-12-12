@@ -45,7 +45,7 @@ def check_alpha158(avx512, keep, tempdir):
     else:
         simd_len = 2
     target = [("alpha158", f, KunCompilerConfig(dtype='double', blocking_len=simd_len, partition_factor=4,
-               output_layout="TS", input_layout="TS", options={"opt_reduce": True, "fast_log": True}))]
+               output_layout="TS", input_layout="TS", options={"opt_reduce": True, "fast_log": True, "no_fast_stat": True}))]
     if avx512:
         machine = cfake.X64CPUFlags(avx512=True, avx512dq=True, avx512vl=True)
     else:
