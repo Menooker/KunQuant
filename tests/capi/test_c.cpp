@@ -130,6 +130,7 @@ int main(int args, char **argv) {
         printf("Bad args\n");
         return 2;
     }
+    srand(114514);
     auto ret = testBatch(argv[1]);
     if (ret) {
         return ret;
