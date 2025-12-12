@@ -132,7 +132,7 @@ class WindowedLinearRegressionConsumerTrait(StateConsumerTrait):
 
 class WindowedLinearRegressionImplBase(UnaryElementwiseOp, WindowedLinearRegressionConsumerTrait):
     def __init__(self, v: OpBase) -> None:
-        super().__init__([v])
+        super().__init__(v)
     
     def verify(self, func: 'KunQuant.Stage.Function') -> None:
         if len(self.inputs) < 1 or not isinstance(self.inputs[0], WindowedLinearRegression):
