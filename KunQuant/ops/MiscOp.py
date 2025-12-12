@@ -128,31 +128,30 @@ class WindowedLinearRegression(OpBase, WindowedTrait, GlobalStatefulProducerTrai
 
 
 class WindowedLinearRegressionConsumerTrait(StateConsumerTrait):
-    pass
-
-class WindowedLinearRegressionImplBase(UnaryElementwiseOp, WindowedLinearRegressionConsumerTrait):
-    def __init__(self, v: OpBase) -> None:
-        super().__init__(v)
-    
     def verify(self, func: 'KunQuant.Stage.Function') -> None:
         if len(self.inputs) < 1 or not isinstance(self.inputs[0], WindowedLinearRegression):
             raise RuntimeError("WindowedLinearRegressionImpl expects WindowedLinearRegression Op as input")
-        return super().verify(func)
+        return OpBase.verify(self, func)
 
+class WindowedLinearRegressionImplUnaryBase(WindowedLinearRegressionConsumerTrait, UnaryElementwiseOp):
+    pass
 
-class WindowedLinearRegressionRSqaureImpl(WindowedLinearRegressionImplBase):
+class WindowedLinearRegressionImplBinaryBase(WindowedLinearRegressionConsumerTrait, BinaryElementwiseOp):
+    pass
+
+class WindowedLinearRegressionRSqaureImpl(WindowedLinearRegressionImplUnaryBase):
     '''
     Compute RSqaure of Windowed Linear Regression
     '''
     pass
 
-class WindowedLinearRegressionSlopeImpl(WindowedLinearRegressionImplBase):
+class WindowedLinearRegressionSlopeImpl(WindowedLinearRegressionImplUnaryBase):
     '''
     Compute RSqaure of Windowed Linear Regression
     '''
     pass
 
-class WindowedLinearRegressionResiImpl(WindowedLinearRegressionImplBase):
+class WindowedLinearRegressionResiImpl(WindowedLinearRegressionImplBinaryBase):
     '''
     Compute RSqaure of Windowed Linear Regression
     '''
