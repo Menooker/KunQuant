@@ -42,9 +42,9 @@ struct SkipListStateImpl {
     }
 };
 
-template <typename T, int simdLen, int window>
+template <typename T, int simdLen, int expectedwindow>
 struct SkipListState : SkipListStateImpl<T, simdLen> {
-    SkipListState() : SkipListStateImpl<T, simdLen>(window) {}
+    SkipListState() : SkipListStateImpl<T, simdLen>(expectedwindow) {}
 };
 } // namespace
 

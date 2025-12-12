@@ -103,7 +103,7 @@ def _is_bad_op_to_add(op: OpBase, partiton: _Partition):
                 has_bad_input = True
     return has_bad_input, connected_to_parti
 
-def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _PartitionOpInfo], partiton: _Partition, f: Function) -> OpBase:
+def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _PartitionOpInfo], partiton: _Partition, f: Function, edge_ops: Dict[OpBase, bool]) -> OpBase:
     '''
     Select the next op to put into the partition.
     1. If there is CrossSectionalOp, always select it first
@@ -113,7 +113,8 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
     '''
     cur_best = (-1, -1, -1) # (is_loop, critical, score)
     cur_best_op: OpBase = None
-    edge_ops = partiton.get_edge_ops(f)
+    if edge_ops is None:
+        edge_ops = partiton.get_edge_ops(f)
     for op, idx in ready_ops:
         if isinstance(op, CrossSectionalOp):
             return op
@@ -152,7 +153,13 @@ def _select_next(ready_ops: List[Tuple[OpBase, int]], info: Dict[OpBase, _Partit
             cur_best = score_tuple
             cur_best_op = op
     return cur_best_op
-        
+
+def _has_critical_ops(edge_ops: Dict[OpBase, bool]) -> bool:
+    for op, is_in_loop in edge_ops.items():
+        if is_in_loop:
+            return True
+    return False
+
 def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
     opinfo = _collect_op_info(f)
     partitions: List[_Partition] = []
@@ -162,7 +169,7 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
     while len(ready_ops):
         partition = _Partition(OrderedDict(), set())
         # print("============\nnew partition:", partition)
-        selected = _select_next(ready_ops, opinfo, partition, f)
+        selected = _select_next(ready_ops, opinfo, partition, f, None)
         while selected:
             # remove the pending dependency. If an op is ready, put into ready queue
             def maintain_ready_queue(s_op: OpBase):
@@ -198,7 +205,8 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
                         partition.add(opinfo, inp)
                 partition.add(opinfo, selected)
                 # print("@@@add ", selected)
-            if partition.num_outputs > partition_thres:
+            next_edge_ops = partition.get_edge_ops(f)
+            if partition.num_outputs > partition_thres and not _has_critical_ops(next_edge_ops):
                 # if an output is directly connected with the partition, add it
                 direct_output = None
                 for candidate, bat in ready_ops:
@@ -213,7 +221,7 @@ def _partition(f: Function, partition_thres = 3) -> List[_Partition]:
                     continue
                 # too many outputs visited, make a new partition
                 break
-            selected = _select_next(ready_ops, opinfo, partition, f)
+            selected = _select_next(ready_ops, opinfo, partition, f, next_edge_ops)
         if partition.ops.__len__():
             partitions.append(partition)
     if to_visit.__len__() != 0:
