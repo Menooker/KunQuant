@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Kun/SkipList.hpp>
 #include <KunSIMD/Vector.hpp>
 #include <algorithm>
 #include <cmath>
@@ -10,42 +11,136 @@
 namespace kun {
 namespace ops {
 
-namespace quantile {
-template <typename T>
-T call(T *sorted, int length, T q) {
-    T findex = (length - 1) * q;
-    int index = findex;
-    T fraction = findex - index;
-    if (std::abs(fraction) < 1e-6) {
-        return sorted[index];
+namespace {
+template <typename T, int simdLen>
+struct SkipListStateImpl {
+    using simd_t = kun_simd::vec<T, simdLen>;
+    SkipList skipList[simdLen];
+    int lastInsertRank[simdLen];
+    size_t window;
+    SkipListStateImpl(size_t window) : window(window) {
+        for (int i = 0; i < simdLen; i++) {
+            skipList[i].init(window);
+        }
     }
-    T i = sorted[index];
-    T j = sorted[index + 1];
-    return i + (j - i) * fraction;
-}
-
-} // namespace quantile
-template <typename T, int stride, int window, typename TInput>
-kun_simd::vec<T, stride> windowedQuantile(TInput &input, size_t index, T q) {
-    alignas(alignof(kun_simd::vec<T, stride>)) T result[stride];
-    T sorted[window];
-    for (int i = 0; i < stride; i++) {
-        int cnt = 0;
-        for (int j = 0; j < window; j++) {
-            auto v = input.getWindowLane(index, j, i);
-            if (!std::isnan(v)) {
-                sorted[cnt] = v;
-                cnt++;
+    SkipListStateImpl &step(const simd_t &oldvalue, const simd_t &value,
+                            size_t index) {
+        alignas(alignof(simd_t)) T values[simdLen];
+        simd_t::store(oldvalue, values);
+        for (int i = 0; i < simdLen; i++) {
+            if (!std::isnan(values[i])) {
+                skipList[i].remove(values[i]);
             }
         }
-        if (cnt > 0) {
-            std::sort(sorted, sorted + cnt);
-            result[i] = quantile::call<T>(sorted, cnt, q);
-        } else {
+        simd_t::store(value, values);
+        for (int i = 0; i < simdLen; i++) {
+            if (!std::isnan(values[i])) {
+                lastInsertRank[i] = skipList[i].insert(values[i], index);
+            }
+        }
+        return *this;
+    }
+};
+
+template <typename T, int simdLen, int expectedwindow>
+struct SkipListState : SkipListStateImpl<T, simdLen> {
+    SkipListState() : SkipListStateImpl<T, simdLen>(expectedwindow) {}
+};
+} // namespace
+
+// https://github.com/pandas-dev/pandas/blob/main/pandas/_libs/window/aggregations.pyx
+
+template <typename T, int stride>
+kun_simd::vec<T, stride> SkipListQuantile(SkipListStateImpl<T, stride> &state,
+                                          T q) {
+    alignas(alignof(kun_simd::vec<T, stride>)) T result[stride];
+    size_t index;
+    bool found;
+    for (int i = 0; i < stride; i++) {
+        int nobs = state.skipList[i].size();
+        if (nobs != state.window) {
             result[i] = NAN;
+            continue;
+        }
+        T idx_with_fraction = q * (nobs - 1);
+        int idx = static_cast<int>(idx_with_fraction);
+        if (idx == idx_with_fraction) {
+            result[i] = state.skipList[i].get(idx, index, found);
+        } else {
+            auto vlow = state.skipList[i].get(idx, index, found);
+            auto vhigh = state.skipList[i].get(idx + 1, index, found);
+            result[i] = vlow + (vhigh - vlow) * (idx_with_fraction - idx);
         }
     }
     return kun_simd::vec<T, stride>::load(result);
 }
+
+template <typename T, int stride>
+kun_simd::vec<T, stride> SkipListRank(SkipListStateImpl<T, stride> &state,
+                                      const kun_simd::vec<T, stride> &cur) {
+    alignas(alignof(kun_simd::vec<T, stride>)) T result[stride];
+    alignas(alignof(kun_simd::vec<T, stride>)) T curval[stride];
+    kun_simd::vec<T, stride>::store(cur, curval);
+    size_t index;
+    bool found;
+    for (int i = 0; i < stride; i++) {
+        int nobs = state.skipList[i].size();
+        if (nobs != state.window) {
+            result[i] = NAN;
+            continue;
+        }
+        double rank = state.lastInsertRank[i] + 1;
+        double rank_min = state.skipList[i].minRank(curval[i]) + 1;
+        rank = (((rank * (rank + 1) / 2) - ((rank_min - 1) * rank_min / 2)) /
+                (rank - rank_min + 1));
+        result[i] = rank;
+    }
+    return kun_simd::vec<T, stride>::load(result);
+}
+
+template <typename T, int stride>
+kun_simd::vec<T, stride> SkipListMinMax(SkipListStateImpl<T, stride> &state, bool is_min) {
+    alignas(alignof(kun_simd::vec<T, stride>)) T result[stride];
+    size_t index;
+    bool found;
+    for (int i = 0; i < stride; i++) {
+        int nobs = state.skipList[i].size();
+        if (nobs != state.window) {
+            result[i] = NAN;
+            continue;
+        }
+        int rank = is_min ? 0 : state.window - 1;
+        result[i] = state.skipList[i].get(rank, index, found);
+    }
+    return kun_simd::vec<T, stride>::load(result);
+}
+
+template <typename T, int stride>
+kun_simd::vec<T, stride> SkipListMin(SkipListStateImpl<T, stride> &state) {
+    return SkipListMinMax(state, true);
+}
+
+template <typename T, int stride>
+kun_simd::vec<T, stride> SkipListMax(SkipListStateImpl<T, stride> &state) {
+    return SkipListMinMax(state, false);
+}
+
+template <typename T, int stride>
+kun_simd::vec<T, stride> SkipListArgMin(SkipListStateImpl<T, stride> &state, size_t cur_idx) {
+    alignas(alignof(kun_simd::vec<T, stride>)) T result[stride];
+    size_t index;
+    bool found;
+    for (int i = 0; i < stride; i++) {
+        int nobs = state.skipList[i].size();
+        if (nobs != state.window) {
+            result[i] = NAN;
+            continue;
+        }
+        state.skipList[i].get(0, index, found);
+        result[i] = index + nobs - cur_idx;
+    }
+    return kun_simd::vec<T, stride>::load(result);
+}
+
 } // namespace ops
 } // namespace kun

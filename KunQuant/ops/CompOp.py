@@ -1,13 +1,20 @@
 from .ReduceOp import ReduceAdd, ReduceMul, ReduceArgMax, ReduceRank, ReduceMin, ReduceMax, ReduceDecayLinear, ReduceArgMin
 from KunQuant.Op import ConstantOp, OpBase, CompositiveOp, WindowedTrait, ForeachBackWindow, WindowedTempOutput, Builder, IterValue, WindowLoopIndex
 from .ElewiseOp import And, DivConst, GreaterThan, LessThan, Or, Select, SetInfOrNanToValue, Sub, Mul, Sqrt, SubConst, Div, CmpOp, Exp, Log, Min, Max, Equals, Abs
-from .MiscOp import Accumulator, BackRef, SetAccumulator, WindowedLinearRegression, WindowedLinearRegressionResiImpl, WindowedLinearRegressionRSqaureImpl, WindowedLinearRegressionSlopeImpl, ReturnFirstValue
+from .MiscOp import Accumulator, BackRef, SetAccumulator, WindowedLinearRegression, WindowedLinearRegressionResiImpl,\
+    WindowedLinearRegressionRSqaureImpl, WindowedLinearRegressionSlopeImpl, ReturnFirstValue, SkipListState, SkipListQuantile, SkipListRank, SkipListMin, SkipListMax,\
+    SkipListArgMin
 from collections import OrderedDict
 from typing import Union, List, Tuple, Dict
 import math
 
 def _is_fast_stat(opt: dict, attrs: dict) -> bool:
     return not opt.get("no_fast_stat", True) and not attrs.get("no_fast_stat", False)
+
+def _decide_use_skip_list(window: int, blocking_len: int) -> bool:
+    naive_cost = window
+    skip_list_cost = math.log2(window) * blocking_len * 5
+    return skip_list_cost < naive_cost
 
 class WindowedCompositiveOp(CompositiveOp, WindowedTrait):
     def __init__(self, v: OpBase, window: int, v2 = None) -> None:
@@ -17,7 +24,7 @@ class WindowedCompositiveOp(CompositiveOp, WindowedTrait):
         super().__init__(inputs, [("window", window)])
 
 class WindowedReduce(WindowedCompositiveOp):
-    def make_reduce(self, v: OpBase) -> OpBase:
+    def make_reduce(self, v: OpBase, newest: OpBase) -> OpBase:
         raise RuntimeError("Not implemented")
     
     def decompose(self, options: dict) -> List[OpBase]:
@@ -26,7 +33,7 @@ class WindowedReduce(WindowedCompositiveOp):
             v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
             v1 = ForeachBackWindow(v0, self.attrs["window"])
             itr = IterValue(v1, v0)
-            v2 = self.make_reduce(itr)
+            v2 = self.make_reduce(itr, self.inputs[0])
         return b.ops
 
 class WindowedSum(WindowedReduce):
@@ -35,7 +42,7 @@ class WindowedSum(WindowedReduce):
     For indices < window-1, the output will be NaN
     similar to pandas.DataFrame.rolling(n).sum()
     '''
-    def make_reduce(self, v: OpBase) -> OpBase:
+    def make_reduce(self, v: OpBase, newest: OpBase) -> OpBase:
         return ReduceAdd(v)
 
 class WindowedProduct(WindowedReduce):
@@ -44,26 +51,55 @@ class WindowedProduct(WindowedReduce):
     For indices < window-1, the output will be NaN
     similar to pandas.DataFrame.rolling(n).product()
     '''
-    def make_reduce(self, v: OpBase) -> OpBase:
+    def make_reduce(self, v: OpBase, newest: OpBase) -> OpBase:
         return ReduceMul(v)
 
-class WindowedMin(WindowedReduce):
+class _WindowedMinMaxBase(WindowedReduce):
+    '''
+    Base class for windowed min/max ops that can use skip list. If the window is small enough, use naive linear scan. Otherwise, use skip list
+    with Log(window) complexity.
+    '''
+    def on_skip_list(self, skplist: SkipListState, cur: OpBase) -> OpBase:
+        raise RuntimeError("Not implemented")
+    
+    def decompose(self, options: dict) -> List[OpBase]:
+        window = self.attrs["window"]
+        blocking_len = options["blocking_len"]
+        if _decide_use_skip_list(window, blocking_len):
+            b = Builder(self.get_parent())
+            with b:
+                newv = self.inputs[0]
+                oldv = BackRef(newv, window)
+                v2 = SkipListState(oldv, newv, window)
+                self.on_skip_list(v2, newv)
+            return b.ops
+        else:
+            return super().decompose(options)
+
+class WindowedMin(_WindowedMinMaxBase):
     '''
     Min of a rolling look back window, including the current newest data.
     For indices < window-1, the output will be NaN
     similar to pandas.DataFrame.rolling(n).min()
     '''
-    def make_reduce(self, v: OpBase) -> OpBase:
+    def make_reduce(self, v: OpBase, newest: OpBase) -> OpBase:
         return ReduceMin(v)
     
-class WindowedMax(WindowedReduce):
+    def on_skip_list(self, skplist: SkipListState, cur: OpBase) -> OpBase:
+        return SkipListMin(skplist)
+
+
+class WindowedMax(_WindowedMinMaxBase):
     '''
     Max of a rolling look back window, including the current newest data.
     For indices < window-1, the output will be NaN
     similar to pandas.DataFrame.rolling(n).max()
     '''
-    def make_reduce(self, v: OpBase) -> OpBase:
+    def make_reduce(self, v: OpBase, newest: OpBase) -> OpBase:
         return ReduceMax(v)
+    
+    def on_skip_list(self, skplist: SkipListState, cur: OpBase) -> OpBase:
+        return SkipListMax(skplist)
 
 # small - sum
 def _kahan_sub(mask: OpBase, sum: OpBase, small: OpBase, compensation: OpBase) -> Union[OpBase, OpBase]:
@@ -424,37 +460,42 @@ class WindowedKurt(WindowedCompositiveOp):
         return b.ops
 
 
-class TsArgMax(WindowedCompositiveOp):
+class TsArgMax(WindowedReduce):
     '''
     ArgMax in a rolling look back window, including the current newest data.
     The result should be the index of the max element in the rolling window. The index of the oldest element of the rolling window is 1.
     Similar to df.rolling(window).apply(np.argmax) + 1 
     '''
     def decompose(self, options: dict) -> List[OpBase]:
-        b = Builder(self.get_parent())
-        with b:
-            v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
-            v1 = ForeachBackWindow(v0, self.attrs["window"])
-            v2 = ReduceArgMax(IterValue(v1, v0))
-            v3 = SubConst(v2, self.attrs["window"], True)
-        return b.ops
+        window = self.attrs["window"]
+        blocking_len = options["blocking_len"]
+        if _decide_use_skip_list(window, blocking_len):
+            b = Builder(self.get_parent())
+            with b:
+                TsArgMin(0-self.inputs[0], window)
+            return b.ops
+        else:
+            return super().decompose(options)
     
-class TsArgMin(WindowedCompositiveOp):
+    def make_reduce(self, v: OpBase, newest: OpBase) -> OpBase:
+        v2 = ReduceArgMax(v)
+        return self.attrs["window"] - v2
+    
+class TsArgMin(_WindowedMinMaxBase):
     '''
     ArgMin in a rolling look back window, including the current newest data.
     The result should be the index of the min element in the rolling window. The index of the oldest element of the rolling window is 1.
     Similar to df.rolling(window).apply(np.argmin) + 1 
     '''
-    def decompose(self, options: dict) -> List[OpBase]:
-        b = Builder(self.get_parent())
-        with b:
-            v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
-            v1 = ForeachBackWindow(v0, self.attrs["window"])
-            v2 = ReduceArgMin(IterValue(v1, v0))
-            v3 = SubConst(v2, self.attrs["window"], True)
-        return b.ops
+    def on_skip_list(self, skplist: SkipListState, cur: OpBase) -> OpBase:
+        return SkipListArgMin([skplist], [])
+    
+    def make_reduce(self, v: OpBase, newest: OpBase) -> OpBase:
+        v2 = ReduceArgMin(v)
+        return self.attrs["window"] - v2
 
-class TsRank(WindowedCompositiveOp):
+
+class TsRank(_WindowedMinMaxBase):
     '''
     Time series rank of the newest data in a rolling look back window, including the current newest data.
     Let num_values_less = the number of values in rolling window that is less than the current newest data.
@@ -462,13 +503,11 @@ class TsRank(WindowedCompositiveOp):
     rank = num_values_less + (num_values_eq + 1) / 2
     Similar to df.rolling(window).rank()
     '''
-    def decompose(self, options: dict) -> List[OpBase]:
-        b = Builder(self.get_parent())
-        with b:
-            v0 = WindowedTempOutput(self.inputs[0], self.attrs["window"])
-            v1 = ForeachBackWindow(v0, self.attrs["window"])
-            v2 = ReduceRank(IterValue(v1, v0), self.inputs[0])
-        return b.ops
+    def on_skip_list(self, skplist: SkipListState, cur: OpBase) -> OpBase:
+        return SkipListRank(skplist, cur)
+    
+    def make_reduce(self, v: OpBase, newest: OpBase) -> OpBase:
+        return ReduceRank(v, newest)
 
 class Clip(CompositiveOp):
     '''
@@ -636,4 +675,27 @@ class WindowedMaxDrawdown(WindowedCompositiveOp):
                 filtered = Select(index >= max_bar_index, IterValue(each, v), inf)
             trough = ReduceMin(filtered)
             (peak - trough) / peak
+        return b.ops
+    
+
+class WindowedQuantile(CompositiveOp, WindowedTrait):
+    '''
+    Quantile in `window` rows ago.
+    Similar to pd.rolling(window).quantile(q, interpolation='linear')
+    '''
+    def __init__(self, v: OpBase, window: int, q: float) -> None:
+        super().__init__([v], [("window", window), ("q", q)])
+        
+    def required_input_window(self) -> int:
+        return self.attrs["window"] + 1
+    
+    def decompose(self, options: dict) -> List[OpBase]:
+        b = Builder(self.get_parent())
+        window = self.attrs["window"]
+        v = self.inputs[0]
+        q = self.attrs["q"]
+        with b:
+            old = BackRef(v, window)
+            v2 = SkipListState(old, v, window)
+            v3 = SkipListQuantile(v2, q)
         return b.ops

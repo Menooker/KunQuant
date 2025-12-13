@@ -272,11 +272,14 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             buf_name = _get_buffer_name(op.inputs[0], inp[0])
             funcname = "windowedRef"
             scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>({buf_name}, i);'))
-        elif isinstance(op, WindowedQuantile):
+        elif isinstance(op, SkipListQuantile):
             assert(op.get_parent() is None)
-            buf_name = _get_buffer_name(op.inputs[0], inp[0])
-            funcname = "windowedQuantile"
-            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{elem_type}, {simd_lanes}, {op.attrs["window"]}>({buf_name}, i, {_float_value_to_float(op.attrs["q"], elem_type)});'))
+            funcname = "SkipListQuantile"
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{elem_type}, {simd_lanes}>(v{inp[0]}, {_float_value_to_float(op.attrs["q"], elem_type)});'))
+        elif isinstance(op, SkipListArgMin):
+            assert(op.get_parent() is None)
+            funcname = "SkipListArgMin"
+            scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{elem_type}, {simd_lanes}>(v{inp[0]}, i);'))
         elif isinstance(op, GloablStatefulOpTrait):
             if stream_mode: raise RuntimeError(f"Stream Mode does not support {op.__class__.__name__}")
             assert(op.get_parent() is None)

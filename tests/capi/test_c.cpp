@@ -9,7 +9,7 @@
         printf("CHECK(" #V ") faild\n");                                       \
         return 3;                                                              \
     }
-
+extern bool testSkipList();
 static int testBatch(const char *libpath) {
     // prepare inputs
     const size_t num_stocks = 24;
@@ -123,10 +123,14 @@ static int testStream(const char *libpath) {
 }
 
 int main(int args, char **argv) {
+    if (!testSkipList()) {
+        return 3;
+    }
     if (args != 3) {
         printf("Bad args\n");
         return 2;
     }
+    srand(114514);
     auto ret = testBatch(argv[1]);
     if (ret) {
         return ret;
