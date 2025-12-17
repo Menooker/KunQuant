@@ -351,7 +351,7 @@ template struct StreamBuffer<float>;
 template struct StreamBuffer<double>;
 
 StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
-                             size_t num_stocks)
+                             size_t num_stocks, InputStreamBase* states)
     : m{m} {
     if (m->required_version != VERSION) {
         throw std::runtime_error("The required version in the module does not "
@@ -363,8 +363,17 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
     }
     if (m->init_state_buffers) {
         state_buffers = m->init_state_buffers(num_stocks);
-        for (auto &buf : state_buffers) {
-            buf->initialize();
+        if (states) {
+            for (auto &buf : state_buffers) {
+                if (!buf->deserialize(states)) {
+                    throw std::runtime_error(
+                        "Failed to deserialize state buffer");
+                }
+            }
+        } else {
+            for (auto &buf : state_buffers) {
+                buf->initialize();
+            }
         }
     }
     std::vector<Buffer> rtlbuffers;
@@ -460,8 +469,18 @@ void StreamContext::run() {
 StreamContext::~StreamContext() = default;
 
 
+bool StreamContext::serializeStates(OutputStreamBase* stream) {
+    for (auto& ptr: state_buffers) {
+        if (!ptr->serialize(stream)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 StateBuffer *StateBuffer::make(size_t num_objs, size_t elem_size,
-                               CtorFn_t ctor_fn, DtorFn_t dtor_fn) {
+                               CtorFn_t ctor_fn, DtorFn_t dtor_fn, SerializeFn_t serialize_fn,
+                               DeserializeFn_t deserialize_fn) {
     auto ret = kunAlignedAlloc(KUN_MALLOC_ALIGNMENT,
         sizeof(StateBuffer) + num_objs * elem_size);
     auto buf = (StateBuffer *)ret;
@@ -470,6 +489,8 @@ StateBuffer *StateBuffer::make(size_t num_objs, size_t elem_size,
     buf->initialized = 0;
     buf->ctor_fn = ctor_fn;
     buf->dtor_fn = dtor_fn;
+    buf->serialize_fn = serialize_fn;
+    buf->deserialize_fn = deserialize_fn;
     return buf;
 }
 

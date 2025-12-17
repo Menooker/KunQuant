@@ -17,6 +17,7 @@ Python recipe (https://rhettinger.wordpress.com/2010/02/06/lost-knowledge/)
 */
 
 #include "SkipList.hpp"
+#include "StateBuffer.hpp"
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -294,4 +295,68 @@ double SkipList::get(int rank, size_t &index, bool &found) {
 }
 
 int SkipList::size() const { return impl->size; }
+
+bool SkipList::serialize(OutputStreamBase *stream, int expsize) const {
+    if (!stream->write(&impl->size, sizeof(impl->size))) {
+        return false;
+    }
+    for(int i=0;i<impl->size;i++) {
+        size_t index;
+        bool found;
+        double value = impl->get(i, index, found);
+        if (!found) {
+            return false;
+        }
+        if (!stream->write(&value, sizeof(value))) {
+            return false;
+        }
+        if (!stream->write(&index, sizeof(index))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool SkipList::deserialize(InputStreamBase *stream, int expsize) {
+    size_t size;
+    if (!stream->read(&size, sizeof(size))) {
+        return false;
+    }
+    for (size_t i = 0; i < size; i++) {
+        double value;
+        size_t index;
+        if (!stream->read(&value, sizeof(value))) {
+            return false;
+        }
+        if (!stream->read(&index, sizeof(index))) {
+            return false;
+        }
+        impl->insert(value, index);
+    }
+    return true;
+}
+
+
+bool serializeSkipList(SkipList* skiplist, int* lastInsertRank, size_t size, size_t window, OutputStreamBase* stream) {
+    if (!stream->write(lastInsertRank, size * sizeof(int))) {
+        return false;
+    }
+    for (size_t i = 0; i < size; i++) {
+        if (!skiplist->serialize(stream, window)) {
+            return false;
+        }
+    }
+    return true;
+}
+bool deserializeSkipList(SkipList* skiplist, int* lastInsertRank, size_t size, size_t window, InputStreamBase* stream) {
+    if (!stream->read(lastInsertRank, size * sizeof(int))) {
+        return false;
+    }
+    for (size_t i = 0; i < size; i++) {
+        if (!skiplist[i].deserialize(stream, window)) {
+            return false;
+        }
+    }
+    return true;
+}
 } // namespace kun

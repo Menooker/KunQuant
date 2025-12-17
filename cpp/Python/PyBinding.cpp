@@ -1,5 +1,6 @@
 #include <Kun/Context.hpp>
 #include <Kun/Module.hpp>
+#include <Kun/IO.hpp>
 #include <Kun/RunGraph.hpp>
 #include <KunSIMD/cpu/Table.hpp>
 #ifdef _WIN32
@@ -59,8 +60,8 @@ struct StreamContextWrapper {
     std::shared_ptr<kun::Library> lib;
     kun::StreamContext ctx;
     StreamContextWrapper(std::shared_ptr<kun::Executor> exec,
-                         const ModuleHandle *m, size_t num_stocks)
-        : lib{m->lib}, ctx{std::move(exec), m->modu, num_stocks}
+                         const ModuleHandle *m, size_t num_stocks, kun::InputStreamBase* states = nullptr)
+        : lib{m->lib}, ctx{std::move(exec), m->modu, num_stocks, states}
            {}
 };
 } // namespace
@@ -403,6 +404,27 @@ PYBIND11_MODULE(KunRunner, m) {
     py::class_<StreamContextWrapper>(m, "StreamContext")
         .def(py::init<std::shared_ptr<kun::Executor>, const ModuleHandle *,
                       size_t>())
+        .def(py::init([](std::shared_ptr<kun::Executor> exec,
+                         const ModuleHandle *mod, size_t stocks,
+                         py::object init) {
+            if (py::isinstance<std::string>(init)) {
+                auto filename = py::cast<std::string>(init);
+                kun::FileInputStream stream(filename);
+                return new StreamContextWrapper(std::move(exec), mod, stocks,
+                                                &stream);
+            } else if (py::isinstance<py::bytes>(init)) {
+                py::bytes b = py::cast<py::bytes>(init);
+                char *data;
+                py::ssize_t size;
+                if (PYBIND11_BYTES_AS_STRING_AND_SIZE(b.ptr(), &data, &size))
+                    throw std::runtime_error("Failed to get bytes data");
+                kun::MemoryInputStream stream{data, (size_t)size};
+                return new StreamContextWrapper(std::move(exec), mod, stocks,
+                                                &stream);
+            }
+            throw std::runtime_error(
+                "Bad type for init, expecting filename or bytes");
+        }))
         .def("queryBufferHandle",
              [](StreamContextWrapper &t, const char *name) {
                  return t.ctx.queryBufferHandle(name);
@@ -448,5 +470,24 @@ PYBIND11_MODULE(KunRunner, m) {
                     ths.pushData(handle, (const double *)data.data());
                 }
             })
+        .def(
+            "serializeStates",
+            [](StreamContextWrapper &t, py::object fileNameOrNone) -> py::object {
+                if (py::isinstance<py::str>(fileNameOrNone)) {
+                    auto filename = py::cast<std::string>(fileNameOrNone);
+                    kun::FileOutputStream stream(filename);
+                    if (!t.ctx.serializeStates(&stream)) {
+                        throw std::runtime_error("Failed to serialize states");
+                    }
+                    return py::none();
+                }
+                kun::MemoryOutputStream stream;
+                if (!t.ctx.serializeStates(&stream)) {
+                    throw std::runtime_error("Failed to serialize states");
+                }
+                py::bytes b(stream.getData(), (py::ssize_t)stream.getSize());
+                return b;
+            },
+            py::arg("fileNameOrNone") = py::none())
         .def("run", [](StreamContextWrapper &t) { t.ctx.run(); });
 }
