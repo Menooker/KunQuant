@@ -2,6 +2,7 @@
 
 #include "Context.hpp"
 #include "Module.hpp"
+#include "StateBuffer.hpp"
 #include <unordered_map>
 #include <string>
 #include <vector>
@@ -34,6 +35,7 @@ struct AlignedPtr {
 
 struct KUN_API StreamContext {
     std::vector<AlignedPtr> buffers;
+    std::vector<StateBufferPtr> state_buffers;
     Context ctx;
     const Module *m;
     StreamContext(std::shared_ptr<Executor> exec, const Module *m,

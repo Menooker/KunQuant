@@ -17,6 +17,8 @@ python tests/test.py
 python tests/test2.py
 echo "KunQuant runtime tests"
 python tests/test_runtime.py
+echo "KunQuant stream tests"
+python tests/test_stream.py
 echo "KunQuant alpha101 tests"
 python tests/test_alpha101.py arm
 echo "KunQuant alpha158 tests"

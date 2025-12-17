@@ -4,6 +4,8 @@ python tests/test.py
 python tests/test2.py
 echo "KunQuant runtime tests"
 python tests/test_runtime.py
+echo "KunQuant stream tests"
+python tests/test_stream.py
 echo "KunQuant runtime tests (AVX)"
 KUN_TEST_NO_AVX2=1 python tests/test_runtime.py 
 echo "KunQuant alpha101 tests"

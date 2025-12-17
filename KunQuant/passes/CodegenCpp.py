@@ -92,7 +92,7 @@ def _generate_cross_sectional_func_name(op: GenericCrossSectionalOp, inputs: Lis
         name.append(layout)
     return f"{op.__class__.__name__}_{'_'.join(name)}"
 
-def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int], generated_cross_sectional_func: Set[str], elem_type: str, simd_lanes: int, aligned: bool, static: bool) -> Tuple[str, str]:
+def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inputs: List[Tuple[Input, bool]], outputs: List[Tuple[Output, bool]], options: dict, stream_mode: bool, query_temp_buffer_id, stream_window_size: Dict[str, int], stream_state_buffer_init: List[str], generated_cross_sectional_func: Set[str], elem_type: str, simd_lanes: int, aligned: bool, static: bool) -> Tuple[str, str]:
     if len(f.ops) == 3 and isinstance(f.ops[1], SimpleCrossSectionalOp):
         return "", f'''static auto stage_{prefix}__{f.name} = {f.ops[1].__class__.__name__}Stocks<Mapper{f.ops[0].attrs["layout"]}<{elem_type}, {simd_lanes}>, Mapper{f.ops[2].attrs["layout"]}<{elem_type}, {simd_lanes}>>;'''
     
@@ -281,14 +281,19 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
             funcname = "SkipListArgMin"
             scope.scope.append(_CppSingleLine(scope, f'auto v{idx} = {funcname}<{elem_type}, {simd_lanes}>(v{inp[0]}, i);'))
         elif isinstance(op, GloablStatefulOpTrait):
-            if stream_mode: raise RuntimeError(f"Stream Mode does not support {op.__class__.__name__}")
             assert(op.get_parent() is None)
             args = {}
             if isinstance(op, WindowedTrait):
                 buf_name = _get_buffer_name(op.inputs[0], inp[0])
                 args["buf_name"] = buf_name
             vargs = [f"v{inpv}" for inpv in inp]
-            toplevel.scope.insert(-1, _CppSingleLine(toplevel, op.generate_init_code(idx, elem_type, simd_lanes, vargs, aligned)))
+            if stream_mode:
+                cur_idx = len(stream_state_buffer_init)
+                var_init_code, init_buffer_code = op.generate_init_code_stream(idx, cur_idx, elem_type, simd_lanes, vargs, aligned)
+                toplevel.scope.insert(-1, _CppSingleLine(toplevel, var_init_code))
+                stream_state_buffer_init.append(init_buffer_code)
+            else:
+                toplevel.scope.insert(-1, _CppSingleLine(toplevel, op.generate_init_code(idx, elem_type, simd_lanes, vargs, aligned)))
             scope.scope.append(_CppSingleLine(scope, op.generate_step_code(idx, "i", vargs, **args)))
         elif isinstance(op, Select):
             scope.scope.append(_CppSingleLine(scope, f"auto v{idx} = Select(v{inp[0]}, v{inp[1]}, v{inp[2]});"))

@@ -18,12 +18,6 @@
 #define kunAlignedFree(x) free(x)
 #endif
 
-#ifdef __AVX__
-#define MALLOC_ALIGNMENT 64  // AVX-512 alignment
-#else
-#define MALLOC_ALIGNMENT 16  // NEON alignment
-#endif
-
 #if CHECKED_PTR
 #include <assert.h>
 #include <sys/mman.h>
@@ -76,11 +70,10 @@ void checkedDealloc(void *ptr, size_t sz) {
 #endif
 
 namespace kun {
-static const uint64_t VERSION = 0x64100003;
 
 void Buffer::alloc(size_t count, size_t use_count, size_t elem_size) {
     if (!ptr) {
-        ptr = (float *)kunAlignedAlloc(MALLOC_ALIGNMENT, count * elem_size);
+        ptr = (float *)kunAlignedAlloc(KUN_MALLOC_ALIGNMENT, count * elem_size);
         refcount = (int)use_count;
 #if CHECKED_PTR
         size = count * elem_size;
@@ -230,7 +223,7 @@ void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout,
                 length,
                 8,
                 Datatype::Float,
-                false};
+                false, nullptr};
     std::vector<RuntimeStage> &stages = ctx.stages;
     stages.reserve(buffers.size());
     for (size_t i = 0; i < buffers.size(); i++) {
@@ -284,7 +277,7 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
                 length,
                 m->blocking_len,
                 m->dtype,
-                false};
+                false, nullptr};
     std::vector<RuntimeStage> &stages = ctx.stages;
     stages.reserve(m->num_stages);
     for (size_t i = 0; i < m->num_stages; i++) {
@@ -368,6 +361,12 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
         throw std::runtime_error(
             "Cannot run batch mode module via StreamContext");
     }
+    if (m->init_state_buffers) {
+        state_buffers = m->init_state_buffers(num_stocks);
+        for (auto &buf : state_buffers) {
+            buf->initialize();
+        }
+    }
     std::vector<Buffer> rtlbuffers;
     rtlbuffers.reserve(m->num_buffers);
     buffers.reserve(m->num_buffers);
@@ -404,6 +403,7 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
     ctx.dtype = m->dtype;
     ctx.is_stream = true;
     ctx.simd_len = m->blocking_len;
+    ctx.state_buffers = state_buffers.data();
 }
 
 size_t StreamContext::queryBufferHandle(const char *name) const {
@@ -458,4 +458,25 @@ void StreamContext::run() {
 }
 
 StreamContext::~StreamContext() = default;
+
+
+StateBuffer *StateBuffer::make(size_t num_objs, size_t elem_size,
+                               CtorFn_t ctor_fn, DtorFn_t dtor_fn) {
+    auto ret = kunAlignedAlloc(KUN_MALLOC_ALIGNMENT,
+        sizeof(StateBuffer) + num_objs * elem_size);
+    auto buf = (StateBuffer *)ret;
+    buf->num_objs = num_objs;
+    buf->elem_size = elem_size;
+    buf->initialized = 0;
+    buf->ctor_fn = ctor_fn;
+    buf->dtor_fn = dtor_fn;
+    return buf;
+}
+
+void StateBuffer::Deleter::operator()(StateBuffer *buf) {
+    if (buf->initialized) {
+        buf->dtor_fn(buf);
+    }
+    kunAlignedFree(buf);
+}
 } // namespace kun
