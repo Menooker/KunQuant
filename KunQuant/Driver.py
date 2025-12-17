@@ -312,10 +312,11 @@ using namespace kun;
 ''')
         
     if len(stream_state_buffer_init) > 0:
+        stream_state_str = "\n    ".join(stream_state_buffer_init)
         impl_src.append(f'''static std::vector<StateBufferPtr> __init_state_buffers(size_t stock_count) {{
     std::vector<StateBufferPtr> buffers;
     buffers.reserve({len(stream_state_buffer_init)});
-    {"\n    ".join(stream_state_buffer_init)}
+    {stream_state_str}
     return buffers;
 }}
 ''')
