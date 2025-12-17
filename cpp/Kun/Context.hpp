@@ -2,6 +2,7 @@
 
 #include "Stage.hpp"
 #include "StreamBuffer.hpp"
+#include "StateBuffer.hpp"
 #include <atomic>
 #include <memory>
 #include <stdlib.h>
@@ -9,6 +10,7 @@
 
 namespace kun {
 
+static const uint64_t VERSION = 0x64100004;
 struct KUN_API RuntimeStage {
     const Stage *stage;
     Context *ctx;
@@ -127,6 +129,7 @@ struct Context {
     size_t simd_len;
     Datatype dtype;
     bool is_stream;
+    StateBufferPtr* state_buffers;
 };
 
 KUN_API std::shared_ptr<Executor> createSingleThreadExecutor();

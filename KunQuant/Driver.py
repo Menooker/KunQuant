@@ -10,7 +10,7 @@ from KunQuant.passes import Util as PassUtil
 # get the cpu architecture of the machine
 from KunQuant.jit.env import cpu_arch as _cpu_arch
 
-required_version = "0x64100003"
+required_version = "kun::VERSION"
 @dataclass
 class KunCompilerConfig:
     partition_factor : int = 3
@@ -232,7 +232,8 @@ using namespace kun;
         def query_temp_buf_id(tempname: str, window: int) -> int:
             input_windows[tempname] = window
             return insert_name_str(tempname, "TEMP").idx
-        src, decl = codegen_cpp(module_name, func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows, generated_cross_sectional_func, dtype, blocking_len, not allow_unaligned, is_single_source)
+        stream_state_buffer_init = []
+        src, decl = codegen_cpp(module_name, func, input_name_to_idx, ins, outs, options, stream_mode, query_temp_buf_id, input_windows, stream_state_buffer_init, generated_cross_sectional_func, dtype, blocking_len, not allow_unaligned, is_single_source)
         impl_src.append(src)
         decl_src.append(decl)
         newparti = _Partition(func.name, len(partitions), pins, pouts)
@@ -309,6 +310,17 @@ using namespace kun;
 {parti_dep_src2}
 }}
 ''')
+        
+    if len(stream_state_buffer_init) > 0:
+        stream_state_str = "\n    ".join(stream_state_buffer_init)
+        impl_src.append(f'''static std::vector<StateBufferPtr> __init_state_buffers(size_t stock_count) {{
+    std::vector<StateBufferPtr> buffers;
+    buffers.reserve({len(stream_state_buffer_init)});
+    {stream_state_str}
+    return buffers;
+}}
+''')
+
     dty = dtype[0].upper() + dtype[1:]
     impl_src.append(f'''KUN_EXPORT Module {module_name}{{
     {required_version},
@@ -320,7 +332,8 @@ using namespace kun;
     MemoryLayout::{output_layout},
     {blocking_len},
     Datatype::{dty},
-    {"0" if allow_unaligned else "1"}
+    {"0" if allow_unaligned else "1"},
+    {"nullptr" if len(stream_state_buffer_init) == 0 else "__init_state_buffers"}
 }};''')
     push_source()
     if not is_single_source:

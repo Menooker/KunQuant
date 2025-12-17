@@ -55,12 +55,13 @@ struct ModuleHandle {
                  const std::shared_ptr<kun::Library> &lib)
         : modu{modu}, lib{lib} {}
 };
-struct StreamContextWrapper : kun::StreamContext {
+struct StreamContextWrapper {
     std::shared_ptr<kun::Library> lib;
+    kun::StreamContext ctx;
     StreamContextWrapper(std::shared_ptr<kun::Executor> exec,
                          const ModuleHandle *m, size_t num_stocks)
-        : kun::StreamContext{std::move(exec), m->modu, num_stocks},
-          lib{m->lib} {}
+        : lib{m->lib}, ctx{std::move(exec), m->modu, num_stocks}
+           {}
 };
 } // namespace
 
@@ -402,9 +403,13 @@ PYBIND11_MODULE(KunRunner, m) {
     py::class_<StreamContextWrapper>(m, "StreamContext")
         .def(py::init<std::shared_ptr<kun::Executor>, const ModuleHandle *,
                       size_t>())
-        .def("queryBufferHandle", &StreamContextWrapper::queryBufferHandle)
+        .def("queryBufferHandle",
+             [](StreamContextWrapper &t, const char *name) {
+                 return t.ctx.queryBufferHandle(name);
+             })
         .def("getCurrentBuffer",
-             [](StreamContextWrapper &ths, size_t handle) -> py::buffer {
+             [](StreamContextWrapper &t, size_t handle) -> py::buffer {
+                 auto &ths = t.ctx;
                  if (ths.m->dtype == kun::Datatype::Double) {
                      auto buf = ths.getCurrentBufferPtrDouble(handle);
                      return py::array_t<double, py::array::c_style>{
@@ -416,7 +421,8 @@ PYBIND11_MODULE(KunRunner, m) {
              })
         .def(
             "pushData",
-            [](StreamContextWrapper &ths, size_t handle, py::array data) {
+            [](StreamContextWrapper &t, size_t handle, py::array data) {
+                auto &ths = t.ctx;
                 py::ssize_t ndim;
                 if (ths.m->dtype == kun::Datatype::Float) {
                     if (!py::isinstance<py::array_t<float, py::array::c_style>>(
@@ -442,5 +448,5 @@ PYBIND11_MODULE(KunRunner, m) {
                     ths.pushData(handle, (const double *)data.data());
                 }
             })
-        .def("run", &StreamContextWrapper::run);
+        .def("run", [](StreamContextWrapper &t) { t.ctx.run(); });
 }

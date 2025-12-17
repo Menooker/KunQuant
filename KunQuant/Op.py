@@ -474,6 +474,21 @@ class StatefulOpTrait(GenericCppCodegenTrait):
         inputs: the input variables of the op
         '''
         return f"{self.get_func_or_class_full_name(elem_type, simd_lanes)} {self.get_state_variable_name_prefix()}{idx};"
+    def generate_init_code_stream(self, local_idx: str, buffer_idx: str, elem_type: str, simd_lanes: int, inputs: List[str], aligned: bool) -> Tuple[str, str]:
+        '''
+        generate the code for the initialization of the state variable
+        local_idx: the output variable name index
+        buffer_idx: the buffer index in ctx->state_buffers
+        elem_type: the element type of the state variable
+        simd_lanes: SIMD lanes
+        inputs: the input variables of the op
+
+        Returns:
+        ["the code for the initialization of the state variable in the compute function", "initalizer code for the state buffer"]
+        '''
+        typename = self.get_func_or_class_full_name(elem_type, simd_lanes)
+        return f"{typename}& {self.get_state_variable_name_prefix()}{local_idx} = __ctx->state_buffers[{buffer_idx}]->get<{typename}>(__stock_idx);",\
+            f"buffers.emplace_back(makeStateBuffer<{typename}>(stock_count, {simd_lanes}));"
     
 
 class GloablStatefulOpTrait(StatefulOpTrait):

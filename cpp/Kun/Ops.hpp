@@ -348,6 +348,7 @@ struct ExpMovingAvg {
     using simd_int_t =
         kun_simd::vec<typename kun_simd::fp_trait<T>::int_t, stride>;
     simd_t v;
+    ExpMovingAvg() : v{NAN} {}
     ExpMovingAvg(const simd_t &init) : v{init} {}
     static constexpr T weight_latest = T(2.0) / (window + 1);
     simd_t step(simd_t cur, size_t index) {

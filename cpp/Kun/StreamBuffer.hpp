@@ -1,14 +1,10 @@
 #pragma once
 #include "Base.hpp"
+#include "MathUtil.hpp"
 #include <cassert>
 #include <stddef.h>
 
 namespace kun {
-namespace {
-size_t divideAndCeil(size_t x, size_t y) { return (x + y - 1) / y; }
-size_t roundUp(size_t x, size_t y) { return divideAndCeil(x, y) * y; }
-
-} // namespace
 template <typename T>
 struct StreamBuffer {
     // [#stock_count of float data]

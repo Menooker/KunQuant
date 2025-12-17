@@ -1,8 +1,9 @@
 #pragma once
 
 #include "Stage.hpp"
-#include <memory>
+#include "StateBuffer.hpp"
 #include <functional>
+#include <vector>
 
 namespace kun {
 
@@ -11,7 +12,6 @@ enum class MemoryLayout {
     TS,
     STREAM,
 };
-
 
 struct Module {
     size_t required_version;
@@ -24,11 +24,12 @@ struct Module {
     size_t blocking_len;
     Datatype dtype;
     size_t aligned;
+    std::vector<StateBufferPtr> (*init_state_buffers)(size_t num_stocks);
 };
 
 struct Library {
     void *handle;
-    std::function<void(Library*)> dtor;
+    std::function<void(Library *)> dtor;
     KUN_API const Module *getModule(const char *name);
     KUN_API static std::shared_ptr<Library> load(const char *filename);
     Library(const Library &) = delete;

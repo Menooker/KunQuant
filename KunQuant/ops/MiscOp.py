@@ -1,6 +1,6 @@
 import KunQuant
 from KunQuant.Op import AcceptSingleValueInputTrait, Input, OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GlobalStatefulProducerTrait, GloablStatefulOpTrait, StateConsumerTrait, UnaryElementwiseOp, BinaryElementwiseOp
-from typing import List, Union
+from typing import List, Tuple, Union
 
 class BackRef(OpBase, WindowedTrait):
     '''
@@ -99,6 +99,11 @@ class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait):
 
     def get_state_variable_name_prefix(self) -> str:
         return "ema_"
+
+    def generate_init_code_stream(self, local_idx: str, buffer_idx: str, elem_type: str, simd_lanes: int, inputs: List[str], aligned: bool) -> Tuple[str, str]:
+        if len(self.inputs) == 2:
+            raise RuntimeError("EMA with init_val is not supported in stream mode")
+        return super().generate_init_code_stream(local_idx, buffer_idx, elem_type, simd_lanes, inputs, aligned)
 
     def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str], aligned: bool) -> str:
         initv = "NAN"
