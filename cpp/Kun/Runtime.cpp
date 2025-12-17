@@ -361,6 +361,44 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
         throw std::runtime_error(
             "Cannot run batch mode module via StreamContext");
     }
+    std::vector<Buffer> rtlbuffers;
+    rtlbuffers.reserve(m->num_buffers);
+    buffers.reserve(m->num_buffers);
+    if (m->dtype == Datatype::Float) {
+        for (size_t i = 0; i < m->num_buffers; i++) {
+            auto &buf = m->buffers[i];
+            auto ptr = StreamBuffer<float>::make(num_stocks, buf.window,
+                                                 m->blocking_len);
+            size_t buf_size = StreamBuffer<float>::getBufferSize(
+                num_stocks, buf.window, m->blocking_len);
+            buffers.emplace_back(ptr, buf_size);
+            if (m->init_state_buffers) {
+                if (!states->read(ptr, buf_size)) {
+                    throw std::runtime_error(
+                        "Failed to read initial stream buffer");
+                }
+            }
+            rtlbuffers.emplace_back((float *)ptr, 1);
+        }
+    } else if (m->dtype == Datatype::Double) {
+        for (size_t i = 0; i < m->num_buffers; i++) {
+            auto &buf = m->buffers[i];
+            auto ptr = StreamBuffer<double>::make(num_stocks, buf.window,
+                                                  m->blocking_len);
+            buffers.emplace_back(
+                ptr, StreamBuffer<double>::getBufferSize(num_stocks, buf.window,
+                                                         m->blocking_len));
+            if (m->init_state_buffers) {
+                if (!states->read(ptr, buf_size)) {
+                    throw std::runtime_error(
+                        "Failed to read initial stream buffer");
+                }
+            }
+            rtlbuffers.emplace_back((float *)ptr, 1);
+        }
+    } else {
+        throw std::runtime_error("Unknown type");
+    }
     if (m->init_state_buffers) {
         state_buffers = m->init_state_buffers(num_stocks);
         if (states) {
@@ -375,32 +413,6 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
                 buf->initialize();
             }
         }
-    }
-    std::vector<Buffer> rtlbuffers;
-    rtlbuffers.reserve(m->num_buffers);
-    buffers.reserve(m->num_buffers);
-    if (m->dtype == Datatype::Float) {
-        for (size_t i = 0; i < m->num_buffers; i++) {
-            auto &buf = m->buffers[i];
-            auto ptr = StreamBuffer<float>::make(num_stocks, buf.window,
-                                                 m->blocking_len);
-            buffers.emplace_back(
-                ptr, StreamBuffer<float>::getBufferSize(num_stocks, buf.window,
-                                                        m->blocking_len));
-            rtlbuffers.emplace_back((float *)ptr, 1);
-        }
-    } else if (m->dtype == Datatype::Double) {
-        for (size_t i = 0; i < m->num_buffers; i++) {
-            auto &buf = m->buffers[i];
-            auto ptr = StreamBuffer<double>::make(num_stocks, buf.window,
-                                                  m->blocking_len);
-            buffers.emplace_back(
-                ptr, StreamBuffer<double>::getBufferSize(num_stocks, buf.window,
-                                                         m->blocking_len));
-            rtlbuffers.emplace_back((float *)ptr, 1);
-        }
-    } else {
-        throw std::runtime_error("Unknown type");
     }
     ctx.buffers = std::move(rtlbuffers);
     ctx.executor = exec;
