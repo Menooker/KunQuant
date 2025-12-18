@@ -20,9 +20,7 @@ KUN_API void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout, bool 
               size_t length);
 struct AlignedPtr {
     void* ptr;
-#if CHECKED_PTR
     size_t size;
-#endif
     char* get() const noexcept {
         return (char*)ptr;
     }

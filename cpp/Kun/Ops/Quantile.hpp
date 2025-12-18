@@ -48,6 +48,8 @@ struct SkipListState : SkipListStateImpl<T, simdLen> {
 };
 } // namespace
 
+template <typename T>
+struct Serializer;
 
 template <typename T, int simdLen, int expectedwindow>
 struct Serializer<SkipListState<T, simdLen, expectedwindow>> {

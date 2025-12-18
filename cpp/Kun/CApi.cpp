@@ -1,4 +1,5 @@
 #include "CApi.h"
+#include "IO.hpp"
 #include "Module.hpp"
 #include "RunGraph.hpp"
 #include <string>
@@ -81,7 +82,85 @@ KUN_API KunStreamContextHandle kunCreateStream(KunExecutorHandle exec,
                                                size_t num_stocks) {
     auto &pexec = *unwrapExecutor(exec);
     auto modu = reinterpret_cast<Module *>(m);
-    return new kun::StreamContext{pexec, modu, num_stocks};
+    try {
+        // Create a StreamContext with no initial states
+        return new kun::StreamContext{pexec, modu, num_stocks};
+    } catch (...) {
+        // If there is an error, return nullptr
+        return nullptr;
+    }
+}
+
+
+KUN_API KunStatus kunCreateStreamEx(KunExecutorHandle exec,
+                                               KunModuleHandle m,
+                                               size_t num_stocks,
+                                               const KunStreamExtraArgs *extra_args,
+                                               KunStreamContextHandle *out_handle) {
+    auto &pexec = *unwrapExecutor(exec);
+    auto modu = reinterpret_cast<Module *>(m);
+    FileInputStream file_stream;
+    MemoryInputStream memory_stream {nullptr, 0};
+    InputStreamBase *states = nullptr;
+    if (extra_args) {
+        if (extra_args->version != KUN_API_VERSION) {
+            return KUN_INVALID_ARGUMENT;
+        }
+        if (extra_args->init_kind == KUN_INIT_FILE) {
+            if (!extra_args->init.path) {
+                return KUN_INVALID_ARGUMENT;
+            }
+            file_stream.file.open(extra_args->init.path, std::ios::binary);
+            states = &file_stream;
+        } else if (extra_args->init_kind == KUN_INIT_MEMORY) {
+            if (!extra_args->init.memory.buffer) {
+                return KUN_INVALID_ARGUMENT;
+            }
+            memory_stream.data = extra_args->init.memory.buffer;
+            memory_stream.size = extra_args->init.memory.size;
+            states = &memory_stream;
+        } else if (extra_args->init_kind == KUN_INIT_NONE) {
+            // do nothing
+        } else {
+            return KUN_INVALID_ARGUMENT;
+        }
+    }
+    try {
+        auto ctx = new kun::StreamContext{pexec, modu, num_stocks, states};
+        *out_handle = reinterpret_cast<KunStreamContextHandle>(ctx);
+    } catch (const std::exception &e) {
+        *out_handle = nullptr;
+        // If there is an error, return KUN_INIT_ERROR
+        return KUN_INIT_ERROR;
+    }
+    return KUN_SUCCESS;
+}
+
+KUN_API KunStatus kunStreamSerializeStates(KunStreamContextHandle context,
+                                           size_t dump_kind,
+                                           char *path_or_buffer,
+                                           size_t *size) {
+    auto ctx = reinterpret_cast<kun::StreamContext *>(context);
+    if (dump_kind == KUN_INIT_FILE) {
+        kun::FileOutputStream stream(path_or_buffer);
+        if (!ctx->serializeStates(&stream)) {
+            return KUN_INVALID_ARGUMENT;
+        }
+        return KUN_SUCCESS;
+    } else if (dump_kind == KUN_INIT_MEMORY) {
+        if (!path_or_buffer || !size) {
+            return KUN_INVALID_ARGUMENT;
+        }
+        size_t in_size = *size;
+        kun::MemoryRefOutputStream stream {path_or_buffer, in_size};
+        if (!ctx->serializeStates(&stream)) {
+            return KUN_INVALID_ARGUMENT;
+        }
+        *size = stream.pos; // Update size to the actual written size
+        return stream.pos > in_size ? KUN_INIT_ERROR : KUN_SUCCESS;
+    } else {
+        return KUN_INVALID_ARGUMENT;
+    }
 }
 
 KUN_API size_t kunQueryBufferHandle(KunStreamContextHandle context,

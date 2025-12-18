@@ -23,11 +23,23 @@ struct KUN_API MemoryOutputStream final : public OutputStreamBase {
     const char *getData() const { return buffer.data(); }
     size_t getSize() const { return buffer.size(); }
 };
+
+struct MemoryRefOutputStream final : public OutputStreamBase {
+    size_t pos;
+    char* buf;
+    size_t size;
+
+    MemoryRefOutputStream(char* buf, size_t len) : pos(0), buf(buf), size(len) {}
+
+    bool write(const void *buf, size_t len) override;
+};
+
+
 struct KUN_API FileInputStream final : public InputStreamBase {
     std::ifstream file;
 
     FileInputStream(const std::string &filename);
-
+    FileInputStream() = default;
     bool read(void *buf, size_t len) override;
 };
 struct KUN_API FileOutputStream final : public OutputStreamBase {

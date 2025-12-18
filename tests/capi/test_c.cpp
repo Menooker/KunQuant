@@ -80,6 +80,13 @@ static int testStream(const char *libpath) {
     KunStreamContextHandle ctx = kunCreateStream(exec, modu, num_stocks);
     CHECK(ctx);
 
+    size_t buf_size = 0;
+    auto status = kunStreamSerializeStates(ctx, KUN_INIT_MEMORY, nullptr, &buf_size);
+    CHECK(status == KUN_INIT_ERROR);
+    auto states_buffer = new char[buf_size];
+    status = kunStreamSerializeStates(ctx, KUN_INIT_MEMORY, states_buffer, &buf_size);
+    CHECK(status == KUN_SUCCESS);
+
     size_t handleClose = kunQueryBufferHandle(ctx, "close");
     size_t handleOpen = kunQueryBufferHandle(ctx, "open");
     size_t handleHigh = kunQueryBufferHandle(ctx, "high");
@@ -108,6 +115,18 @@ static int testStream(const char *libpath) {
             return 4;
         }
     }
+    
+    kunDestoryStream(ctx);
+    ctx = nullptr;
+    KunStreamExtraArgs extra_args;
+    extra_args.version = KUN_API_VERSION;
+    extra_args.init_kind = KUN_INIT_MEMORY;
+    extra_args.init.memory.buffer = states_buffer;
+    extra_args.init.memory.size = buf_size;
+    status = kunCreateStreamEx(exec, modu, num_stocks, &extra_args, &ctx);
+    CHECK(status == KUN_SUCCESS);
+    CHECK(ctx);
+
 
     delete[] dataclose;
     delete[] dataopen;
@@ -115,6 +134,7 @@ static int testStream(const char *libpath) {
     delete[] datalow;
     delete[] datavol;
     delete[] dataamount;
+    delete[] states_buffer;
     kunDestoryStream(ctx);
     kunUnloadLibrary(lib);
     kunDestoryExecutor(exec);

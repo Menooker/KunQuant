@@ -17,6 +17,14 @@ bool MemoryOutputStream::write(const void *buf, size_t len) {
     return true;
 }
 
+bool MemoryRefOutputStream::write(const void *b, size_t len) {
+    if (pos + len <= size) {
+        std::memcpy(buf + pos, b, len);
+    }
+    pos += len;
+    return true;
+}
+
 FileInputStream::FileInputStream(const std::string &filename)
     : file(filename, std::ios::binary) {}
 

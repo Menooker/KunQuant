@@ -407,7 +407,7 @@ PYBIND11_MODULE(KunRunner, m) {
         .def(py::init([](std::shared_ptr<kun::Executor> exec,
                          const ModuleHandle *mod, size_t stocks,
                          py::object init) {
-            if (py::isinstance<std::string>(init)) {
+            if (py::isinstance<py::str>(init)) {
                 auto filename = py::cast<std::string>(init);
                 kun::FileInputStream stream(filename);
                 return new StreamContextWrapper(std::move(exec), mod, stocks,

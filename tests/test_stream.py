@@ -7,7 +7,7 @@ from KunQuant.Stage import Function
 from KunQuant.Op import *
 from KunQuant.ops import *
 from KunQuant.runner import KunRunner as kr
-from tempfile import NamedTemporaryFile
+import tempfile
 
 def make_steam():
 
@@ -62,18 +62,69 @@ def test_stream_ser_deser(lib):
     ema = np.empty((100, 24))
     slope = np.empty((100, 24))
 
+    df = pd.DataFrame(a)
+    expected_quantile = df.rolling(10).quantile(0.49, interpolation='linear').to_numpy()
+    expected_ema = df.ewm(span=10, adjust=False, ignore_na=True).mean().to_numpy()
+    expected_slope = df.rolling(10).apply(lambda x: np.polyfit(np.arange(len(x)), x, 1)[0]).to_numpy()
+
     for i in range(50):
         stream.pushData(handle_a, a[i])
         stream.run()
         out[i] = stream.getCurrentBuffer(handle_quantile)
         ema[i] = stream.getCurrentBuffer(handle_ema)
         slope[i] = stream.getCurrentBuffer(handle_slope)
-    stream.serializeStates("kun_test_stream_state.bin")
+    temppath = os.path.join(tempfile.gettempdir(), "kun_test_stream_state.bin")
+    print("serializing states to", temppath)
+    stream.serializeStates(temppath)
     states = stream.serializeStates()
-    with open("kun_test_stream_state.bin", "rb") as f:
+    with open(temppath, "rb") as f:
         assert(f.read() == states)
-    os.remove("kun_test_stream_state.bin")
     print("length of serialized states:", len(states))
+
+    # reload stream with in memory buffer
+    del stream
+    stream = kr.StreamContext(executor, lib.getModule("stream_test"), 24, states)
+    for i in range(50, 100):
+        stream.pushData(handle_a, a[i])
+        stream.run()
+        out[i] = stream.getCurrentBuffer(handle_quantile)
+        ema[i] = stream.getCurrentBuffer(handle_ema)
+        slope[i] = stream.getCurrentBuffer(handle_slope)
+    np.testing.assert_allclose(ema, expected_ema, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(slope[10:], expected_slope[10:], atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(out, expected_quantile, atol=1e-6, rtol=1e-4, equal_nan=True)
+    
+    # reload stream with file
+    del stream
+    stream = kr.StreamContext(executor, lib.getModule("stream_test"), 24, temppath)
+    for i in range(50, 100):
+        stream.pushData(handle_a, a[i])
+        stream.run()
+        out[i] = stream.getCurrentBuffer(handle_quantile)
+        ema[i] = stream.getCurrentBuffer(handle_ema)
+        slope[i] = stream.getCurrentBuffer(handle_slope)
+
+    np.testing.assert_allclose(out, expected_quantile, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(ema, expected_ema, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(slope[10:], expected_slope[10:], atol=1e-6, rtol=1e-4, equal_nan=True)
+
+    # failure: bad buffer
+    bad_states = states[:-10]
+    try:
+        stream = kr.StreamContext(executor, lib.getModule("stream_test"), 24, bad_states)
+        assert False, "Expected failure due to bad buffer"
+    except RuntimeError as e:
+        assert str(e) == "Failed to deserialize state buffer", f"Unexpected error message: {str(e)}"
+    
+    with open(temppath, "wb") as f:
+        f.truncate(20)
+    try:
+        stream = kr.StreamContext(executor, lib.getModule("stream_test"), 24, temppath)
+        assert False, "Expected failure due to bad buffer"
+    except RuntimeError as e:
+        assert str(e) == "Failed to read initial stream buffer", f"Unexpected error message: {str(e)}"
+    os.remove(temppath)
+
 lib = make_steam()
 test_stream(lib)
 test_stream_ser_deser(lib)

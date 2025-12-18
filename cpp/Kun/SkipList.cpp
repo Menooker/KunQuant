@@ -318,11 +318,14 @@ bool SkipList::serialize(OutputStreamBase *stream, int expsize) const {
 }
 
 bool SkipList::deserialize(InputStreamBase *stream, int expsize) {
-    size_t size;
+    int size;
     if (!stream->read(&size, sizeof(size))) {
         return false;
     }
-    for (size_t i = 0; i < size; i++) {
+    if (size < 0 || size > 1024 * 1024 * 4) {
+        return false; // sanity check
+    }
+    for (int i = 0; i < size; i++) {
         double value;
         size_t index;
         if (!stream->read(&value, sizeof(value))) {
@@ -342,7 +345,7 @@ bool serializeSkipList(SkipList* skiplist, int* lastInsertRank, size_t size, siz
         return false;
     }
     for (size_t i = 0; i < size; i++) {
-        if (!skiplist->serialize(stream, window)) {
+        if (!skiplist[i].serialize(stream, window)) {
             return false;
         }
     }
