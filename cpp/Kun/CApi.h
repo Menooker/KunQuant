@@ -25,14 +25,15 @@ typedef int KunStatus;
 #define KUN_INVALID_ARGUMENT 2
 
 typedef struct {
-    size_t version; // version of the KunQuant C API, must be set to KUN_API_VERSION
+    size_t version;   // version of the KunQuant C API, must be set to
+                      // KUN_API_VERSION
     size_t init_kind; // KUN_INIT_NONE KUN_INIT_FILE KUN_INIT_MEMORY
     union {
-        const char* path; // path to stream state dump file
+        const char *path; // path to stream state dump file
         struct {
-            const char* buffer; // name of the stream state dump file
-            size_t size; // size of the stream state dump file
-        } memory; // memory buffer for stream state dump
+            const char *buffer; // name of the stream state dump file
+            size_t size;        // size of the stream state dump file
+        } memory;               // memory buffer for stream state dump
     } init;
 } KunStreamExtraArgs;
 
@@ -160,15 +161,14 @@ KUN_API KunStreamContextHandle kunCreateStream(KunExecutorHandle exec,
  * stream state dump file or memory buffer. The `version` field must be set to
  * KUN_API_VERSION. extra_args can be null for default behavior
  * @param out_handle the output handle to the stream context.
- * @return KUN_SUCCESS on success, KUN_INIT_ERROR if the stream context cannot be
- * initialized from the given states, KUN_INVALID_ARGUMENT if the extra_args is
- * invalid.
+ * @return KUN_SUCCESS on success, KUN_INIT_ERROR if the stream context cannot
+ * be initialized from the given states, KUN_INVALID_ARGUMENT if the extra_args
+ * is invalid.
  */
-KUN_API KunStatus kunCreateStreamEx(KunExecutorHandle exec,
-                                               KunModuleHandle m,
-                                               size_t num_stocks,
-                                               const KunStreamExtraArgs* extra_args,
-                                               KunStreamContextHandle *out_handle);
+KUN_API KunStatus kunCreateStreamEx(KunExecutorHandle exec, KunModuleHandle m,
+                                    size_t num_stocks,
+                                    const KunStreamExtraArgs *extra_args,
+                                    KunStreamContextHandle *out_handle);
 
 /**
  * @brief Serialize the states from the stream.
@@ -177,18 +177,20 @@ KUN_API KunStatus kunCreateStreamEx(KunExecutorHandle exec,
  * @param dump_kind the kind of dump, KUN_INIT_FILE or KUN_INIT_MEMORY
  * @param path_or_buffer if dump_kind is KUN_INIT_FILE, this is the path to the
  * stream state dump file. If dump_kind is KUN_INIT_MEMORY, this is the memory
- * buffer to store the stream state dump.
+ * buffer to store the stream state dump. nullable if `*size` is 0 and dump_kind
+ * is KUN_INIT_MEMORY.
  * @param size if dump_kind is KUN_INIT_MEMORY, this should point to the size of
- * the memory buffer. If the function succeeds or the buffer is too small,
- * the size will be set to the size of the stream state dump.
+ * the memory buffer. If the function succeeds or the buffer is too small, the
+ * size will be set to the size of the stream state dump in bytes. If dump_kind
+ * is KUN_INIT_FILE, this parameter is unused.
  * @return KUN_SUCCESS on success, KUN_INIT_ERROR if the memory buffer is too
  * small or there is a file error. If dump_kind is KUN_INIT_MEMORY `size` will
  * be overwritten to the size of dumped data. KUN_INVALID_ARGUMENT if dump_kind
  * is not KUN_INIT_FILE or KUN_INIT_MEMORY.
  */
-KUN_API KunStatus kunStreamSerializeStates(
-    KunStreamContextHandle context, size_t dump_kind, char *path_or_buffer, size_t* size);
-
+KUN_API KunStatus kunStreamSerializeStates(KunStreamContextHandle context,
+                                           size_t dump_kind,
+                                           char *path_or_buffer, size_t *size);
 
 /**
  * @brief Query the handle of a named buffer (input or output)

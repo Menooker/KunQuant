@@ -144,11 +144,11 @@ KUN_API KunStatus kunStreamSerializeStates(KunStreamContextHandle context,
     if (dump_kind == KUN_INIT_FILE) {
         kun::FileOutputStream stream(path_or_buffer);
         if (!ctx->serializeStates(&stream)) {
-            return KUN_INVALID_ARGUMENT;
+            return KUN_INIT_ERROR;
         }
         return KUN_SUCCESS;
     } else if (dump_kind == KUN_INIT_MEMORY) {
-        if (!path_or_buffer || !size) {
+        if (!size || (*size !=0 && !path_or_buffer)) {
             return KUN_INVALID_ARGUMENT;
         }
         size_t in_size = *size;
