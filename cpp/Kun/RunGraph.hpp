@@ -20,9 +20,7 @@ KUN_API void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout, bool 
               size_t length);
 struct AlignedPtr {
     void* ptr;
-#if CHECKED_PTR
     size_t size;
-#endif
     char* get() const noexcept {
         return (char*)ptr;
     }
@@ -39,7 +37,7 @@ struct KUN_API StreamContext {
     Context ctx;
     const Module *m;
     StreamContext(std::shared_ptr<Executor> exec, const Module *m,
-                  size_t num_stocks);
+                  size_t num_stocks, InputStreamBase* states = nullptr);
     // query the buffer handle of a named buffer
     size_t queryBufferHandle(const char *name) const;
     // get the current readable position of the named buffer. The returned
@@ -54,6 +52,7 @@ struct KUN_API StreamContext {
     StreamContext(const StreamContext&) = delete;
     StreamContext& operator=(const StreamContext&) = delete;
     ~StreamContext();
+    bool serializeStates(OutputStreamBase* stream);
 };
 
 } // namespace kun

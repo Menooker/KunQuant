@@ -3,6 +3,7 @@
 #include "Base.hpp"
 #include "Math.hpp"
 #include "StreamBuffer.hpp"
+#include "StateBuffer.hpp"
 #include <cmath>
 #include <limits>
 #include <stdint.h>
@@ -10,6 +11,18 @@
 
 namespace kun {
 namespace ops {
+
+
+template <typename T>
+struct Serializer {
+    static bool serialize(StateBuffer *obj, OutputStreamBase *stream) {
+        return stream->write(obj->buf, sizeof(T) * obj->num_objs);
+    }
+
+    static bool deserialize(StateBuffer *obj, InputStreamBase *stream) {
+        return stream->read(obj->buf, sizeof(T) * obj->num_objs);
+    }
+};
 
 template <bool vcontainsWindow>
 struct DataSource {
@@ -704,6 +717,24 @@ inline DecayVec_t<T> SetInfOrNanToValue(T aa, T2 v) {
     DecayVec_t<T> a = aa;
     auto mask = sc_isnan(a - a);
     return sc_select(mask, v, a);
+}
+
+
+template <typename T>
+StateBufferPtr makeStateBuffer(size_t num_stocks, size_t simd_len) {
+    return StateBufferPtr(StateBuffer::make(
+        divideAndCeil(num_stocks, simd_len), sizeof(T),
+        [](StateBuffer *obj) {
+            for (size_t i = 0; i < obj->num_objs; i++) {
+                new (&obj->get<T>(i)) T();
+            }
+        },
+        [](StateBuffer *obj) {
+            for (size_t i = 0; i < obj->num_objs; i++) {
+                obj->get<T>(i).~T();
+            }
+        }, Serializer<T>::serialize,
+        Serializer<T>::deserialize));
 }
 
 } // namespace ops

@@ -148,12 +148,12 @@ def test_avg_stddev(lib):
 ####################################
 
 def check_TS():
-    return "avg_and_stddev_TS", build_avg_and_stddev(), KunCompilerConfig(input_layout="TS", output_layout="TS", options={"no_fast_stat": 'no_warn'})
+    return "avg_and_stddev_TS", build_avg_and_stddev(), KunCompilerConfig(dtype="double", input_layout="TS", output_layout="TS", options={"no_fast_stat": 'no_warn'})
 
 def test_avg_stddev_TS(lib):
     modu = lib.getModule("avg_and_stddev_TS")
     assert(modu)
-    inp = np.random.rand(24, 20).astype("float32")
+    inp = np.random.rand(24, 20)
     df = pd.DataFrame(inp.transpose())
     expected_mean = df.rolling(10).mean().to_numpy().transpose()
     expected_stddev = df.rolling(10).std().to_numpy().transpose()

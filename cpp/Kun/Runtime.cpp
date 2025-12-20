@@ -295,16 +295,12 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
 
 AlignedPtr::AlignedPtr(void *ptr, size_t size) noexcept {
     this->ptr = ptr;
-#if CHECKED_PTR
     this->size = size;
-#endif
 }
 AlignedPtr::AlignedPtr(AlignedPtr &&other) noexcept {
     ptr = other.ptr;
     other.ptr = nullptr;
-#if CHECKED_PTR
     size = other.size;
-#endif
 }
 
 void AlignedPtr::release() noexcept {
@@ -321,9 +317,7 @@ AlignedPtr &AlignedPtr::operator=(AlignedPtr &&other) noexcept {
     release();
     ptr = other.ptr;
     other.ptr = nullptr;
-#if CHECKED_PTR
     size = other.size;
-#endif
     return *this;
 }
 
@@ -350,8 +344,25 @@ char *StreamBuffer<T>::make(size_t stock_count, size_t window_size,
 template struct StreamBuffer<float>;
 template struct StreamBuffer<double>;
 
+template <typename T>
+static void pushBuffer(std::vector<Buffer> &rtlbuffers,
+                       std::vector<AlignedPtr> &buffers, size_t num_stocks,
+                       size_t blocking_len, const BufferInfo &buf,
+                       InputStreamBase *states) {
+    auto ptr = StreamBuffer<T>::make(num_stocks, buf.window, blocking_len);
+    size_t buf_size =
+        StreamBuffer<T>::getBufferSize(num_stocks, buf.window, blocking_len);
+    buffers.emplace_back(ptr, buf_size);
+    if (states) {
+        if (!states->read(ptr, buf_size)) {
+            throw std::runtime_error("Failed to read initial stream buffer");
+        }
+    }
+    rtlbuffers.emplace_back((float *)ptr, 1);
+}
+
 StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
-                             size_t num_stocks)
+                             size_t num_stocks, InputStreamBase *states)
     : m{m} {
     if (m->required_version != VERSION) {
         throw std::runtime_error("The required version in the module does not "
@@ -361,37 +372,36 @@ StreamContext::StreamContext(std::shared_ptr<Executor> exec, const Module *m,
         throw std::runtime_error(
             "Cannot run batch mode module via StreamContext");
     }
-    if (m->init_state_buffers) {
-        state_buffers = m->init_state_buffers(num_stocks);
-        for (auto &buf : state_buffers) {
-            buf->initialize();
-        }
-    }
     std::vector<Buffer> rtlbuffers;
     rtlbuffers.reserve(m->num_buffers);
     buffers.reserve(m->num_buffers);
     if (m->dtype == Datatype::Float) {
         for (size_t i = 0; i < m->num_buffers; i++) {
-            auto &buf = m->buffers[i];
-            auto ptr = StreamBuffer<float>::make(num_stocks, buf.window,
-                                                 m->blocking_len);
-            buffers.emplace_back(
-                ptr, StreamBuffer<float>::getBufferSize(num_stocks, buf.window,
-                                                        m->blocking_len));
-            rtlbuffers.emplace_back((float *)ptr, 1);
+            pushBuffer<float>(rtlbuffers, buffers, num_stocks, m->blocking_len,
+                              m->buffers[i], states);
         }
     } else if (m->dtype == Datatype::Double) {
         for (size_t i = 0; i < m->num_buffers; i++) {
-            auto &buf = m->buffers[i];
-            auto ptr = StreamBuffer<double>::make(num_stocks, buf.window,
-                                                  m->blocking_len);
-            buffers.emplace_back(
-                ptr, StreamBuffer<double>::getBufferSize(num_stocks, buf.window,
-                                                         m->blocking_len));
-            rtlbuffers.emplace_back((float *)ptr, 1);
+            pushBuffer<double>(rtlbuffers, buffers, num_stocks, m->blocking_len,
+                               m->buffers[i], states);
         }
     } else {
         throw std::runtime_error("Unknown type");
+    }
+    if (m->init_state_buffers) {
+        state_buffers = m->init_state_buffers(num_stocks);
+        if (states) {
+            for (auto &buf : state_buffers) {
+                if (!buf->deserialize(states)) {
+                    throw std::runtime_error(
+                        "Failed to deserialize state buffer");
+                }
+            }
+        } else {
+            for (auto &buf : state_buffers) {
+                buf->initialize();
+            }
+        }
     }
     ctx.buffers = std::move(rtlbuffers);
     ctx.executor = exec;
@@ -460,8 +470,23 @@ void StreamContext::run() {
 StreamContext::~StreamContext() = default;
 
 
+bool StreamContext::serializeStates(OutputStreamBase* stream) {
+    for(auto& buf: buffers) {
+        if(!stream->write(buf.get(), buf.size)) {
+            return false;
+        }
+    }
+    for (auto& ptr: state_buffers) {
+        if (!ptr->serialize(stream)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 StateBuffer *StateBuffer::make(size_t num_objs, size_t elem_size,
-                               CtorFn_t ctor_fn, DtorFn_t dtor_fn) {
+                               CtorFn_t ctor_fn, DtorFn_t dtor_fn, SerializeFn_t serialize_fn,
+                               DeserializeFn_t deserialize_fn) {
     auto ret = kunAlignedAlloc(KUN_MALLOC_ALIGNMENT,
         sizeof(StateBuffer) + num_objs * elem_size);
     auto buf = (StateBuffer *)ret;
@@ -470,6 +495,8 @@ StateBuffer *StateBuffer::make(size_t num_objs, size_t elem_size,
     buf->initialized = 0;
     buf->ctor_fn = ctor_fn;
     buf->dtor_fn = dtor_fn;
+    buf->serialize_fn = serialize_fn;
+    buf->deserialize_fn = deserialize_fn;
     return buf;
 }
 

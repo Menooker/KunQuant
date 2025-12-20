@@ -48,6 +48,35 @@ struct SkipListState : SkipListStateImpl<T, simdLen> {
 };
 } // namespace
 
+template <typename T>
+struct Serializer;
+
+template <typename T, int simdLen, int expectedwindow>
+struct Serializer<SkipListState<T, simdLen, expectedwindow>> {
+    static bool serialize(StateBuffer *obj, OutputStreamBase *stream) {
+        for(size_t i = 0; i < obj->num_objs; i++) {
+            auto &state = obj->get<SkipListState<T, simdLen, expectedwindow>>(i);
+            if (!serializeSkipList(state.skipList, state.lastInsertRank, simdLen,
+                                   expectedwindow, stream)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static bool deserialize(StateBuffer *obj, InputStreamBase *stream) {
+        for(size_t i = 0; i < obj->num_objs; i++) {
+            auto &state = obj->get<SkipListState<T, simdLen, expectedwindow>>(i);
+            new (&state) SkipListState<T, simdLen, expectedwindow>{};
+            if (!deserializeSkipList(state.skipList, state.lastInsertRank, simdLen,
+                                     expectedwindow, stream)) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
 // https://github.com/pandas-dev/pandas/blob/main/pandas/_libs/window/aggregations.pyx
 
 template <typename T, int stride>
