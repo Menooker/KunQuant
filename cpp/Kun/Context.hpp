@@ -10,7 +10,7 @@
 
 namespace kun {
 
-static const uint64_t VERSION = 0x64100004;
+static const uint64_t VERSION = 0x64100005;
 struct KUN_API RuntimeStage {
     const Stage *stage;
     Context *ctx;
