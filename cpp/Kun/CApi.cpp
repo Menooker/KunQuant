@@ -137,7 +137,7 @@ KUN_API KunStatus kunCreateStreamEx(KunExecutorHandle exec,
 }
 
 KUN_API KunStatus kunStreamSerializeStates(KunStreamContextHandle context,
-                                           size_t dump_kind,
+                                           KunStateBufferKind dump_kind,
                                            char *path_or_buffer,
                                            size_t *size) {
     auto ctx = reinterpret_cast<kun::StreamContext *>(context);

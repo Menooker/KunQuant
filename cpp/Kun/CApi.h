@@ -14,25 +14,27 @@ extern "C" {
 
 #define KUN_API_VERSION 1
 
-#define KUN_INIT_NONE 0
-#define KUN_INIT_FILE 1
-#define KUN_INIT_MEMORY 2
+typedef enum {
+    KUN_INIT_NONE = 0,
+    KUN_INIT_FILE,
+    KUN_INIT_MEMORY,
+} KunStateBufferKind;
 
-typedef int KunStatus;
-
-#define KUN_SUCCESS 0
-#define KUN_INIT_ERROR 1
-#define KUN_INVALID_ARGUMENT 2
+typedef enum {
+    KUN_SUCCESS = 0,
+    KUN_INIT_ERROR,
+    KUN_INVALID_ARGUMENT,
+} KunStatus;
 
 typedef struct {
-    size_t version;   // version of the KunQuant C API, must be set to
-                      // KUN_API_VERSION
-    size_t init_kind; // KUN_INIT_NONE KUN_INIT_FILE KUN_INIT_MEMORY
+    size_t version; // version of the KunQuant C API, must be set to
+                    // KUN_API_VERSION
+    KunStateBufferKind init_kind; // KUN_INIT_NONE KUN_INIT_FILE KUN_INIT_MEMORY
     union {
         const char *path; // path to stream state dump file
         struct {
-            const char *buffer; // name of the stream state dump file
-            size_t size;        // size of the stream state dump file
+            const char *buffer; // buffer for stream state dump
+            size_t size;        // size of the stream state dump file in bytes
         } memory;               // memory buffer for stream state dump
     } init;
 } KunStreamExtraArgs;
@@ -189,7 +191,7 @@ KUN_API KunStatus kunCreateStreamEx(KunExecutorHandle exec, KunModuleHandle m,
  * is not KUN_INIT_FILE or KUN_INIT_MEMORY.
  */
 KUN_API KunStatus kunStreamSerializeStates(KunStreamContextHandle context,
-                                           size_t dump_kind,
+                                           KunStateBufferKind dump_kind,
                                            char *path_or_buffer, size_t *size);
 
 /**
