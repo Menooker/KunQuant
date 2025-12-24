@@ -11,7 +11,7 @@
 namespace kun {
 
 struct RuntimeStage;
-using FuncType = void (*)(Context *__ctx, size_t __stock_idx,
+using FuncType = void (*)(RuntimeStage *stage, size_t __stock_idx,
                           size_t __total_time, size_t __start, size_t __length);
 using RankFuncType = void (*)(RuntimeStage *stage, size_t __stock_idx,
                          size_t __total_time, size_t __start, size_t __length);
@@ -43,7 +43,6 @@ union FuncHolder
     RankFuncType rankf;
     FuncType f;
     constexpr FuncHolder(RankFuncType r): rankf{r} {}
-    constexpr FuncHolder(FuncType r): f{r} {}
 };
 
 

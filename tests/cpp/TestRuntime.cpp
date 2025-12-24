@@ -7,8 +7,9 @@ static constexpr size_t num_splits = 4;
 const static size_t simd_len = 8;
 
 
-static void stage1(Context *__ctx, size_t __stock_idx, size_t __total_time,
+static void stage1(RuntimeStage *stage, size_t __stock_idx, size_t __total_time,
                    size_t __start, size_t __length) {
+    auto __ctx = stage->ctx;
     float *base =
         &__ctx->buffers[0].ptr[__stock_idx * __total_time * simd_len + __start * simd_len];
     float *out =
@@ -18,8 +19,9 @@ static void stage1(Context *__ctx, size_t __stock_idx, size_t __total_time,
     }
 }
 
-static void stage2(Context *__ctx, size_t __stock_idx, size_t __total_time,
+static void stage2(RuntimeStage *stage, size_t __stock_idx, size_t __total_time,
                    size_t __start, size_t __length) {
+    auto __ctx = stage->ctx;
     float *base =
         &__ctx->buffers[1].ptr[__stock_idx * __total_time * simd_len + __start * simd_len];
     float *out =
@@ -29,8 +31,9 @@ static void stage2(Context *__ctx, size_t __stock_idx, size_t __total_time,
     }
 }
 
-static void stage3(Context *__ctx, size_t __stock_idx, size_t __total_time,
+static void stage3(RuntimeStage *stage, size_t __stock_idx, size_t __total_time,
                    size_t __start, size_t __length) {
+    auto __ctx = stage->ctx;
     float *base1 =
         &__ctx->buffers[1].ptr[__stock_idx * __total_time * simd_len + __start * simd_len];
     float *base2 =

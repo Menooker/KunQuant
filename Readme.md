@@ -292,21 +292,9 @@ On x86-64 CPUs, AVX2-FMA is used by default in the built KunQuant core library. 
 
 KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./Stream.md)
 
-## Row-to-row correlation (for IC/IR calculation)
+## Utility functions
 
-```python
-from KunQuant.runner import KunRunner as kr
-data1 = ... # np.ndarray of shape [time*stocks]. For example, a factor's results
-data2 = ... # np.ndarray of shape [time*stocks]. For example, a factor's results
-valid_in = {"alpha1": data1, "alpha2": data2}
-returns = ... # np.ndarray of shape [time*stocks]. For example, the rank of returns
-valid_corr = {"alpha1": np.empty((time,), dtype="float32"), "alpha2": np.empty((time,), dtype="float32")}
-kr.corrWith(executor, valid_in, returns, valid_corr, layout = "TS", rank_inputs = True)
-# outputs in valid_corr
-alpha1_ic = valid_corr["alpha1"].mean()
-```
-
-The parameter `rank_inputs=True` will first compute rank in the first input array (e.g. `valid_in` above) and compute the correlation with the second input (e.g. `returns` above). It will not compute the rank of the second input.
+To compute row-to-row correlation (for IC/IR calculation) and aggregrating functions (like `pd.groupby(...)`), please see [Utility.md](./Utility.md).
 
 ## Using C-style APIs
 

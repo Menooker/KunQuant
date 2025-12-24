@@ -72,7 +72,7 @@ void checkedDealloc(void *ptr, size_t sz) {
 namespace kun {
 
 void Buffer::alloc(size_t count, size_t use_count, size_t elem_size) {
-    if (!ptr) {
+    if (!ptr && count > 0) {
         ptr = (float *)kunAlignedAlloc(KUN_MALLOC_ALIGNMENT, count * elem_size);
         refcount = (int)use_count;
 #if CHECKED_PTR
@@ -94,7 +94,7 @@ void Buffer::deref() {
 
 Buffer::~Buffer() {
     if (ptr && refcount.load() >= 0) {
-        free(ptr);
+        kunAlignedFree(ptr);
     }
 }
 
@@ -107,15 +107,12 @@ size_t RuntimeStage::getNumTasks() const {
 bool RuntimeStage::doJob() {
     auto cur_idx = doing_index.load();
     auto num_tasks = getNumTasks();
+    auto total_time = ctx->total_time;
+    auto start = ctx->start;
+    auto length = ctx->length;
     while (cur_idx < num_tasks) {
         if (doing_index.compare_exchange_strong(cur_idx, cur_idx + 1)) {
-            if (stage->kind == TaskExecKind::SLICE_BY_STOCK) {
-                stage->f.f(ctx, cur_idx, ctx->total_time, ctx->start,
-                           ctx->length);
-            } else {
-                stage->f.rankf(this, cur_idx, ctx->total_time, ctx->start,
-                               ctx->length);
-            }
+            stage->f.f(this, cur_idx, total_time, start, length);
             if (!onDone(1)) {
                 return false;
             }
@@ -161,6 +158,23 @@ bool RuntimeStage::onDone(size_t cnt) {
         return false;
     }
     return true;
+}
+
+static void setContextStagesAndRun(Context &ctx, Stage *mstages,
+                                   size_t num_stages, Executor *exec) {
+    std::vector<RuntimeStage> &stages = ctx.stages;
+    stages.reserve(num_stages);
+    for (size_t i = 0; i < num_stages; i++) {
+        auto &stage = mstages[i];
+        stages.emplace_back(&stage, &ctx);
+    }
+    for (size_t i = 0; i < num_stages; i++) {
+        auto &stage = mstages[i];
+        if (stage.orig_pending == 0) {
+            stages[i].enqueue();
+        }
+    }
+    exec->runUntilDone();
 }
 
 void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout,
@@ -211,7 +225,7 @@ void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout,
         auto *outbuf = &temp.back();
         mstages.emplace_back(Stage{thefunc, nullptr, 0, inbuf, 2, outbuf, 1, 0,
                                    TaskExecKind::SLICE_BY_TIME,
-                                   buffer_info.size()});
+                                   mstages.size()});
     }
     Context ctx{std::move(rtlbuffers),
                 {},
@@ -223,20 +237,75 @@ void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout,
                 length,
                 8,
                 Datatype::Float,
-                false, nullptr};
-    std::vector<RuntimeStage> &stages = ctx.stages;
-    stages.reserve(buffers.size());
-    for (size_t i = 0; i < buffers.size(); i++) {
-        auto &stage = mstages[i];
-        stages.emplace_back(&stage, &ctx);
+                false,
+                nullptr};
+    setContextStagesAndRun(ctx, mstages.data(), mstages.size(), exec.get());
+}
+
+namespace ops {
+void aggregrationFloat(RuntimeStage *stage, size_t stock_idx,
+                       size_t __total_time, size_t __start, size_t __length);
+void aggregrationDouble(RuntimeStage *stage, size_t stock_idx,
+                        size_t __total_time, size_t __start, size_t __length);
+} // namespace ops
+
+void aggregrate(std::shared_ptr<Executor> exec, size_t num_aggregrations,
+                  float **buffers, float **labels, Datatype dtype,
+                  const AggregrationOutput *outbuffers, size_t num_stocks,
+                  size_t total_time, size_t cur_time, size_t length) {
+    decltype(&ops::aggregrationFloat) thefunc = nullptr;
+    size_t simd_len = 0;
+    if (dtype == Datatype::Float) {
+        simd_len = 8;
+        thefunc = &ops::aggregrationFloat;
+    } else {
+        simd_len = 4;
+        thefunc = &ops::aggregrationDouble;
     }
-    for (size_t i = 0; i < buffers.size(); i++) {
-        auto &stage = mstages[i];
-        if (stage.orig_pending == 0) {
-            stages[i].enqueue();
+    std::vector<BufferInfo> buffer_info;
+    std::vector<Buffer> rtlbuffers;
+    std::vector<Stage> mstages;
+    std::vector<BufferInfo *> temp;
+    // for each aggregration, we need num_aggregration_buffers + 2 buffers
+    // 1 for the labels, 1 for the input and num_aggregration_buffers for the
+    // output
+    rtlbuffers.reserve((AGGREGRATION_NUM_KINDS + 2) * num_aggregrations);
+    buffer_info.reserve((AGGREGRATION_NUM_KINDS + 2) * num_aggregrations);
+    mstages.reserve(num_aggregrations);
+    temp.reserve((AGGREGRATION_NUM_KINDS + 2) * num_aggregrations);
+    auto pushBuffer = [&](float *buffer, BufferKind kind, size_t num_users) {
+        rtlbuffers.emplace_back(buffer, total_time);
+        buffer_info.emplace_back(
+            BufferInfo{buffer_info.size(), "", num_users, kind, 0, 0});
+        temp.push_back(&buffer_info.back());
+    };
+    for (size_t i = 0; i < num_aggregrations; i++) {
+        float *input = buffers[i];
+        float *label = labels[i];
+        pushBuffer(label, BufferKind::INPUT, 1);
+        auto *inbuf = &temp.back();
+        pushBuffer(input, BufferKind::INPUT, 1);
+        auto *outbuf = &temp.back() + 1;
+        for (size_t j = 0; j < AGGREGRATION_NUM_KINDS; j++) {
+            pushBuffer(outbuffers[i].buffers[j], BufferKind::OUTPUT, 0);
         }
+        mstages.emplace_back(
+            Stage{thefunc, nullptr, 0, inbuf, 2, outbuf, AGGREGRATION_NUM_KINDS,
+                  0, TaskExecKind::SLICE_BY_STOCK, mstages.size()});
     }
-    exec->runUntilDone();
+    Context ctx{std::move(rtlbuffers),
+                {},
+                exec,
+                0,
+                num_stocks,
+                total_time,
+                cur_time,
+                length,
+                simd_len,
+                dtype,
+                false,
+                nullptr};
+    setContextStagesAndRun(ctx, mstages.data(), mstages.size(), exec.get());
 }
 
 void runGraph(std::shared_ptr<Executor> exec, const Module *m,
@@ -277,20 +346,9 @@ void runGraph(std::shared_ptr<Executor> exec, const Module *m,
                 length,
                 m->blocking_len,
                 m->dtype,
-                false, nullptr};
-    std::vector<RuntimeStage> &stages = ctx.stages;
-    stages.reserve(m->num_stages);
-    for (size_t i = 0; i < m->num_stages; i++) {
-        auto &stage = m->stages[i];
-        stages.emplace_back(&stage, &ctx);
-    }
-    for (size_t i = 0; i < m->num_stages; i++) {
-        auto &stage = m->stages[i];
-        if (stage.orig_pending == 0) {
-            stages[i].enqueue();
-        }
-    }
-    exec->runUntilDone();
+                false,
+                nullptr};
+    setContextStagesAndRun(ctx, m->stages, m->num_stages, exec.get());
 }
 
 AlignedPtr::AlignedPtr(void *ptr, size_t size) noexcept {
@@ -327,7 +385,8 @@ template <typename T>
 char *StreamBuffer<T>::make(size_t stock_count, size_t window_size,
                             size_t simd_len) {
     auto ret = kunAlignedAlloc(
-        sizeof(T) * simd_len, StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
+        sizeof(T) * simd_len,
+        StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
     auto buf = (StreamBuffer *)ret;
     auto data = buf->getBuffer();
     auto rounded_stock_count = roundUp(stock_count, simd_len);
@@ -428,12 +487,14 @@ size_t StreamContext::queryBufferHandle(const char *name) const {
 
 const float *StreamContext::getCurrentBufferPtrFloat(size_t handle) const {
     auto buf = (StreamBuffer<float> *)buffers.at(handle).get();
-    return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window, m->blocking_len);
+    return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window,
+                                    m->blocking_len);
 }
 
 const double *StreamContext::getCurrentBufferPtrDouble(size_t handle) const {
     auto buf = (StreamBuffer<double> *)buffers.at(handle).get();
-    return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window, m->blocking_len);
+    return buf->getCurrentBufferPtr(ctx.stock_count, m->buffers[handle].window,
+                                    m->blocking_len);
 }
 
 void StreamContext::pushData(size_t handle, const float *data) {
@@ -469,14 +530,13 @@ void StreamContext::run() {
 
 StreamContext::~StreamContext() = default;
 
-
-bool StreamContext::serializeStates(OutputStreamBase* stream) {
-    for(auto& buf: buffers) {
-        if(!stream->write(buf.get(), buf.size)) {
+bool StreamContext::serializeStates(OutputStreamBase *stream) {
+    for (auto &buf : buffers) {
+        if (!stream->write(buf.get(), buf.size)) {
             return false;
         }
     }
-    for (auto& ptr: state_buffers) {
+    for (auto &ptr : state_buffers) {
         if (!ptr->serialize(stream)) {
             return false;
         }
@@ -485,10 +545,11 @@ bool StreamContext::serializeStates(OutputStreamBase* stream) {
 }
 
 StateBuffer *StateBuffer::make(size_t num_objs, size_t elem_size,
-                               CtorFn_t ctor_fn, DtorFn_t dtor_fn, SerializeFn_t serialize_fn,
+                               CtorFn_t ctor_fn, DtorFn_t dtor_fn,
+                               SerializeFn_t serialize_fn,
                                DeserializeFn_t deserialize_fn) {
     auto ret = kunAlignedAlloc(KUN_MALLOC_ALIGNMENT,
-        sizeof(StateBuffer) + num_objs * elem_size);
+                               sizeof(StateBuffer) + num_objs * elem_size);
     auto buf = (StateBuffer *)ret;
     buf->num_objs = num_objs;
     buf->elem_size = elem_size;

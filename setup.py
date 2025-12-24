@@ -27,6 +27,10 @@ class CMakeBuildExtension(build_ext):
             f"-DPYTHON_EXECUTABLE={os.sys.executable}",
             f"-DCMAKE_BUILD_TYPE={release_or_debug}"
         ]
+        if "KUN_SANITIZER" in os.environ and os.environ["KUN_SANITIZER"] != "0":
+            cmake_args += [f"-DKUN_SANITIZER=ON"]
+        else:
+            cmake_args += [f"-DKUN_SANITIZER=OFF"]
         build_args = ["cmake", "--build", "."]
         devbuild = False
         if "KUN_BUILD_TESTS" in os.environ and os.environ["KUN_BUILD_TESTS"] != "0":
