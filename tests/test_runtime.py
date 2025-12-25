@@ -650,6 +650,31 @@ def test_stream_lifetime_gh_issue_41():
 
 ####################################
 
+def repro_crash_gh_issue_71():
+    print("Building factors...")
+    builder = Builder()
+    with builder:
+        inp1 = Input("close")
+        # Generate MANY factors to stress memory/heap
+        for i in range(20):
+            Output(WindowedQuantile(inp1, 10, 0.5 + i * 0.01), f"qtl_{i}")
+        for i in range(20):
+            Output(WindowedLinearRegressionSlope(inp1, 10 + i), f"beta_{i}")
+    f = Function(builder.ops)
+    return "test_repro_crash_gh_issue_71", f, KunCompilerConfig(partition_factor=3, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
+
+def test_repro_crash_gh_issue_71(lib):
+    num_symbols = 24
+    executor = kr.createSingleThreadExecutor()
+    modu = lib.getModule("test_repro_crash_gh_issue_71")
+    stream = kr.StreamContext(executor, modu, num_symbols)
+    data = np.random.rand(num_symbols).astype("float32")
+    h_close = stream.queryBufferHandle("close")
+    for i in range(20):
+        stream.pushData(h_close, data)
+        stream.run()
+
+####################################
 
 def create_stream_double():
     builder = Builder()
@@ -736,6 +761,7 @@ funclist = [
     check_covar(),
     check_quantile(),
     check_large_rank(),
+    repro_crash_gh_issue_71(),
     ]
 lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig(machine=get_compiler_flags()))
 
@@ -762,4 +788,5 @@ test_loop_index()
 test_covar(lib)
 test_quantile(lib)
 test_large_rank(lib)
+test_repro_crash_gh_issue_71(lib)
 print("done")

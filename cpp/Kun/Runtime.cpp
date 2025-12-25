@@ -385,8 +385,9 @@ template <typename T>
 char *StreamBuffer<T>::make(size_t stock_count, size_t window_size,
                             size_t simd_len) {
     auto ret = kunAlignedAlloc(
-        sizeof(T) * simd_len,
-        StreamBuffer::getBufferSize(stock_count, window_size, simd_len));
+        KUN_MALLOC_ALIGNMENT,
+        roundUp(StreamBuffer::getBufferSize(stock_count, window_size, simd_len),
+                KUN_MALLOC_ALIGNMENT));
     auto buf = (StreamBuffer *)ret;
     auto data = buf->getBuffer();
     auto rounded_stock_count = roundUp(stock_count, simd_len);
@@ -548,8 +549,10 @@ StateBuffer *StateBuffer::make(size_t num_objs, size_t elem_size,
                                CtorFn_t ctor_fn, DtorFn_t dtor_fn,
                                SerializeFn_t serialize_fn,
                                DeserializeFn_t deserialize_fn) {
-    auto ret = kunAlignedAlloc(KUN_MALLOC_ALIGNMENT,
-                               sizeof(StateBuffer) + num_objs * elem_size);
+    auto ret =
+        kunAlignedAlloc(KUN_MALLOC_ALIGNMENT,
+                        roundUp(sizeof(StateBuffer) + num_objs * elem_size,
+                                KUN_MALLOC_ALIGNMENT));
     auto buf = (StateBuffer *)ret;
     buf->num_objs = num_objs;
     buf->elem_size = elem_size;
