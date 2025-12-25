@@ -4,7 +4,7 @@ If you use KunQuant in online services, when the data for each tick are received
 
 ## Building Streaming mode Factor libraries
 
-It is almost the same as the steps in [Customize.md](./Customize.md) and [Readme.md](./Readme.md). The main difference is that you need to specify `output_layout="STREAM"` in `generate.py` of your Factor library generator. `project/Alpha101Stream` is an example of Alpha101 in streaming mode. You can check the difference of `projects/Alpha101/generate.py` and `project/Alpha101Stream/generate.py`. Except the difference in the names, the only difference is at the line
+It is almost the same as the steps in [Customize.md](./Customize.md) and [Readme.md](../Readme.md). The main difference is that you need to specify `output_layout="STREAM"` in `generate.py` of your Factor library generator. `project/Alpha101Stream` is an example of Alpha101 in streaming mode. You can check the difference of `projects/Alpha101/generate.py` and `project/Alpha101Stream/generate.py`. Except the difference in the names, the only difference is at the line
 
 ```python
 src = compileit(f, "alpha_101_stream", partition_factor=8, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})

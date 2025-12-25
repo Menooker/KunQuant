@@ -118,7 +118,7 @@ lib = cfake.compileit([("alpha101", f, KunCompilerConfig(input_layout="TS", outp
 modu = lib.getModule("alpha101")
 ```
 
-We will explain the function `cfake.compileit` in [Customize.md](./Customize.md). Let's continue to see how to use the compiled `lib`.
+We will explain the function `cfake.compileit` in [Customize.md](./doc/Customize.md). Let's continue to see how to use the compiled `lib`.
 
 Load your stock data. In this example, load from local pandas files. We assume the open, close, high, low, volumn and amount data for different stocks are stored in different files.
 
@@ -231,7 +231,7 @@ Note that the executors are reusable. A multithread executor is actually a threa
 
 ## Customized factors
 
-KunQuant is a tool for general expressions. You can further read [Customize.md](./Customize.md) for how you can compile your own customized factors. This document also provides infomation on
+KunQuant is a tool for general expressions. You can further read [Customize.md](./doc/Customize.md) for how you can compile your own customized factors. This document also provides infomation on
  * building and keeping the compilation result for later use
  * Loading existing compiled factor library
  * enabling AVX512
@@ -290,22 +290,22 @@ On x86-64 CPUs, AVX2-FMA is used by default in the built KunQuant core library. 
 
 ## Streaming mode
 
-KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./Stream.md)
+KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./doc/Stream.md)
 
 ## Utility functions
 
-To compute row-to-row correlation (for IC/IR calculation) and aggregrating functions (like `pd.groupby(...)`), please see [Utility.md](./Utility.md).
+To compute row-to-row correlation (for IC/IR calculation) and aggregrating functions (like `pd.groupby(...)`), please see [Utility.md](./doc/Utility.md).
 
 ## Using C-style APIs
 
-KunQuant provides C-style APIs to call the generated factor code in shared libraries. See [CAPI.md](./CAPI.md)
+KunQuant provides C-style APIs to call the generated factor code in shared libraries. See [CAPI.md](./doc/CAPI.md)
 
 
 ## Operator definitions
 
-See [Operators.md](./Operators.md)
+See [Operators.md](./doc/Operators.md)
 
-To add new operators, see [NewOperators.md](./NewOperators.md)
+To add new operators, see [NewOperators.md](./doc/NewOperators.md)
 
 ## Testing and validation
 
