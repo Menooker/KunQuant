@@ -8,10 +8,10 @@ namespace ops {
         RuntimeStage * stage, size_t time_idx, size_t __total_time,            \
         size_t __start, size_t __length);
 
-DEF_INSTANCE(CorrWith, MapperSTs<float, 8>)
-DEF_INSTANCE(CorrWith, MapperTS<float, 8>)
-DEF_INSTANCE(RankCorrWith, MapperSTs<float, 8>)
-DEF_INSTANCE(RankCorrWith, MapperTS<float, 8>)
+DEF_INSTANCE(CorrWith, MapperSTsFloat)
+DEF_INSTANCE(CorrWith, MapperTSFloat)
+DEF_INSTANCE(RankCorrWith, MapperSTsFloat)
+DEF_INSTANCE(RankCorrWith, MapperTSFloat)
 
 } // namespace ops
 } // namespace kun

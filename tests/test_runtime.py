@@ -10,9 +10,63 @@ from KunQuant.Stage import Function
 from KunQuant.Op import *
 from KunQuant.ops import *
 from KunQuant.predefined.Alpha101 import *
-from  KunQuant.runner import KunRunner as kr
+from KunQuant.runner import KunRunner as kr
 import sys
 from KunQuant.jit.env import cpu_arch
+
+def test_aggregrate(dtype):
+    a = np.random.rand(240, 16).astype(dtype)
+    b = np.random.rand(240, 16).astype(dtype)
+    c = np.random.rand(240, 16).astype(dtype)
+    # randomly generate time stamps between 2026-01-01 to 2026-01-07
+    dates = pd.date_range(start="2026-01-01", end="2026-01-07", freq="min")
+    labels = pd.DataFrame(sorted(np.random.choice(dates, size=240)))
+    adf = pd.DataFrame(a, index=labels[0])
+    bdf = pd.DataFrame(b, index=labels[0])
+    cdf = pd.DataFrame(c, index=labels[0])
+    # compute the aggregrate of a sum of all rows for each day
+    a_sum = adf.groupby(adf.index.date).sum()
+    a_min = adf.groupby(adf.index.date).min()
+    a_max = adf.groupby(adf.index.date).max()
+    a_first = adf.groupby(adf.index.date).first()
+    a_last = adf.groupby(adf.index.date).last()
+    a_count = adf.groupby(adf.index.date).count()
+    a_mean = adf.groupby(adf.index.date).mean()
+    # compute the aggregrate of b sum of all rows for each day
+    b_sum = bdf.groupby(bdf.index.date).sum()
+    b_min = bdf.groupby(bdf.index.date).min()
+    b_max = bdf.groupby(bdf.index.date).max()
+
+    c_sum = cdf.groupby(cdf.index.date).sum()
+
+    # get day of month of adf.index
+    labels = adf.index.day.to_numpy().astype(dtype)
+    length = len(a_sum)
+
+    executor = kr.createMultiThreadExecutor(3)
+
+    def make_emp():
+        return np.empty((length, 16), dtype=dtype)
+    out_a = {"sum": make_emp(), "min": make_emp(),
+             "max": make_emp(), "first": make_emp(),
+             "last": make_emp(), "count": make_emp(), "mean": make_emp()}
+    out_b = {"sum": make_emp(), "min": make_emp(),
+             "max": make_emp()}
+    out_c = {"sum": make_emp()}
+    kr.aggregrate(executor, [a, b, c], [labels, labels, labels], [out_a, out_b, out_c])
+    np.testing.assert_allclose(out_a["sum"], a_sum, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(out_a["min"], a_min, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(out_a["max"], a_max, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(out_a["first"], a_first, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(out_a["last"], a_last, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(out_a["count"], a_count, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(out_a["mean"], a_mean, atol=1e-6, rtol=1e-4, equal_nan=True)
+
+    np.testing.assert_allclose(out_b["sum"], b_sum, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(out_b["min"], b_min, atol=1e-6, rtol=1e-4, equal_nan=True)
+    np.testing.assert_allclose(out_b["max"], b_max, atol=1e-6, rtol=1e-4, equal_nan=True)
+
+    np.testing.assert_allclose(out_c["sum"], c_sum, atol=1e-6, rtol=1e-4, equal_nan=True)
 
 def get_compiler_flags():
     if os.environ.get("KUN_TEST_NO_AVX2", "0") != "0":
@@ -61,7 +115,7 @@ def test_corrwith():
     a2 =  pd.DataFrame(a).rank(axis=1, pct=True).astype("float32")
     b2 =  pd.DataFrame(b).rank(axis=1, pct=True).astype("float32")
     ret2 =  pd.DataFrame(b).rank(axis=1, pct=True).astype("float32")
-    kr.corrWith(executor, [a2.to_numpy(),b2.to_numpy()], ret2.to_numpy(), [out1, out2], "TS", rank_inputs = True)
+    kr.corrWith(executor, [a, b], ret2.to_numpy(), [out1, out2], "TS", rank_inputs = True)
     ex1 = a2.corrwith(ret2, axis=1)
     np.testing.assert_allclose(out1, ex1, atol=1e-6, rtol=1e-4, equal_nan=True)
     ex1 = b2.corrwith(ret2, axis=1)
@@ -597,7 +651,6 @@ def test_stream_lifetime_gh_issue_41():
 ####################################
 
 def repro_crash_gh_issue_71():
-    print("Building factors...")
     builder = Builder()
     with builder:
         inp1 = Input("close")
@@ -607,7 +660,7 @@ def repro_crash_gh_issue_71():
         for i in range(20):
             Output(WindowedLinearRegressionSlope(inp1, 10 + i), f"beta_{i}")
     f = Function(builder.ops)
-    return "test_repro_crash_gh_issue_71", f, KunCompilerConfig(partition_factor=3, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
+    return "test_repro_crash_gh_issue_71", f, KunCompilerConfig(partition_factor=3, input_layout="STREAM", output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
 
 def test_repro_crash_gh_issue_71(lib):
     num_symbols = 24
@@ -685,6 +738,8 @@ def test_loop_index():
 
 test_stream_lifetime_gh_issue_41()
 test_corrwith()
+test_aggregrate("float32")
+test_aggregrate("float64")
 funclist = [
     check_1(),
     check_TS(),

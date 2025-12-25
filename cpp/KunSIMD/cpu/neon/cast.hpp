@@ -73,4 +73,12 @@ INLINE vec_s64x2 fast_cast(vec_f64x2 v) {
 }
 
 
+INLINE vec_f32x4::Masktype vec_f32x4::make_mask(int N) {
+    return vec_s32x4{N} > vec_s32x4{0, 1, 2, 3};
+}
+
+INLINE vec_f64x2::Masktype vec_f64x2::make_mask(int N) {
+    return vec_s64x2{N} > vec_s64x2{0, 1};
+}
+
 } // namespace kun_simd

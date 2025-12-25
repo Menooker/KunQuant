@@ -118,7 +118,7 @@ lib = cfake.compileit([("alpha101", f, KunCompilerConfig(input_layout="TS", outp
 modu = lib.getModule("alpha101")
 ```
 
-We will explain the function `cfake.compileit` in [Customize.md](./Customize.md). Let's continue to see how to use the compiled `lib`.
+We will explain the function `cfake.compileit` in [Customize.md](./doc/Customize.md). Let's continue to see how to use the compiled `lib`.
 
 Load your stock data. In this example, load from local pandas files. We assume the open, close, high, low, volumn and amount data for different stocks are stored in different files.
 
@@ -231,7 +231,7 @@ Note that the executors are reusable. A multithread executor is actually a threa
 
 ## Customized factors
 
-KunQuant is a tool for general expressions. You can further read [Customize.md](./Customize.md) for how you can compile your own customized factors. This document also provides infomation on
+KunQuant is a tool for general expressions. You can further read [Customize.md](./doc/Customize.md) for how you can compile your own customized factors. This document also provides infomation on
  * building and keeping the compilation result for later use
  * Loading existing compiled factor library
  * enabling AVX512
@@ -290,34 +290,22 @@ On x86-64 CPUs, AVX2-FMA is used by default in the built KunQuant core library. 
 
 ## Streaming mode
 
-KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./Stream.md)
+KunQuant can be configured to generate factor libraries for streaming, when the data arrive one at a time. See [Stream.md](./doc/Stream.md)
 
-## Row-to-row correlation (for IC/IR calculation)
+## Utility functions
 
-```python
-from KunQuant.runner import KunRunner as kr
-data1 = ... # np.ndarray of shape [time*stocks]. For example, a factor's results
-data2 = ... # np.ndarray of shape [time*stocks]. For example, a factor's results
-valid_in = {"alpha1": data1, "alpha2": data2}
-returns = ... # np.ndarray of shape [time*stocks]. For example, the rank of returns
-valid_corr = {"alpha1": np.empty((time,), dtype="float32"), "alpha2": np.empty((time,), dtype="float32")}
-kr.corrWith(executor, valid_in, returns, valid_corr, layout = "TS", rank_inputs = True)
-# outputs in valid_corr
-alpha1_ic = valid_corr["alpha1"].mean()
-```
-
-The parameter `rank_inputs=True` will first compute rank in the first input array (e.g. `valid_in` above) and compute the correlation with the second input (e.g. `returns` above). It will not compute the rank of the second input.
+To compute row-to-row correlation (for IC/IR calculation) and aggregrating functions (like `pd.groupby(...)`), please see [Utility.md](./doc/Utility.md).
 
 ## Using C-style APIs
 
-KunQuant provides C-style APIs to call the generated factor code in shared libraries. See [CAPI.md](./CAPI.md)
+KunQuant provides C-style APIs to call the generated factor code in shared libraries. See [CAPI.md](./doc/CAPI.md)
 
 
 ## Operator definitions
 
-See [Operators.md](./Operators.md)
+See [Operators.md](./doc/Operators.md)
 
-To add new operators, see [NewOperators.md](./NewOperators.md)
+To add new operators, see [NewOperators.md](./doc/NewOperators.md)
 
 ## Testing and validation
 

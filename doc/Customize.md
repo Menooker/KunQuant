@@ -6,7 +6,7 @@ This document describes how you can build your own factors.
 
 You can invoke KunQuant as a Python library to generate high performance C++ source code for your own factors. KunQuant also provides predefined factors of Alpha101, at the Python module KunQuant.predefined.Alpha101.
 
-First, you need to install KunQuant. See [Readme.md](./Readme.md).
+First, you need to install KunQuant. See [Readme.md](../Readme.md).
 
 Then in Python code, import the needed classes and functions.
 
@@ -99,7 +99,7 @@ lib = kr.Library.load("/path/to/a/dir/your_lib_name/your_lib_name.so")
 modu = lib.getModule("my_library_name")
 ```
 
-And use the `modu` object just like in the example in [Readme](./Readme.md).
+And use the `modu` object just like in the example in [Readme](../Readme.md).
 
 ## Compiler options
 

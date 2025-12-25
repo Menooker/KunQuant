@@ -49,7 +49,7 @@ void transpose_ST8s(float* in, float* out, int stocks, int time) {
 
 Again, you need to make sure the number of stocks is a multiple of 8.
 
-Then, similar to the Python example in [Readme.md](./Readme.md), we need to create the executor, load library and get the module:
+Then, similar to the Python example in [Readme.md](../Readme.md), we need to create the executor, load library and get the module:
 
 ```C
     KunExecutorHandle exec = kunCreateSingleThreadExecutor();

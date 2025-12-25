@@ -9,7 +9,7 @@
 namespace kun {
 namespace ops {
 template <typename INPUT>
-void KUN_TEMPLATE_EXPORT CorrWith(RuntimeStage *stage, size_t time_idx,
+void CorrWith(RuntimeStage *stage, size_t time_idx,
                                   size_t __total_time, size_t __start,
                                   size_t __length) {
     auto num_stocks = stage->ctx->stock_count;
@@ -54,7 +54,7 @@ void KUN_TEMPLATE_EXPORT CorrWith(RuntimeStage *stage, size_t time_idx,
 }
 
 template <typename INPUT>
-void KUN_TEMPLATE_EXPORT RankCorrWith(RuntimeStage *stage, size_t time_idx,
+void RankCorrWith(RuntimeStage *stage, size_t time_idx,
                                       size_t __total_time, size_t __start,
                                       size_t __length) {
     auto num_stocks = stage->ctx->stock_count;
@@ -120,22 +120,22 @@ void KUN_TEMPLATE_EXPORT RankCorrWith(RuntimeStage *stage, size_t time_idx,
     }
 }
 
-extern template void CorrWith<MapperSTs<float, 8>>(RuntimeStage *stage,
+extern template void CorrWith<MapperSTsFloat>(RuntimeStage *stage,
                                                    size_t time_idx,
                                                    size_t __total_time,
                                                    size_t __start,
                                                    size_t __length);
-extern template void CorrWith<MapperTS<float, 8>>(RuntimeStage *stage,
+extern template void CorrWith<MapperTSFloat>(RuntimeStage *stage,
                                                   size_t time_idx,
                                                   size_t __total_time,
                                                   size_t __start,
                                                   size_t __length);
-extern template void RankCorrWith<MapperSTs<float, 8>>(RuntimeStage *stage,
+extern template void RankCorrWith<MapperSTsFloat>(RuntimeStage *stage,
                                                        size_t time_idx,
                                                        size_t __total_time,
                                                        size_t __start,
                                                        size_t __length);
-extern template void RankCorrWith<MapperTS<float, 8>>(RuntimeStage *stage,
+extern template void RankCorrWith<MapperTSFloat>(RuntimeStage *stage,
                                                       size_t time_idx,
                                                       size_t __total_time,
                                                       size_t __start,

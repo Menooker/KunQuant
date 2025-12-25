@@ -13,8 +13,22 @@
 #include <pybind11/stl.h>
 #include <string>
 #include <vector>
+#include <sstream>
 
 namespace py = pybind11;
+
+static std::string shapeToString(const std::vector<py::ssize_t> &shape) {
+    std::stringstream ss;
+    ss << "(";
+    for (size_t i = 0; i < shape.size(); i++) {
+        ss << shape[i];
+        if (i != shape.size() - 1) {
+            ss << ", ";
+        }
+    }
+    ss << ")";
+    return ss.str();
+}
 
 static void expectContiguousShape(kun::Datatype dtype,
                                   const py::buffer_info &info, const char *name,
@@ -29,7 +43,9 @@ static void expectContiguousShape(kun::Datatype dtype,
     }
     // ST8s layout
     if (info.ndim != shape.size() || info.shape != shape) {
-        throw std::runtime_error(std::string("Bad shape at ") + name);
+        std::stringstream ss;
+        ss << "Bad shape at " << name << " expected " << shapeToString(shape) << " but got " << shapeToString(info.shape);
+        throw std::runtime_error(ss.str());
     }
     for (auto s : info.shape) {
         if (s <= 0) {
@@ -64,6 +80,67 @@ struct StreamContextWrapper {
         : lib{m->lib}, ctx{std::move(exec), m->modu, num_stocks, states}
            {}
 };
+
+void *checkInput(const py::buffer_info &info, const std::string &name,
+                 kun::MemoryLayout mlayout, kun::Datatype dtype,
+                 py::ssize_t &known_S, py::ssize_t &known_T,
+                 py::ssize_t &knownNumStocks, py::ssize_t simd_len) {
+    if (mlayout == kun::MemoryLayout::STs) {
+        // ST8t layout
+        if (info.ndim != 3) {
+            throw std::runtime_error("Bad STs shape at " + name);
+        }
+        auto S = info.shape[0];
+        auto T = info.shape[1];
+        if (known_S == 0) {
+            known_S = S;
+            known_T = T;
+            knownNumStocks = known_S * simd_len;
+        }
+        expectContiguousShape(dtype, info, name.c_str(),
+                              {known_S, known_T, simd_len});
+    } else if (mlayout == kun::MemoryLayout::TS) {
+        // TS layout
+        if (info.ndim != 2) {
+            throw std::runtime_error("Bad TS shape at " + name);
+        }
+        auto S = info.shape[1];
+        auto T = info.shape[0];
+        if (known_S == 0) {
+            known_S = S / simd_len;
+            knownNumStocks = S;
+        }
+        if (known_T == 0) {
+            known_T = T;
+        }
+        expectContiguousShape(dtype, info, name.c_str(),
+                              {known_T, knownNumStocks});
+    } else {
+        throw std::runtime_error("Unknown layout at " + name);
+    }
+    return info.ptr;
+}
+
+kun::AggregrationKind getAggregrationKind(const std::string &name) {
+    if (name == "sum") {
+        return kun::AggregrationKind::AGGREGRATION_SUM;
+    } else if (name == "min") {
+        return kun::AggregrationKind::AGGREGRATION_MIN;
+    } else if (name == "max") {
+        return kun::AggregrationKind::AGGREGRATION_MAX;
+    } else if (name == "first") {
+        return kun::AggregrationKind::AGGREGRATION_FIRST;
+    } else if (name == "last") {
+        return kun::AggregrationKind::AGGREGRATION_LAST;
+    } else if (name == "count") {
+        return kun::AggregrationKind::AGGREGRATION_COUNT;
+    } else if (name == "mean") {
+        return kun::AggregrationKind::AGGREGRATION_MEAN;
+    } else {
+        throw std::runtime_error("Unknown aggregration kind: " + name);
+    }
+}
+
 } // namespace
 
 PYBIND11_MODULE(KunRunner, m) {
@@ -338,53 +415,21 @@ PYBIND11_MODULE(KunRunner, m) {
             py::ssize_t known_S = 0;
             py::ssize_t known_T = 0;
             py::ssize_t knownNumStocks = 0;
-            py::ssize_t simd_len = 8;
+            py::ssize_t simd_len = KUN_DEFAULT_FLOAT_SIMD_LEN;
             std::vector<float *> bufinputs;
             std::vector<float *> bufoutputs;
-            auto check_input = [&](py::buffer buf_obj,
-                                   const std::string &name) -> float * {
-                auto info = buf_obj.request();
-                if (mlayout == kun::MemoryLayout::STs) {
-                    // ST8t layout
-                    if (info.ndim != 3) {
-                        throw std::runtime_error("Bad STs shape at " + name);
-                    }
-                    auto S = info.shape[0];
-                    auto T = info.shape[1];
-                    if (known_S == 0) {
-                        known_S = S;
-                        known_T = T;
-                        knownNumStocks = known_S * simd_len;
-                    }
-                    expectContiguousShape(kun::Datatype::Float, info,
-                                          name.c_str(),
-                                          {known_S, known_T, simd_len});
-                } else if (mlayout == kun::MemoryLayout::TS) {
-                    // TS layout
-                    if (info.ndim != 2) {
-                        throw std::runtime_error("Bad TS shape at " + name);
-                    }
-                    auto S = info.shape[1];
-                    auto T = info.shape[0];
-                    if (known_S == 0) {
-                        known_S = S / simd_len;
-                        known_T = T;
-                        knownNumStocks = S;
-                    }
-                    expectContiguousShape(kun::Datatype::Float, info,
-                                          name.c_str(),
-                                          {known_T, knownNumStocks});
-                } else {
-                    throw std::runtime_error("Unknown layout at " + name);
-                }
-                return (float *)info.ptr;
-            };
-            float *bufcorr_with = check_input(corr_with, "corr_with");
+
+            float *bufcorr_with = (float *)checkInput(
+                corr_with.request(), "corr_with", mlayout, kun::Datatype::Float,
+                known_S, known_T, knownNumStocks, simd_len);
             int idx = -1;
             for (auto buf_obj : inputs) {
                 idx += 1;
-                bufinputs.push_back(check_input(
-                    buf_obj, std::string("buffer_") + std::to_string(idx)));
+                bufinputs.push_back((float *)checkInput(
+                    buf_obj.request(),
+                    std::string("buffer_") + std::to_string(idx), mlayout,
+                    kun::Datatype::Float, known_S, known_T, knownNumStocks,
+                    simd_len));
             }
             py::array::ShapeContainer expected_out_shape{known_T};
             for (size_t i = 0; i < outs.size(); i++) {
@@ -401,6 +446,65 @@ PYBIND11_MODULE(KunRunner, m) {
         py::arg("outs"), py::arg("layout") = "TS",
         py::arg("rank_inputs") = false);
 
+    m.def(
+        "aggregrate",
+        [](std::shared_ptr<kun::Executor> exec,
+           const std::vector<py::buffer> &inputs,
+           const std::vector<py::buffer> &labels,
+           const std::vector<py::dict> &outs) {
+            if (inputs.size() != labels.size() || inputs.size() != outs.size())
+                throw std::runtime_error(
+                    "number of inputs, labels and outputs should match");
+            if (inputs.size() == 0)
+                return;
+            kun::Datatype dtype = inputs[0].request().format ==
+                                          py::format_descriptor<float>::format()
+                                      ? kun::Datatype::Float
+                                      : kun::Datatype::Double;
+            py::ssize_t known_S = 0;
+            py::ssize_t known_T_input = 0;
+            py::ssize_t knownNumStocks = 0;
+            py::ssize_t simd_len = dtype == kun::Datatype::Float
+                                       ? KUN_DEFAULT_FLOAT_SIMD_LEN
+                                       : KUN_DEFAULT_DOUBLE_SIMD_LEN;
+            std::vector<float *> bufinputs;
+            std::vector<float *> buflabels;
+            std::vector<kun::AggregrationOutput> bufoutputs;
+            bufinputs.reserve(inputs.size());
+            buflabels.reserve(labels.size());
+            bufoutputs.reserve(inputs.size());
+
+            for (size_t i = 0; i < inputs.size(); i++) {
+                auto input = inputs[i].request();
+                auto label = labels[i].request();
+                py::dict out = outs[i];
+                checkInput(input, std::string("buffer_") + std::to_string(i),
+                           kun::MemoryLayout::TS, dtype, known_S, known_T_input,
+                           knownNumStocks, simd_len);
+                expectContiguousShape(dtype, label, "label", {known_T_input});
+                bufinputs.push_back((float *)input.ptr);
+                buflabels.push_back((float *)label.ptr);
+                py::ssize_t known_T_output = 0;
+                kun::AggregrationOutput output{};
+                for (auto kv : out) {
+                    auto name = py::cast<std::string>(kv.first);
+                    auto &value = kv.second;
+                    auto idx = getAggregrationKind(name);
+                    auto output_ptr = checkInput(
+                        py::cast<py::buffer>(value).request(),
+                        std::string("output_") + name + std::to_string(idx),
+                        kun::MemoryLayout::TS, dtype, known_S, known_T_output,
+                        knownNumStocks, simd_len);
+                    output.buffers[idx] = (float *)output_ptr;
+                }
+                bufoutputs.emplace_back(output);
+            }
+
+            kun::aggregrate(exec, inputs.size(), bufinputs.data(),
+                            buflabels.data(), dtype, bufoutputs.data(),
+                            knownNumStocks, known_T_input, 0, known_T_input);
+        },
+        py::arg("exec"), py::arg("inputs"), py::arg("labels"), py::arg("outs"));
     py::class_<StreamContextWrapper>(m, "StreamContext")
         .def(py::init<std::shared_ptr<kun::Executor>, const ModuleHandle *,
                       size_t>())

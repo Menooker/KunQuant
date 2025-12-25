@@ -97,13 +97,13 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
         return "", f'''static auto stage_{prefix}__{f.name} = {f.ops[1].__class__.__name__}Stocks<Mapper{f.ops[0].attrs["layout"]}<{elem_type}, {simd_lanes}>, Mapper{f.ops[2].attrs["layout"]}<{elem_type}, {simd_lanes}>>;'''
     
     is_cross_sectional = _is_cross_sectional(f)
-    time_or_stock, ctx_or_stage = ("__time_idx", "RuntimeStage *stage") if is_cross_sectional else ("__stock_idx", "Context* __ctx")
+    time_or_stock = "__time_idx" if is_cross_sectional else "__stock_idx"
     func_name = _generate_cross_sectional_func_name(is_cross_sectional, inputs, outputs) if is_cross_sectional else f.name
-    header = f'''{"static " if static else ""}void stage_{prefix}__{func_name}({ctx_or_stage}, size_t {time_or_stock}, size_t __total_time, size_t __start, size_t __length) '''
+    header = f'''{"static " if static else ""}void stage_{prefix}__{func_name}(RuntimeStage *stage, size_t {time_or_stock}, size_t __total_time, size_t __start, size_t __length) '''
     if static:
         decl = ""
     else:
-        decl = f'''extern void stage_{prefix}__{func_name}({ctx_or_stage}, size_t {time_or_stock}, size_t __total_time, size_t __start, size_t __length);'''
+        decl = f'''extern void stage_{prefix}__{func_name}(RuntimeStage *stage, size_t {time_or_stock}, size_t __total_time, size_t __start, size_t __length);'''
     if is_cross_sectional:
         decl = f"{decl}\nstatic auto stage_{prefix}__{f.name} = stage_{prefix}__{func_name};"
         if func_name in generated_cross_sectional_func:
@@ -138,6 +138,7 @@ def codegen_cpp(prefix: str, f: Function, input_name_to_idx: Dict[str, int], inp
 }}''', decl
 
     toplevel = _CppScope(None)
+    toplevel.scope.append(_CppSingleLine(toplevel, f"auto __ctx = stage->ctx;"))
     buffer_type: Dict[OpBase, str] = dict()
     ptrname = "" if elem_type == "float" else "D"
     for inp, buf_kind in inputs:
