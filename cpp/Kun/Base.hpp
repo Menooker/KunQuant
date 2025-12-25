@@ -4,6 +4,7 @@
 #ifdef __cplusplus
 namespace kun {
 struct Context;
+constexpr size_t time_stride = 8;
 } // namespace kun
 #endif
 

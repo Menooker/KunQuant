@@ -256,10 +256,10 @@ void aggregrate(std::shared_ptr<Executor> exec, size_t num_aggregrations,
     decltype(&ops::aggregrationFloat) thefunc = nullptr;
     size_t simd_len = 0;
     if (dtype == Datatype::Float) {
-        simd_len = 8;
+        simd_len = KUN_DEFAULT_FLOAT_SIMD_LEN;
         thefunc = &ops::aggregrationFloat;
     } else {
-        simd_len = 4;
+        simd_len = KUN_DEFAULT_DOUBLE_SIMD_LEN;
         thefunc = &ops::aggregrationDouble;
     }
     std::vector<BufferInfo> buffer_info;

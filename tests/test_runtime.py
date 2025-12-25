@@ -651,7 +651,6 @@ def test_stream_lifetime_gh_issue_41():
 ####################################
 
 def repro_crash_gh_issue_71():
-    print("Building factors...")
     builder = Builder()
     with builder:
         inp1 = Input("close")
@@ -661,7 +660,7 @@ def repro_crash_gh_issue_71():
         for i in range(20):
             Output(WindowedLinearRegressionSlope(inp1, 10 + i), f"beta_{i}")
     f = Function(builder.ops)
-    return "test_repro_crash_gh_issue_71", f, KunCompilerConfig(partition_factor=3, output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
+    return "test_repro_crash_gh_issue_71", f, KunCompilerConfig(partition_factor=3, input_layout="STREAM", output_layout="STREAM", options={"opt_reduce": False, "fast_log": True})
 
 def test_repro_crash_gh_issue_71(lib):
     num_symbols = 24
