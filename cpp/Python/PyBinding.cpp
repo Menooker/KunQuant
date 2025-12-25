@@ -415,7 +415,7 @@ PYBIND11_MODULE(KunRunner, m) {
             py::ssize_t known_S = 0;
             py::ssize_t known_T = 0;
             py::ssize_t knownNumStocks = 0;
-            py::ssize_t simd_len = 8;
+            py::ssize_t simd_len = KUN_DEFAULT_FLOAT_SIMD_LEN;
             std::vector<float *> bufinputs;
             std::vector<float *> bufoutputs;
 
@@ -464,17 +464,9 @@ PYBIND11_MODULE(KunRunner, m) {
             py::ssize_t known_S = 0;
             py::ssize_t known_T_input = 0;
             py::ssize_t knownNumStocks = 0;
-#ifdef __AVX__
-#define FLOAT_SIMD_LEN 8
-#define DOUBLE_SIMD_LEN 4
-#else
-// neon
-#define FLOAT_SIMD_LEN 4
-#define DOUBLE_SIMD_LEN 2
-#endif
             py::ssize_t simd_len = dtype == kun::Datatype::Float
-                                       ? FLOAT_SIMD_LEN
-                                       : DOUBLE_SIMD_LEN;
+                                       ? KUN_DEFAULT_FLOAT_SIMD_LEN
+                                       : KUN_DEFAULT_DOUBLE_SIMD_LEN;
             std::vector<float *> bufinputs;
             std::vector<float *> buflabels;
             std::vector<kun::AggregrationOutput> bufoutputs;

@@ -106,25 +106,16 @@ static void aggregration(RuntimeStage *stage, size_t stock_idx,
         meanbuf.store(store_idx, reduce_add / count, mask);
 }
 
-#ifdef __AVX__
-#define FLOAT_SIMD_LEN 8
-#define DOUBLE_SIMD_LEN 4
-#else
-// neon
-#define FLOAT_SIMD_LEN 4
-#define DOUBLE_SIMD_LEN 2
-#endif
-
 void aggregrationFloat(RuntimeStage *stage, size_t stock_idx,
                        size_t __total_time, size_t __start, size_t __length) {
-    aggregration<float, FLOAT_SIMD_LEN>(stage, stock_idx, __total_time, __start,
-                                        __length);
+    aggregration<float, KUN_DEFAULT_FLOAT_SIMD_LEN>(
+        stage, stock_idx, __total_time, __start, __length);
 }
 
 void aggregrationDouble(RuntimeStage *stage, size_t stock_idx,
                         size_t __total_time, size_t __start, size_t __length) {
-    aggregration<double, DOUBLE_SIMD_LEN>(stage, stock_idx, __total_time,
-                                          __start, __length);
+    aggregration<double, KUN_DEFAULT_DOUBLE_SIMD_LEN>(
+        stage, stock_idx, __total_time, __start, __length);
 }
 
 } // namespace ops

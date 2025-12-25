@@ -55,6 +55,13 @@ struct KUN_TEMPLATE_ARG MapperSTREAM {
     }
 };
 
+using MapperSTsFloat = MapperSTs<float, KUN_DEFAULT_FLOAT_SIMD_LEN>;
+using MapperTSFloat = MapperTS<float, KUN_DEFAULT_FLOAT_SIMD_LEN>;
+using MapperSTREAMFloat = MapperSTREAM<float, KUN_DEFAULT_FLOAT_SIMD_LEN>;
+using MapperSTsDouble = MapperSTs<double, KUN_DEFAULT_DOUBLE_SIMD_LEN>;
+using MapperTSDouble = MapperTS<double, KUN_DEFAULT_DOUBLE_SIMD_LEN>;
+using MapperSTREAMDouble = MapperSTREAM<double, KUN_DEFAULT_DOUBLE_SIMD_LEN>;
+
 namespace {
 template <typename Mapper>
 struct ExtractInputBuffer {

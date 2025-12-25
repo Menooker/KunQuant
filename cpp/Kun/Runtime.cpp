@@ -185,15 +185,15 @@ void corrWith(std::shared_ptr<Executor> exec, MemoryLayout layout,
     decltype(&ops::CorrWith<ops::MapperTS<float, 8>>) thefunc = nullptr;
     if (layout == MemoryLayout::TS) {
         if (rank_inputs) {
-            thefunc = &ops::RankCorrWith<ops::MapperTS<float, 8>>;
+            thefunc = &ops::RankCorrWith<ops::MapperTSFloat>;
         } else {
-            thefunc = &ops::CorrWith<ops::MapperTS<float, 8>>;
+            thefunc = &ops::CorrWith<ops::MapperTSFloat>;
         }
     } else {
         if (rank_inputs) {
-            thefunc = &ops::RankCorrWith<ops::MapperSTs<float, 8>>;
+            thefunc = &ops::RankCorrWith<ops::MapperSTsFloat>;
         } else {
-            thefunc = &ops::CorrWith<ops::MapperSTs<float, 8>>;
+            thefunc = &ops::CorrWith<ops::MapperSTsFloat>;
         }
     }
     std::vector<BufferInfo> buffer_info;

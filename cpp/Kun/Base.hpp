@@ -4,7 +4,6 @@
 #ifdef __cplusplus
 namespace kun {
 struct Context;
-static constexpr size_t time_stride = 8;
 } // namespace kun
 #endif
 
@@ -25,4 +24,14 @@ static constexpr size_t time_stride = 8;
 // g++ has an strange behavior, it needs T to be
 // exported if we want to export func<T>
 #define KUN_TEMPLATE_ARG KUN_API
+#endif
+
+
+#ifdef __AVX__
+#define KUN_DEFAULT_FLOAT_SIMD_LEN 8
+#define KUN_DEFAULT_DOUBLE_SIMD_LEN 4
+#else
+// neon
+#define KUN_DEFAULT_FLOAT_SIMD_LEN 4
+#define KUN_DEFAULT_DOUBLE_SIMD_LEN 2
 #endif
