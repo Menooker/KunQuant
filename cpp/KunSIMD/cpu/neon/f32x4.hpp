@@ -19,6 +19,7 @@
 #include <cmath>
 #include "../common.hpp"
 #include <KunSIMD/Vector.hpp>
+#include <KunSIMD/cpu/neon/common.hpp>
 #include "s32x4.hpp"
 
 namespace kun_simd {
@@ -45,7 +46,18 @@ struct alignas(16) vec<float, 4> {
     static INLINE vec load_aligned(const float *p) { return vld1q_f32(p); }
     static INLINE void store(vec v, float *p) { vst1q_f32(p, v.v); }
     static INLINE void store_aligned(vec v, float *p) { vst1q_f32(p, v.v); }
+    static Masktype make_mask(int N);
 
+    // slow simulated implementation
+    static INLINE vec masked_load(const float *p, Masktype mask) {
+        vec ret{0};
+        simulate_masked_load(ret.raw, mask.raw, p);
+        return ret;
+    }
+    // slow simulated implementation
+    static INLINE void masked_store(vec v, float *p, Masktype mask) {
+        simulate_masked_store(v.raw, mask.raw, p);
+    }
     operator float32x4_t() const { return v; }
 };
 
