@@ -7,7 +7,7 @@
 #include "mlir/Transforms/Passes.h"
 
 #include "KunGpu/KunGpuDialect.h"
-#include "KunGpu/KunGpuOps.h"
+#include "KunGpu/Passes.h"
 #include "KunIr/KunIrDialect.h"
 #include "KunIr/KunIrOps.h"
 #include "KunIr/Passes.h"
@@ -27,6 +27,7 @@ int main(int argc, char **argv) {
 
   // KunQuant passes
   kunir::registerKunIrToKunGpuPass();
+  kungpu::registerKunGpuPasses();
 
   return mlir::asMainReturnCode(
       mlir::MlirOptMain(argc, argv, "KunQuant MLIR optimizer\n", registry));
