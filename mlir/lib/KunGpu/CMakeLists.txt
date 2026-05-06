@@ -7,6 +7,7 @@ add_mlir_dialect_library(MLIRKunGpuDialect
 
   DEPENDS
   MLIRKunGpuOpsIncGen
+  MLIRKunIrOpsIncGen
 
   LINK_LIBS PUBLIC
   MLIRIR

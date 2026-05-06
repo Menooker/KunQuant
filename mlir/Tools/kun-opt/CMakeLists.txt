@@ -5,9 +5,10 @@ add_llvm_executable(kun-opt kun-opt.cpp)
 llvm_update_compile_flags(kun-opt)
 
 target_link_libraries(kun-opt PRIVATE
-  # KunQuant dialects
+  # KunQuant dialects + passes
   MLIRKunIrDialect
   MLIRKunGpuDialect
+  MLIRKunIrToKunGpu
 
   # MLIR opt infrastructure
   MLIROptLib
@@ -15,6 +16,8 @@ target_link_libraries(kun-opt PRIVATE
   # Standard dialects used inside kunir/kungpu IR
   MLIRFuncDialect
   MLIRArithDialect
+  MLIRMathDialect
+  MLIRSCFDialect
 
   # Core MLIR libraries
   MLIRIR

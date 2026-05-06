@@ -9,6 +9,7 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "KunIr/KunIrDialect.h"
+#include "KunIr/KunIrInterfaces.h"
 #include "KunIr/KunIrTypes.h"
 
 // NativeOpTrait<"Name"> expands to ::mlir::OpTrait::Name in generated code,

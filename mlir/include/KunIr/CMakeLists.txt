@@ -1,1 +1,2 @@
 add_mlir_dialect(KunIrOps kunir)
+add_mlir_interface(KunIrInterfaces)

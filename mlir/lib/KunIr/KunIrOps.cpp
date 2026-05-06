@@ -1,6 +1,10 @@
 #include "KunIr/KunIrOps.h"
+#include "KunIr/KunIrInterfaces.h"
 #include "KunIr/KunIrTypes.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/OpImplementation.h"
 #include <limits>
@@ -9,6 +13,12 @@ using namespace mlir;
 using namespace kunir;
 
 static constexpr uint64_t kInfLookback = std::numeric_limits<uint64_t>::max();
+
+//===----------------------------------------------------------------------===//
+// Interface table (generated)
+//===----------------------------------------------------------------------===//
+
+#include "KunIr/KunIrInterfaces.cpp.inc"
 
 //===----------------------------------------------------------------------===//
 // Generated op definitions
@@ -286,4 +296,76 @@ void ForEachBackWindowOp::print(OpAsmPrinter &printer) {
   printer << " ";
   printer.printRegion(getBody(), /*printEntryBlockArgs=*/false,
                       /*printBlockTerminators=*/true);
+}
+
+//===----------------------------------------------------------------------===//
+// BinaryArithInterface implementations
+//===----------------------------------------------------------------------===//
+
+Value AddOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return b.create<arith::AddFOp>(loc, lhs, rhs);
+}
+Value SubOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return b.create<arith::SubFOp>(loc, lhs, rhs);
+}
+Value MulOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return b.create<arith::MulFOp>(loc, lhs, rhs);
+}
+Value DivOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return b.create<arith::DivFOp>(loc, lhs, rhs);
+}
+Value MaxOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return b.create<arith::MaximumFOp>(loc, lhs, rhs);
+}
+Value MinOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return b.create<arith::MinimumFOp>(loc, lhs, rhs);
+}
+
+//===----------------------------------------------------------------------===//
+// UnaryArithInterface implementations
+//===----------------------------------------------------------------------===//
+
+Value AbsOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
+  return b.create<math::AbsFOp>(loc, operand);
+}
+Value LogOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
+  return b.create<math::LogOp>(loc, operand);
+}
+Value SignOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
+  // sign(x) ≈ copysign(1.0, x)
+  Value one = b.create<arith::ConstantOp>(
+      loc, operand.getType(), b.getFloatAttr(operand.getType(), 1.0));
+  return b.create<math::CopySignOp>(loc, one, operand);
+}
+
+//===----------------------------------------------------------------------===//
+// ReduceArithInterface implementations
+//===----------------------------------------------------------------------===//
+
+TypedAttr ReduceAddOp::getInitValue(FloatType elemType) {
+  return FloatAttr::get(elemType, 0.0);
+}
+Value ReduceAddOp::buildAccumOp(OpBuilder &b, Location loc, Value acc, Value elem) {
+  return b.create<arith::AddFOp>(loc, acc, elem);
+}
+
+TypedAttr ReduceMulOp::getInitValue(FloatType elemType) {
+  return FloatAttr::get(elemType, 1.0);
+}
+Value ReduceMulOp::buildAccumOp(OpBuilder &b, Location loc, Value acc, Value elem) {
+  return b.create<arith::MulFOp>(loc, acc, elem);
+}
+
+TypedAttr ReduceMaxOp::getInitValue(FloatType elemType) {
+  return FloatAttr::get(elemType, -std::numeric_limits<double>::infinity());
+}
+Value ReduceMaxOp::buildAccumOp(OpBuilder &b, Location loc, Value acc, Value elem) {
+  return b.create<arith::MaximumFOp>(loc, acc, elem);
+}
+
+TypedAttr ReduceMinOp::getInitValue(FloatType elemType) {
+  return FloatAttr::get(elemType, std::numeric_limits<double>::infinity());
+}
+Value ReduceMinOp::buildAccumOp(OpBuilder &b, Location loc, Value acc, Value elem) {
+  return b.create<arith::MinimumFOp>(loc, acc, elem);
 }

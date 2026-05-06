@@ -3,6 +3,7 @@
 
 include "KunIr/KunIrDialect.td"
 include "KunIr/KunIrTypes.td"
+include "KunIr/KunIrInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
@@ -22,7 +23,8 @@ class KunIr_BinaryElemwiseOp<string mnemonic, list<Trait> traits = []>
     : KunIr_Op<mnemonic, !listconcat(traits, [
         Pure,
         InferTypeOpInterface,
-        NativeOpTrait<"KunIrElemwiseTsResultType">
+        NativeOpTrait<"KunIrElemwiseTsResultType">,
+        DeclareOpInterfaceMethods<KunIr_BinaryArithInterface>
     ])> {
   let arguments = (ins KunIr_AnyTs:$lhs, KunIr_AnyTs:$rhs);
   let results = (outs KunIr_AnyTs:$result);
@@ -60,7 +62,8 @@ class KunIr_UnaryElemwiseOp<string mnemonic, list<Trait> traits = []>
     : KunIr_Op<mnemonic, !listconcat(traits, [
         Pure,
         InferTypeOpInterface,
-        NativeOpTrait<"KunIrElemwiseTsResultType">
+        NativeOpTrait<"KunIrElemwiseTsResultType">,
+        DeclareOpInterfaceMethods<KunIr_UnaryArithInterface>
     ])> {
   let arguments = (ins KunIr_AnyTs:$input);
   let results = (outs KunIr_AnyTs:$result);
@@ -192,7 +195,11 @@ def KunIr_ForEachBackWindowOp : KunIr_Op<"for_each_back_window", [
 //===----------------------------------------------------------------------===//
 
 class KunIr_ReduceOp<string mnemonic, list<Trait> traits = []>
-    : KunIr_Op<mnemonic, !listconcat(traits, [Pure, SameOperandsAndResultType])> {
+    : KunIr_Op<mnemonic, !listconcat(traits, [
+        Pure,
+        SameOperandsAndResultType,
+        DeclareOpInterfaceMethods<KunIr_ReduceArithInterface>
+    ])> {
   let arguments = (ins KunIr_AnyTs:$value);
   let results = (outs KunIr_AnyTs:$result);
   let hasVerifier = 1;
