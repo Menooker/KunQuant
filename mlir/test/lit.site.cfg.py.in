@@ -1,0 +1,10 @@
+@LIT_SITE_CFG_IN_HEADER@
+
+import sys
+
+config.llvm_tools_dir = lit_config.substitute("@LLVM_TOOLS_BINARY_DIR@")
+config.mlir_tools_dir = lit_config.substitute("@MLIR_TOOLS_DIR@")
+config.kun_opt = lit_config.substitute("@KUN_OPT_BINARY@")
+config.obj_root = "@CMAKE_CURRENT_BINARY_DIR@"
+
+lit_config.load_config(config, "@CMAKE_CURRENT_SOURCE_DIR@/lit.cfg.py")

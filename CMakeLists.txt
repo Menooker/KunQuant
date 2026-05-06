@@ -1,6 +1,6 @@
 cmake_policy(SET CMP0048 NEW)
 project(KunRunner VERSION 0.0.1)
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.20)
 add_subdirectory(3rdparty/pybind11)
 include_directories(${pybind11_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/cpp)
 
@@ -86,3 +86,34 @@ endif()
 message(STATUS "PYTHON_EXECUTABLE = ${PYTHON_EXECUTABLE}")
 
 add_custom_target(TestingTargets DEPENDS KunCApiTest KunTest KunRunner)
+
+#===------------------------------------------------------------------------===#
+# Optional MLIR backend (kun-opt + kunir/kungpu dialects)
+#===------------------------------------------------------------------------===#
+option(KUN_BUILD_MLIR "Build MLIR backend with kunir/kungpu dialects" OFF)
+if(KUN_BUILD_MLIR)
+  find_package(MLIR REQUIRED CONFIG)
+  message(STATUS "Using MLIRConfig.cmake in: ${MLIR_DIR}")
+  message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+
+  set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/bin)
+  set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/lib)
+  set(MLIR_BINARY_DIR ${CMAKE_BINARY_DIR})
+
+  list(APPEND CMAKE_MODULE_PATH "${MLIR_CMAKE_DIR}")
+  list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
+
+  include(TableGen)
+  include(AddLLVM)
+  include(AddMLIR)
+  include(HandleLLVMOptions)
+
+  # MLIR requires C++17; replace the existing -std=c++11 flag so all
+  # targets in this build (including the existing runtime) compile as C++17,
+  # which is backwards-compatible with C++11 code.
+  string(REPLACE "-std=c++11" "-std=c++17" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+  add_subdirectory(mlir)
+endif()
