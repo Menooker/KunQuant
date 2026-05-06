@@ -1,4 +1,5 @@
 #include "KunIr/KunIrOps.h"
+#include "KunIr/KunIrAttrs.h"
 #include "KunIr/KunIrInterfaces.h"
 #include "KunIr/KunIrTypes.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -33,6 +34,10 @@ static constexpr uint64_t kInfLookback = std::numeric_limits<uint64_t>::max();
 
 void kunir::YieldOp::build(mlir::OpBuilder &, mlir::OperationState &) {
   // Empty build: produces a zero-operand yield for ensureTerminator.
+}
+
+void kunir::ReturnOp::build(mlir::OpBuilder &, mlir::OperationState &) {
+  // Empty build: produces a zero-operand return for ensureTerminator.
 }
 
 //===----------------------------------------------------------------------===//
@@ -368,4 +373,259 @@ TypedAttr ReduceMinOp::getInitValue(FloatType elemType) {
 }
 Value ReduceMinOp::buildAccumOp(OpBuilder &b, Location loc, Value acc, Value elem) {
   return b.create<arith::MinimumFOp>(loc, acc, elem);
+}
+
+//===----------------------------------------------------------------------===//
+// FuncOp
+//===----------------------------------------------------------------------===//
+
+void FuncOp::build(OpBuilder &b, OperationState &result,
+                   StringRef name, FunctionType type,
+                   ArrayAttr inputNames, ArrayAttr outputNames,
+                   TargetSpecAttr targetSpec) {
+  result.addAttribute(getSymNameAttrName(result.name), b.getStringAttr(name));
+  result.addAttribute(getFunctionTypeAttrName(result.name), TypeAttr::get(type));
+  result.addAttribute(getInputNamesAttrName(result.name), inputNames);
+  result.addAttribute(getOutputNamesAttrName(result.name), outputNames);
+  result.addAttribute(getTargetSpecAttrName(result.name), targetSpec);
+  Region *body = result.addRegion();
+  Block *block = new Block;
+  for (Type inputType : type.getInputs())
+    block->addArgument(inputType, result.location);
+  body->push_back(block);
+}
+
+LogicalResult FuncOp::verify() {
+  FunctionType ft = getFunctionTypeTyped();
+  Block &block = getBodyBlock();
+
+  // Block args must match function input types
+  if (block.getNumArguments() != ft.getNumInputs())
+    return emitOpError("body block has ") << block.getNumArguments()
+           << " args but function type has " << ft.getNumInputs() << " inputs";
+  for (auto [i, argType] : llvm::enumerate(ft.getInputs())) {
+    if (block.getArgument(i).getType() != argType)
+      return emitOpError("block arg #") << i << " type mismatch";
+  }
+
+  // Validate input_names / output_names counts
+  auto inputNames  = getInputNames();
+  auto outputNames = getOutputNames();
+  unsigned numResults = ft.getNumResults();
+
+  if (numResults > 0) {
+    // Non-void: inputs == num_args, outputs == num_results
+    if (inputNames.size() != ft.getNumInputs())
+      return emitOpError("non-void func: input_names count (")
+             << inputNames.size() << ") != num args ("
+             << ft.getNumInputs() << ")";
+    if (outputNames.size() != numResults)
+      return emitOpError("non-void func: output_names count (")
+             << outputNames.size() << ") != num results (" << numResults << ")";
+  } else {
+    // Void: inputs + outputs == num_args
+    if (inputNames.size() + outputNames.size() != ft.getNumInputs())
+      return emitOpError("void func: input_names + output_names count (")
+             << (inputNames.size() + outputNames.size())
+             << ") != num args (" << ft.getNumInputs() << ")";
+  }
+
+  // Validate all names are StringAttr
+  for (auto [i, a] : llvm::enumerate(inputNames))
+    if (!llvm::isa<StringAttr>(a))
+      return emitOpError("input_names[") << i << "] is not a StringAttr";
+  for (auto [i, a] : llvm::enumerate(outputNames))
+    if (!llvm::isa<StringAttr>(a))
+      return emitOpError("output_names[") << i << "] is not a StringAttr";
+
+  // Validate target_spec
+  auto ts = getTargetSpec();
+  if (ts.getOccupancy() <= 0)
+    return emitOpError("target occupancy must be positive, got ")
+           << ts.getOccupancy();
+  if (ts.getWarpsPerCta() <= 0)
+    return emitOpError("target warps_per_cta must be positive, got ")
+           << ts.getWarpsPerCta();
+  if (ts.getSmemSize() < 0)
+    return emitOpError("target smem_size must be non-negative, got ")
+           << ts.getSmemSize();
+
+  return success();
+}
+
+ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
+  Builder &b = parser.getBuilder();
+
+  // @sym_name
+  StringAttr nameAttr;
+  if (parser.parseSymbolName(nameAttr, getSymNameAttrName(result.name),
+                             result.attributes))
+    return failure();
+
+  // (%arg0 : type0, ...)
+  SmallVector<OpAsmParser::Argument> blockArgs;
+  if (parser.parseArgumentList(blockArgs, OpAsmParser::Delimiter::Paren,
+                               /*allowType=*/true, /*allowAttrs=*/false))
+    return failure();
+
+  // inputs { %name = "str", ... }
+  SmallVector<Attribute> inputNameAttrs;
+  if (parser.parseKeyword("inputs") || parser.parseLBrace())
+    return failure();
+  if (parser.parseOptionalRBrace().failed()) {
+    do {
+      OpAsmParser::UnresolvedOperand argRef;
+      StringAttr nameStr;
+      if (parser.parseOperand(argRef) || parser.parseEqual() ||
+          parser.parseAttribute(nameStr))
+        return failure();
+      inputNameAttrs.push_back(nameStr);
+    } while (parser.parseOptionalComma().succeeded());
+    if (parser.parseRBrace()) return failure();
+  }
+
+  // outputs { ["str", ...] | [%name = "str", ...] }
+  SmallVector<Attribute> outputNameAttrs;
+  if (parser.parseKeyword("outputs") || parser.parseLBrace())
+    return failure();
+  if (parser.parseOptionalRBrace().failed()) {
+    do {
+      // Try %name = "str" form; if no %, fall through to "str" form
+      OpAsmParser::UnresolvedOperand argRef;
+      auto optArg = parser.parseOptionalOperand(argRef);
+      if (optArg.has_value()) {
+        if (failed(*optArg) || parser.parseEqual()) return failure();
+      }
+      StringAttr nameStr;
+      if (parser.parseAttribute(nameStr)) return failure();
+      outputNameAttrs.push_back(nameStr);
+    } while (parser.parseOptionalComma().succeeded());
+    if (parser.parseRBrace()) return failure();
+  }
+
+  // target { occupancy = V, warps_per_cta = V, smem_size = V }
+  if (parser.parseKeyword("target")) return failure();
+  auto targetSpec = TargetSpecAttr::parse(parser, Type{});
+  if (!targetSpec) return failure();
+  result.addAttribute(getTargetSpecAttrName(result.name), targetSpec);
+
+  // -> (result_type, ...) or -> result_type  [optional]
+  SmallVector<Type> resultTypes;
+  if (parser.parseOptionalArrow().succeeded()) {
+    if (parser.parseOptionalLParen().succeeded()) {
+      if (!parser.parseOptionalRParen().succeeded()) {
+        if (parser.parseTypeList(resultTypes) || parser.parseRParen())
+          return failure();
+      }
+    } else {
+      Type singleTy;
+      if (parser.parseType(singleTy)) return failure();
+      resultTypes.push_back(singleTy);
+    }
+  }
+
+  // Build function type from block arg types + result types
+  SmallVector<Type> inputTypes;
+  for (auto &arg : blockArgs) inputTypes.push_back(arg.type);
+  auto funcType = FunctionType::get(result.getContext(), inputTypes, resultTypes);
+  result.addAttribute(getFunctionTypeAttrName(result.name),
+                      TypeAttr::get(funcType));
+  result.addAttribute(getInputNamesAttrName(result.name),
+                      b.getArrayAttr(inputNameAttrs));
+  result.addAttribute(getOutputNamesAttrName(result.name),
+                      b.getArrayAttr(outputNameAttrs));
+
+  // Body region
+  Region *body = result.addRegion();
+  if (parser.parseRegion(*body, blockArgs)) return failure();
+  FuncOp::ensureTerminator(*body, b, result.location);
+  return success();
+}
+
+void FuncOp::print(OpAsmPrinter &p) {
+  Block &block = getBodyBlock();
+  FunctionType ft = getFunctionTypeTyped();
+
+  // @name
+  p << " @" << getSymName();
+
+  // (%arg0 : type0, ...)
+  p << "(";
+  llvm::interleaveComma(block.getArguments(), p, [&](BlockArgument arg) {
+    p << arg << ": " << arg.getType();
+  });
+  p << ")";
+
+  // inputs {%arg0 = "name0", ...}
+  auto inputNames = getInputNames();
+  unsigned numInputs = inputNames.size();
+  p << " inputs {";
+  for (unsigned i = 0; i < numInputs; ++i) {
+    if (i) p << ", ";
+    p << block.getArgument(i) << " = "
+      << llvm::cast<StringAttr>(inputNames[i]);
+  }
+  p << "}";
+
+  // outputs {...}
+  auto outputNames = getOutputNames();
+  p << " outputs {";
+  if (ft.getNumResults() == 0) {
+    // void: %argN = "name" form
+    for (unsigned i = 0; i < outputNames.size(); ++i) {
+      if (i) p << ", ";
+      p << block.getArgument(numInputs + i) << " = "
+        << llvm::cast<StringAttr>(outputNames[i]);
+    }
+  } else {
+    // non-void: just "name" strings
+    llvm::interleaveComma(outputNames, p,
+                          [&](Attribute a) { p << llvm::cast<StringAttr>(a); });
+  }
+  p << "}";
+
+  // target {occupancy = ..., ...}
+  p << " target ";
+  getTargetSpec().print(p);
+
+  // -> result types (non-void)
+  auto resultTypes = ft.getResults();
+  if (!resultTypes.empty()) {
+    p << " -> ";
+    if (resultTypes.size() == 1) {
+      p << resultTypes[0];
+    } else {
+      p << "(";
+      llvm::interleaveComma(resultTypes, p);
+      p << ")";
+    }
+  }
+
+  // body
+  p << " ";
+  p.printRegion(getBody(), /*printEntryBlockArgs=*/false,
+                /*printBlockTerminators=*/true);
+}
+
+//===----------------------------------------------------------------------===//
+// ReturnOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult ReturnOp::verify() {
+  auto funcOp = llvm::cast<FuncOp>((*this)->getParentOp());
+  FunctionType ft = funcOp.getFunctionTypeTyped();
+  auto resultTypes = ft.getResults();
+
+  if (getOperands().size() != resultTypes.size())
+    return emitOpError("returns ") << getOperands().size()
+           << " value(s) but function has " << resultTypes.size()
+           << " result type(s)";
+
+  for (auto [i, opType, resType] :
+       llvm::enumerate(getOperandTypes(), resultTypes)) {
+    if (opType != resType)
+      return emitOpError("operand #") << i << " type '" << opType
+             << "' does not match function result type '" << resType << "'";
+  }
+  return success();
 }

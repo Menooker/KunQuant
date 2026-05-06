@@ -1,3 +1,4 @@
+#include "KunIr/KunIrAttrs.h"
 #include "KunIr/KunIrDialect.h"
 #include "KunIr/KunIrOps.h"
 #include "KunIr/KunIrTypes.h"
@@ -17,4 +18,5 @@ void KunIrDialect::initialize() {
 #include "KunIr/KunIrOps.cpp.inc"
   >();
   registerTypes();
+  registerAttrs();
 }

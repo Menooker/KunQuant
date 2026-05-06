@@ -1,6 +1,6 @@
 //===- KunIrToKunGpu.cpp - Lower kunir ops to kungpu + scf + arith --------===//
 //
-// Lowers a func.func whose body contains kunir ops into a form that uses:
+// Lowers a kunir.func whose body contains kunir ops into a form that uses:
 //   - kungpu.time_length / kungpu.ts.get / kungpu.ts.put  for ts I/O
 //   - scf.for for the outer time loop and inner back-window loops
 //   - arith.* / math.* for scalar arithmetic
@@ -21,7 +21,6 @@
 #include "KunIr/KunIrTypes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
@@ -121,16 +120,14 @@ static LogicalResult lowerBlock(
 //===----------------------------------------------------------------------===//
 
 struct LowerKunIrToKunGpuPass
-    : PassWrapper<LowerKunIrToKunGpuPass, OperationPass<func::FuncOp>> {
+    : PassWrapper<LowerKunIrToKunGpuPass, OperationPass<kunir::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(LowerKunIrToKunGpuPass)
   StringRef getArgument()    const override { return "kunir-to-kungpu"; }
   StringRef getDescription() const override {
     return "Lower kunir ops to kungpu + scf + arith/math"; }
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<kungpu::KunGpuDialect>();
-    registry.insert<arith::ArithDialect>();
-    registry.insert<math::MathDialect>();
-    registry.insert<scf::SCFDialect>();
+    registry.insert<kungpu::KunGpuDialect, arith::ArithDialect,
+                    math::MathDialect, scf::SCFDialect>();
   }
   void runOnOperation() override;
 };
@@ -138,7 +135,7 @@ struct LowerKunIrToKunGpuPass
 } // namespace
 
 void LowerKunIrToKunGpuPass::runOnOperation() {
-  func::FuncOp funcOp = getOperation();
+  kunir::FuncOp funcOp = getOperation();
   MLIRContext *ctx = &getContext();
   Location loc = funcOp.getLoc();
 
@@ -147,7 +144,7 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
   // ------------------------------------------------------------------
   // 1. Extend function signature: ts return types → extra output params.
   // ------------------------------------------------------------------
-  FunctionType oldFT = funcOp.getFunctionType();
+  FunctionType oldFT = funcOp.getFunctionTypeTyped();
   SmallVector<Type> newArgTys(oldFT.getInputs());
   SmallVector<unsigned> tsRetIdx;
   for (auto [i, ty] : llvm::enumerate(oldFT.getResults()))
@@ -161,16 +158,17 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
   SmallVector<Type> newRetTys;
   for (auto [i, ty] : llvm::enumerate(oldFT.getResults()))
     if (!isa<TsType>(ty)) newRetTys.push_back(ty);
-  funcOp.setFunctionType(FunctionType::get(ctx, newArgTys, newRetTys));
+  funcOp.setFunctionTypeAttr(
+      TypeAttr::get(FunctionType::get(ctx, newArgTys, newRetTys)));
 
   // ------------------------------------------------------------------
   // 2. Snapshot original ops and find the original return.
   // ------------------------------------------------------------------
   SmallVector<Operation *> origOps;
-  func::ReturnOp retOp;
+  kunir::ReturnOp retOp;
   for (Operation &op : entry) origOps.push_back(&op);
   for (Operation *op : origOps)
-    if (auto r = dyn_cast<func::ReturnOp>(op)) { retOp = r; break; }
+    if (auto r = dyn_cast<kunir::ReturnOp>(op)) { retOp = r; break; }
 
   // Collect ts return values from the original return.
   SmallVector<Value> tsRetVals;
@@ -217,7 +215,7 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
   //    for_each_back_window, and func.return are handled by the callback.
   // ------------------------------------------------------------------
   auto outerHandler = [&](Operation &op) -> LogicalResult {
-    if (isa<func::ReturnOp>(op)) return success(); // handled in step 7
+    if (isa<kunir::ReturnOp>(op)) return success(); // handled in step 7
 
     Location ol = op.getLoc();
 
@@ -334,7 +332,7 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
     SmallVector<Value> nonTsRets;
     for (Value v : retOp.getOperands())
       if (!isa<TsType>(v.getType())) nonTsRets.push_back(v);
-    b.create<func::ReturnOp>(loc, nonTsRets);
+    b.create<kunir::ReturnOp>(loc, mlir::ValueRange(nonTsRets));
   }
 
   // ------------------------------------------------------------------

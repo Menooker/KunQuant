@@ -1,14 +1,15 @@
 // RUN: %kun-opt --kunir-to-kungpu %s | %FileCheck %s
 
-// CHECK-LABEL: func.func @test_binary_lower
+// CHECK-LABEL: kunir.func @test_binary_lower
 // CHECK-SAME: !kunir.ts<f32, inf>
 // CHECK-SAME: !kunir.ts<f32, inf>
 // CHECK-SAME: !kunir.ts<f32, 1>
 // CHECK-NOT: -> !kunir.ts
-func.func @test_binary_lower(
-    %a: !kunir.ts<f32, inf>,
-    %b: !kunir.ts<f32, inf>
-) -> !kunir.ts<f32, 1> {
+kunir.func @test_binary_lower(%a: !kunir.ts<f32, inf>, %b: !kunir.ts<f32, inf>)
+    inputs {%a = "a", %b = "b"}
+    outputs {"result"}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+    -> !kunir.ts<f32, 1> {
   // CHECK:      %[[TL:.*]] = kungpu.time_length
   // CHECK:      %[[C0:.*]] = arith.constant 0 : index
   // CHECK:      %[[C1:.*]] = arith.constant 1 : index
@@ -18,23 +19,31 @@ func.func @test_binary_lower(
   // CHECK:        arith.addf
   // CHECK:        kungpu.ts.put
   %sum = kunir.add %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
-  return %sum : !kunir.ts<f32, 1>
+  kunir.return %sum : !kunir.ts<f32, 1>
 }
 
-// CHECK-LABEL: func.func @test_unary_lower
-func.func @test_unary_lower(%x: !kunir.ts<f32, inf>) -> !kunir.ts<f32, 1> {
+// CHECK-LABEL: kunir.func @test_unary_lower
+kunir.func @test_unary_lower(%x: !kunir.ts<f32, inf>)
+    inputs {%x = "x"}
+    outputs {"result"}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+    -> !kunir.ts<f32, 1> {
   // CHECK: math.absf
   %a = kunir.abs %x : !kunir.ts<f32, inf>
-  return %a : !kunir.ts<f32, 1>
+  kunir.return %a : !kunir.ts<f32, 1>
 }
 
-// CHECK-LABEL: func.func @test_windowed_sum
-func.func @test_windowed_sum(%close: !kunir.ts<f32, inf>) -> !kunir.ts<f32, 1> {
+// CHECK-LABEL: kunir.func @test_windowed_sum
+kunir.func @test_windowed_sum(%close: !kunir.ts<f32, inf>)
+    inputs {%close = "close"}
+    outputs {"result"}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+    -> !kunir.ts<f32, 1> {
   // CHECK:      %[[C0:.*]] = arith.constant 0 : index
   // CHECK:      %[[C1:.*]] = arith.constant 1 : index
   // CHECK:      %[[WT:.*]] = kungpu.windowed_temp : <f32, 5>
   // CHECK:      scf.for %[[T:.*]] =
-  // CHECK:        kungpu.ts.get %arg0[%[[T]]]
+  // CHECK:        kungpu.ts.get %{{.*}}[%[[T]]]
   // CHECK:        kungpu.ts.put %[[WT]][%[[T]]]
   // CHECK:        %[[WIN:.*]] = arith.constant 5 : index
   // CHECK:        scf.for %{{.*}} = %[[C0]] to %[[WIN]] step %[[C1]] iter_args
@@ -48,14 +57,15 @@ func.func @test_windowed_sum(%close: !kunir.ts<f32, inf>) -> !kunir.ts<f32, 1> {
     %s = kunir.reduce_add %cur : !kunir.ts<f32, 1>
     kunir.yield %s : !kunir.ts<f32, 1>
   }
-  return %sum : !kunir.ts<f32, 1>
+  kunir.return %sum : !kunir.ts<f32, 1>
 }
 
-// CHECK-LABEL: func.func @test_computed_reduce
-func.func @test_computed_reduce(
-    %x: !kunir.ts<f32, inf>,
-    %y: !kunir.ts<f32, inf>
-) -> !kunir.ts<f32, 1> {
+// CHECK-LABEL: kunir.func @test_computed_reduce
+kunir.func @test_computed_reduce(%x: !kunir.ts<f32, inf>, %y: !kunir.ts<f32, inf>)
+    inputs {%x = "x", %y = "y"}
+    outputs {"result"}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+    -> !kunir.ts<f32, 1> {
   // CHECK:      %[[WX:.*]] = kungpu.windowed_temp : <f32, 3>
   // CHECK:      %[[WY:.*]] = kungpu.windowed_temp : <f32, 3>
   // CHECK:      scf.for
@@ -74,12 +84,16 @@ func.func @test_computed_reduce(
     %s = kunir.reduce_add %prod : !kunir.ts<f32, 1>
     kunir.yield %s : !kunir.ts<f32, 1>
   }
-  return %sum : !kunir.ts<f32, 1>
+  kunir.return %sum : !kunir.ts<f32, 1>
 }
 
-// CHECK-LABEL: func.func @test_multi_reduce
+// CHECK-LABEL: kunir.func @test_multi_reduce
 // CHECK-SAME: (%[[IN:.*]]: !kunir.ts<f64, inf>, %[[OUT0:.*]]: !kunir.ts<f64, 1>, %[[OUT1:.*]]: !kunir.ts<f64, 1>)
-func.func @test_multi_reduce(%input: !kunir.ts<f64, inf>) -> (!kunir.ts<f64, 1>, !kunir.ts<f64, 1>) {
+kunir.func @test_multi_reduce(%input: !kunir.ts<f64, inf>)
+    inputs {%input = "input"}
+    outputs {"sum", "maxval"}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+    -> (!kunir.ts<f64, 1>, !kunir.ts<f64, 1>) {
   // CHECK:      %[[WT:.*]] = kungpu.windowed_temp : <f64, 10>
   // CHECK:      scf.for %[[T:.*]] =
   // CHECK:        kungpu.ts.get %[[IN]][%[[T]]]
@@ -102,5 +116,5 @@ func.func @test_multi_reduce(%input: !kunir.ts<f64, inf>) -> (!kunir.ts<f64, 1>,
     %m = kunir.reduce_max %val : !kunir.ts<f64, 1>
     kunir.yield %s, %m : !kunir.ts<f64, 1>, !kunir.ts<f64, 1>
   }
-  return %sum, %max : !kunir.ts<f64, 1>, !kunir.ts<f64, 1>
+  kunir.return %sum, %max : !kunir.ts<f64, 1>, !kunir.ts<f64, 1>
 }

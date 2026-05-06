@@ -8,6 +8,7 @@
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
+#include "KunIr/KunIrAttrs.h"
 #include "KunIr/KunIrDialect.h"
 #include "KunIr/KunIrInterfaces.h"
 #include "KunIr/KunIrTypes.h"

@@ -3,6 +3,7 @@ add_mlir_dialect_library(MLIRKunIrDialect
   KunIrTypes.cpp
   KunIrInterfaces.cpp
   KunIrOps.cpp
+  KunIrAttrs.cpp
 
   PARTIAL_SOURCES_INTENDED
 
@@ -12,9 +13,11 @@ add_mlir_dialect_library(MLIRKunIrDialect
   DEPENDS
   MLIRKunIrOpsIncGen
   MLIRKunIrInterfacesIncGen
+  MLIRKunIrAttrsIncGen
 
   LINK_LIBS PUBLIC
   MLIRIR
+  MLIRFuncDialect
   MLIRSideEffectInterfaces
 )
 
