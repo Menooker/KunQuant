@@ -81,28 +81,42 @@ def main() -> int:
     assert exe.warps_per_cta == 4
     assert exe.vector_size   == 1
 
-    print()
-    print(f"=== launch ({args.time_length} × {args.num_stocks}) ===")
-    T, S = args.time_length, args.num_stocks
+    # Run the kernel for two num_stocks values:
+    #  - one that's a multiple of (warps_per_cta * 32 * vector_size) — no
+    #    tail block;
+    #  - one that isn't — exercises the active-thread guard inserted by
+    #    convert-kungpu-to-llvm phase 1.
+    block_x = exe.warps_per_cta * 32 * exe.vector_size
     rng = np.random.default_rng(0)
-    a_h = rng.standard_normal((T, S), dtype=np.float32)
-    b_h = rng.standard_normal((T, S), dtype=np.float32)
-    a   = cp.asarray(a_h)
-    b   = cp.asarray(b_h)
-    out = cp.zeros((T, S), dtype=cp.float32)
-
-    exe.launch({"a": a, "b": b, "sum": out})
-    cp.cuda.runtime.deviceSynchronize()
-    out_h = cp.asnumpy(out)
-    expected = a_h + b_h
-    if not np.allclose(out_h, expected, atol=1e-5):
-        diff = np.abs(out_h - expected)
-        print(f"FAIL — max abs diff {diff.max()}, "
-                f"argmax @ {np.unravel_index(diff.argmax(), diff.shape)}",
-                file=sys.stderr)
-        return 1
-    print(f"ok — output matches a + b on every (t, s) cell")
-    return 0
+    rc = 0
+    for label, S in [("aligned", args.num_stocks),
+                      ("unaligned (tail block)",
+                       args.num_stocks + (block_x // 2 + 7))]:
+        T = args.time_length
+        print()
+        is_aligned = (S % block_x == 0)
+        print(f"=== launch ({T} × {S}) — {label}, "
+               f"S % {block_x} = {S % block_x}, "
+               f"aligned={is_aligned} ===")
+        a_h = rng.standard_normal((T, S), dtype=np.float32)
+        b_h = rng.standard_normal((T, S), dtype=np.float32)
+        a   = cp.asarray(a_h)
+        b   = cp.asarray(b_h)
+        out = cp.zeros((T, S), dtype=cp.float32)
+        exe.launch({"a": a, "b": b, "sum": out})
+        cp.cuda.runtime.deviceSynchronize()
+        out_h = cp.asnumpy(out)
+        expected = a_h + b_h
+        if not np.allclose(out_h, expected, atol=1e-5):
+            diff = np.abs(out_h - expected)
+            print(f"  FAIL — max abs diff {diff.max()}, "
+                    f"argmax @ {np.unravel_index(diff.argmax(), diff.shape)}",
+                    file=sys.stderr)
+            rc = 1
+        else:
+            print(f"  ok — output matches a + b on every (t, s) cell "
+                   f"({T*S} cells)")
+    return rc
 
 
 if __name__ == "__main__":

@@ -86,13 +86,47 @@ struct WTDesc {
 using WTDescMap = llvm::DenseMap<Value, WTDesc>;
 
 //===----------------------------------------------------------------------===//
+// Helper: stock_id = blockIdx.x * blockDim.x + threadIdx.x  (index-typed)
+// Defined here so phase 1 (`convertFuncSignature` below) can reuse it
+// for the active-thread guard, in addition to the conversion patterns.
+//===----------------------------------------------------------------------===//
+
+static Value emitStockId(OpBuilder &b, Location loc, Type idxTy) {
+  Value tid  = b.create<gpu::ThreadIdOp>(loc, idxTy, gpu::Dimension::x);
+  Value bid  = b.create<gpu::BlockIdOp>(loc, idxTy, gpu::Dimension::x);
+  Value bdim = b.create<gpu::BlockDimOp>(loc, idxTy, gpu::Dimension::x);
+  return b.create<arith::AddIOp>(
+      loc, b.create<arith::MulIOp>(loc, bid, bdim), tid);
+}
+
+//===----------------------------------------------------------------------===//
 // Phase 1: kunir.func → func.func (signature only)
 //===----------------------------------------------------------------------===//
 
-static void convertFuncSignature(kunir::FuncOp fn) {
-  auto *ctx = fn.getContext();
+static LogicalResult convertFuncSignature(kunir::FuncOp fn) {
+  auto *ctx  = fn.getContext();
   Location loc = fn.getLoc();
   auto i32Ty = IntegerType::get(ctx, 32);
+  auto idxTy = IndexType::get(ctx);
+
+  // We only support vector_size = 1 right now.  When vector_size > 1 a
+  // single thread handles `vector_size` consecutive stocks; if those
+  // straddle the num_stocks boundary, the kernel either has to:
+  //   - clamp the lane index to min(base + k, num_stocks - 1) on
+  //     every gmem load (safe re-read), and per-lane predicate the
+  //     gmem stores to skip the out-of-range cells;
+  //   - or refuse non-aligned num_stocks at launch time.
+  // TODO(vector_size>1): implement the clamp scheme above and remove
+  // this check.  See discussion in KunGpuToLLVM history for why
+  // PTX vector loads can't mask individual lanes.
+  auto tsAttr = fn.getTargetSpecAttr();
+  int64_t vectorSize = tsAttr ? tsAttr.getVectorSize() : 1;
+  if (vectorSize != 1) {
+    return fn.emitError("convert-kungpu-to-llvm: vector_size = ")
+            << vectorSize << " not yet supported (only vector_size = 1). "
+            << "TODO: implement clamp + per-lane store predicate for the "
+            << "tail block.";
+  }
 
   FunctionType oldFT = fn.getFunctionTypeTyped();
   SmallVector<Type> newArgTypes = {i32Ty, i32Ty};
@@ -128,19 +162,51 @@ static void convertFuncSignature(kunir::FuncOp fn) {
     r.erase();
   }
   fn.erase();
+
+  // ── Tail-block guard ────────────────────────────────────────────────
+  // grid_x is sized as ceil(num_stocks / block_x), so the last block
+  // contains threads with stock_id ≥ num_stocks.  Without a guard those
+  // threads do gmem GEPs at out-of-bounds addresses (UB).  Compute
+  // stock_id at the top of the kernel and wrap the original body in
+  // `scf.if (stock_id < num_stocks)`.  Inactive threads fall through to
+  // gpu.return without touching gmem; their smem column is sized to the
+  // block (not num_stocks), so leaving it uninitialised is safe.
+  //
+  // For vector_size = 1 this is the entire fix; vector_size > 1 is
+  // gated above.
+  Operation *gpuRet = entry.getTerminator();
+  Operation *origFirst = entry.empty() ? nullptr : &entry.front();
+  if (!origFirst || origFirst == gpuRet) {
+    // Empty body — nothing to guard.
+    return success();
+  }
+
+  OpBuilder pb(ctx);
+  pb.setInsertionPointToStart(&entry);
+  Value sidIdx = emitStockId(pb, loc, idxTy);
+  Value sidI32 = pb.create<arith::IndexCastOp>(loc, i32Ty, sidIdx);
+  Value numStocks = entry.getArgument(1); // i32
+  Value active = pb.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt,
+                                            sidI32, numStocks);
+  auto ifOp = pb.create<scf::IfOp>(loc, /*resultTypes=*/TypeRange{},
+                                     active, /*withElseRegion=*/false);
+
+  // Move all original ops (everything between the prologue we just
+  // inserted and the gpu.return) into the scf.if's then-region, before
+  // its implicit scf.yield.
+  Block &thenBlk = ifOp.getThenRegion().front();
+  Operation *thenYield = thenBlk.getTerminator();
+  thenBlk.getOperations().splice(thenYield->getIterator(),
+                                   entry.getOperations(),
+                                   origFirst->getIterator(),
+                                   gpuRet->getIterator());
+
+  return success();
 }
 
 //===----------------------------------------------------------------------===//
 // Helpers used inside conversion patterns
 //===----------------------------------------------------------------------===//
-
-static Value emitStockId(OpBuilder &b, Location loc, Type idxTy) {
-  Value tid  = b.create<gpu::ThreadIdOp>(loc, idxTy, gpu::Dimension::x);
-  Value bid  = b.create<gpu::BlockIdOp>(loc, idxTy, gpu::Dimension::x);
-  Value bdim = b.create<gpu::BlockDimOp>(loc, idxTy, gpu::Dimension::x);
-  return b.create<arith::AddIOp>(
-      loc, b.create<arith::MulIOp>(loc, bid, bdim), tid);
-}
 
 // Read num_stocks (i32 func arg[1]) sign-extended to i64 for the linear gmem
 // address computation.  The bare i32 value is in arg[1]; we extend at every
@@ -449,7 +515,8 @@ struct ConvertKunGpuToLLVMPass
       SmallVector<kunir::FuncOp> kfns;
       module.walk([&](kunir::FuncOp fn) { kfns.push_back(fn); });
       for (kunir::FuncOp fn : kfns)
-        convertFuncSignature(fn);
+        if (failed(convertFuncSignature(fn)))
+          return signalPassFailure();
     }
 
     // ── Phase 2 ────────────────────────────────────────────────────────

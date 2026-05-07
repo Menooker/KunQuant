@@ -30,11 +30,24 @@ gpu.module @kungpu_kernels {
 // CHECK-SAME:    kungpu.output_names = ["out"]
 // CHECK-SAME:    kungpu.target_spec = #kunir<target_spec{
 //
-// time_length → arith.index_cast of arg0 (i32 → index)
-// CHECK:       %[[TLIDX:.*]] = arith.index_cast %[[TL]] : i32 to index
-// CHECK:       %[[OFFCST:.*]] = arith.constant 0 : i32
+// ── Active-thread guard prologue ──────────────────────────────────────
+// Computes stock_id = bid*bdim + tid, compares with %num_stocks, then
+// wraps the original kernel body in scf.if so threads with
+// stock_id ≥ num_stocks fall straight through to gpu.return.
+// CHECK:       %[[TID:.*]]  = gpu.thread_id  x
+// CHECK:       %[[BID:.*]]  = gpu.block_id   x
+// CHECK:       %[[BDIM:.*]] = gpu.block_dim  x
+// CHECK:       %[[BTB:.*]]  = arith.muli %[[BID]], %[[BDIM]]
+// CHECK:       %[[SID:.*]]  = arith.addi %[[BTB]], %[[TID]]
+// CHECK:       %[[SIDI:.*]] = arith.index_cast %[[SID]] : index to i32
+// CHECK:       %[[ACTIVE:.*]] = arith.cmpi slt, %[[SIDI]], %[[NS]] : i32
+// CHECK:       scf.if %[[ACTIVE]] {
 //
-// CHECK:       scf.for %[[T:.*]] = %{{.*}} to %[[TLIDX]] step %{{.*}}
+// time_length → arith.index_cast of arg0 (i32 → index)
+// CHECK:         %[[TLIDX:.*]] = arith.index_cast %[[TL]] : i32 to index
+// CHECK:         %[[OFFCST:.*]] = arith.constant 0 : i32
+//
+// CHECK:         scf.for %[[T:.*]] = %{{.*}} to %[[TLIDX]] step %{{.*}}
 //
 // ── ts.get on global %in at offset 0 ───────────────────────────────────
 // effective time = t − 0; stock_id = bid*bdim + tid; lin = effT*ns + sid.
@@ -61,6 +74,8 @@ gpu.module @kungpu_kernels {
 // CHECK:         %[[LIN2:.*]] = arith.addi %[[ROW2]],
 // CHECK:         %[[GEP2:.*]] = llvm.getelementptr %[[OUT]][%[[LIN2]]]
 // CHECK:         llvm.store %[[V]], %[[GEP2]]
+// scf.if + gpu.return: inactive threads (sid ≥ ns) skip the body and
+// arrive at gpu.return directly.
 // CHECK:       gpu.return
 kunir.func @test_copy(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
     inputs {%in = "in"}
