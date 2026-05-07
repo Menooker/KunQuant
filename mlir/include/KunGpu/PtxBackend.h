@@ -15,10 +15,13 @@
 
 #pragma once
 
+#include "KunCuda/Runtime.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/StringRef.h"
 
 #include <string>
+#include <vector>
 
 namespace kungpu {
 
@@ -33,7 +36,9 @@ struct PtxCompileOptions {
   /// caller should set it to whatever GPU it actually targets.
   std::string targetTriple = "nvptx64-nvidia-cuda";
   std::string targetCpu    = "sm_80";
-  std::string targetFeatures = "+ptx80";
+  /// Empty by default — let LLVM pick a PTX version compatible with the
+  /// chosen `targetCpu` (sm_80 → ptx70 etc., sm_120 → ptx87 etc.).
+  std::string targetFeatures;
 };
 
 /// End-to-end compile a `builtin.module` containing `gpu.module` kernels.
@@ -55,5 +60,44 @@ struct PtxCompileOptions {
 ::mlir::LogicalResult compileKunIrToPtx(::mlir::ModuleOp module,
                                           const PtxCompileOptions &options,
                                           std::string &ptxOut);
+
+struct PtxToCubinOptions {
+  /// SM architecture to assemble for, e.g. "sm_80".
+  std::string gpuArch = "sm_80";
+  /// PTX ISA version for ptxas (passed via --gpu-name and -V).  Empty =
+  /// let ptxas choose its default.
+  std::string ptxasVersion;
+  /// Extra arguments forwarded verbatim to ptxas (e.g. {"-O3"}).
+  std::vector<std::string> extraArgs;
+  /// Optional override for the ptxas binary path.  When empty we search
+  /// PATH and the CUDA_HOME / CUDA_PATH env vars (same logic upstream
+  /// NVPTXSerializer uses).
+  std::string ptxasPath;
+};
+
+/// Assemble PTX text into a CUBIN binary.  This is the same operation
+/// upstream `NVPTXSerializer::compileToBinary` performs internally —
+/// shell out to `ptxas` — exposed as a standalone helper because the
+/// upstream class isn't part of the public C++ API.
+///
+/// On success, `cubinOut` contains the raw CUBIN bytes.
+::mlir::LogicalResult compilePtxToCubin(::llvm::StringRef ptx,
+                                          const PtxToCubinOptions &options,
+                                          std::vector<char> &cubinOut,
+                                          std::string &errorMsg);
+
+/// All-in-one: run the kunir → LLVM dialect pipeline, translate to LLVM
+/// IR, optimize, emit PTX, assemble to CUBIN, and pull the kernel
+/// metadata (name + I/O argument names + target-spec fields) off the
+/// lowered function so callers can hand the result to
+/// `kun_cuda::Executable` without re-walking the IR.
+///
+/// The module is mutated in-place by the pipeline (same as
+/// `compileKunIrToPtx`).
+::mlir::LogicalResult
+compileKunIrToExecutable(::mlir::ModuleOp module,
+                          const PtxCompileOptions &ptxOpts,
+                          const PtxToCubinOptions &cubinOpts,
+                          ::kun_cuda::ExecutableData &out);
 
 } // namespace kungpu

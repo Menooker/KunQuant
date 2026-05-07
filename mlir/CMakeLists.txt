@@ -10,6 +10,16 @@ include_directories(${KUN_MLIR_BINARY_DIR}/include)
 
 add_definitions(${LLVM_DEFINITIONS})
 
+# The MLIR backend requires LLVM to have been built with the NVPTX target
+# — we emit PTX and load cubins.  Fail loudly here so the diagnostic is
+# clear rather than getting cryptic linker errors later.
+if(NOT "NVPTX" IN_LIST LLVM_TARGETS_TO_BUILD)
+  message(FATAL_ERROR
+    "KunQuant MLIR backend requires LLVM with NVPTX target.  Reconfigure "
+    "your LLVM build with -DLLVM_TARGETS_TO_BUILD=\"X86;NVPTX\" "
+    "(currently: '${LLVM_TARGETS_TO_BUILD}').")
+endif()
+
 # Enable gc-sections so kun-opt pulls in only the code it actually uses
 # from MLIR static libraries, keeping the binary small.
 if(NOT MSVC)

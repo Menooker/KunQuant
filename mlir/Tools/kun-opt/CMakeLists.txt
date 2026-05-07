@@ -1,7 +1,7 @@
 set(LLVM_LINK_COMPONENTS Support)
 if("NVPTX" IN_LIST LLVM_TARGETS_TO_BUILD)
   list(APPEND LLVM_LINK_COMPONENTS
-    NVPTXCodeGen NVPTXAsmParser NVPTXDesc NVPTXInfo
+    NVPTXCodeGen NVPTXDesc NVPTXInfo
     Passes Target TargetParser Core IRReader CodeGen MC AsmPrinter)
 endif()
 

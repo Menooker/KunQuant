@@ -1,33 +1,141 @@
 //===- PtxBackend.cpp - Compile a kunir module all the way to PTX ------===//
 
 #include "KunGpu/PtxBackend.h"
+#include "KunGpu/KunGpuUtils.h"
 #include "KunGpu/Pipelines.h"
+#include "KunIr/KunIrAttrs.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 
-#ifndef KUN_HAS_NVPTX
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/Program.h"
+#include "llvm/Support/raw_ostream.h"
 
-// LLVM was built without the NVPTX target.  Provide a stub so callers
-// still link, but compiling actual PTX is unavailable.
-
-#include "mlir/IR/BuiltinOps.h"
+#include <cstdlib>
 
 namespace kungpu {
-::mlir::LogicalResult compileKunIrToPtx(::mlir::ModuleOp module,
-                                          const PtxCompileOptions &,
-                                          std::string &) {
-  return module.emitError(
-      "compileKunIrToPtx: NVPTX target was not enabled in this LLVM build "
-      "(missing 'NVPTX' in LLVM_TARGETS_TO_BUILD).");
+
+namespace {
+
+/// Search for `ptxas` in the user-provided override, then PATH, then
+/// CUDA_HOME / CUDA_PATH / standard CUDA install locations.  Mirrors the
+/// search the upstream NVPTXSerializer does.
+static llvm::ErrorOr<std::string> findPtxas(::llvm::StringRef override) {
+  using namespace llvm::sys;
+  if (!override.empty() && fs::exists(override))
+    return std::string(override);
+  if (auto p = findProgramByName("ptxas"))
+    return p;
+  for (const char *envName : {"CUDA_HOME", "CUDA_PATH", "CUDA_TOOLKIT_PATH"}) {
+    if (const char *envVal = std::getenv(envName)) {
+      llvm::SmallString<256> p(envVal);
+      path::append(p, "bin", "ptxas");
+      if (fs::exists(p))
+        return std::string(p);
+    }
+  }
+  if (fs::exists("/usr/local/cuda/bin/ptxas"))
+    return std::string("/usr/local/cuda/bin/ptxas");
+  return std::make_error_code(std::errc::no_such_file_or_directory);
 }
+
+} // namespace
+
+::mlir::LogicalResult compilePtxToCubin(::llvm::StringRef ptx,
+                                          const PtxToCubinOptions &opts,
+                                          std::vector<char> &cubinOut,
+                                          std::string &errorMsg) {
+  using namespace llvm;
+
+  auto ptxasOrErr = findPtxas(opts.ptxasPath);
+  if (!ptxasOrErr) {
+    errorMsg = "compilePtxToCubin: ptxas not found "
+                "(looked in CUDA_HOME / CUDA_PATH / PATH / "
+                "/usr/local/cuda/bin); set ptxas_path or CUDA_HOME.";
+    return ::mlir::failure();
+  }
+
+  // Write PTX to a temp file.
+  SmallString<128> ptxPath, cubinPath, logPath;
+  if (auto ec = sys::fs::createTemporaryFile("kun-ptx", "ptx", ptxPath)) {
+    errorMsg = "compilePtxToCubin: createTemporaryFile(ptx): " + ec.message();
+    return ::mlir::failure();
+  }
+  if (auto ec = sys::fs::createTemporaryFile("kun-cubin", "cubin", cubinPath)) {
+    sys::fs::remove(ptxPath);
+    errorMsg = "compilePtxToCubin: createTemporaryFile(cubin): " + ec.message();
+    return ::mlir::failure();
+  }
+  if (auto ec = sys::fs::createTemporaryFile("kun-ptxlog", "log", logPath)) {
+    sys::fs::remove(ptxPath); sys::fs::remove(cubinPath);
+    errorMsg = "compilePtxToCubin: createTemporaryFile(log): " + ec.message();
+    return ::mlir::failure();
+  }
+
+  // Auto-cleanup.
+  struct CleanupOnExit {
+    SmallVectorImpl<char> &p; ~CleanupOnExit() { sys::fs::remove(p); }
+  };
+  CleanupOnExit c1{ptxPath}, c2{cubinPath}, c3{logPath};
+
+  {
+    std::error_code ec;
+    raw_fd_ostream os(ptxPath, ec, sys::fs::OF_None);
+    if (ec) {
+      errorMsg = "compilePtxToCubin: writing PTX: " + ec.message();
+      return ::mlir::failure();
+    }
+    os << ptx;
+  }
+
+  // Build argv:
+  //   ptxas --gpu-name=<sm_xx> -o <cubin> <ptx> [extra...]
+  std::string gpuArg = "--gpu-name=" + opts.gpuArch;
+  std::string outArg = "-o";
+  SmallVector<StringRef> argv = {*ptxasOrErr, gpuArg, outArg, cubinPath, ptxPath};
+  for (const auto &a : opts.extraArgs) argv.push_back(a);
+
+  std::string errBuf;
+  std::optional<StringRef> redirects[] = {std::nullopt,        // stdin
+                                            StringRef(logPath),  // stdout
+                                            StringRef(logPath)}; // stderr
+  int rc = sys::ExecuteAndWait(*ptxasOrErr, argv, /*Env=*/std::nullopt,
+                                 redirects, /*SecondsToWait=*/0,
+                                 /*MemoryLimit=*/0, &errBuf);
+  if (rc != 0) {
+    auto logBuf = MemoryBuffer::getFile(logPath);
+    errorMsg = "compilePtxToCubin: ptxas failed (exit " + std::to_string(rc) + ")";
+    if (!errBuf.empty()) errorMsg += ": " + errBuf;
+    if (logBuf && (*logBuf)->getBufferSize() > 0) {
+      errorMsg += "\n--- ptxas log ---\n";
+      errorMsg += (*logBuf)->getBuffer().str();
+    }
+    return ::mlir::failure();
+  }
+
+  auto cubinBuf = MemoryBuffer::getFile(cubinPath);
+  if (!cubinBuf) {
+    errorMsg = "compilePtxToCubin: cannot read cubin: " +
+                  cubinBuf.getError().message();
+    return ::mlir::failure();
+  }
+  StringRef bytes = (*cubinBuf)->getBuffer();
+  cubinOut.assign(bytes.begin(), bytes.end());
+  return ::mlir::success();
+}
+
 } // namespace kungpu
 
-#else  // KUN_HAS_NVPTX
-
-
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/ExecutionEngine/OptUtils.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/PassManager.h"
-#include "mlir/Target/LLVMIR/Dialect/All.h"
+#include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/GPU/GPUToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
 
 #include "llvm/IR/LLVMContext.h"
@@ -83,14 +191,30 @@ LogicalResult compileKunIrToPtx(ModuleOp module,
         "compileKunIrToPtx: kunir-to-llvm pipeline failed");
 
   // ─── Step 2.  Translate MLIR LLVM dialect → llvm::Module ──────────
-  // Make sure NVVM (and friends) know how to emit themselves to LLVM IR.
+  // Register only the translations we actually need (builtin + LLVM +
+  // NVVM + GPU); the upstream `registerAllToLLVMIRTranslations` would
+  // pull in ArmSVE / SPIR-V / etc. and force us to link them all.
   DialectRegistry registry;
-  registerAllToLLVMIRTranslations(registry);
+  registerBuiltinDialectTranslation(registry);
+  registerLLVMDialectTranslation(registry);
+  registerNVVMDialectTranslation(registry);
+  registerGPUDialectTranslation(registry);
   ctx->appendDialectRegistry(registry);
+
+  // Mirror upstream `gpu-module-to-binary` / NVPTXSerializer: translate
+  // the gpu.module (the kernel container) rather than the outer
+  // builtin.module — only the gpu.module's body is meant to become LLVM
+  // IR.  We just take the first gpu.module; multi-module support can
+  // come later.
+  gpu::GPUModuleOp gpuMod;
+  module.walk([&](gpu::GPUModuleOp m) { gpuMod = m; return WalkResult::interrupt(); });
+  if (!gpuMod)
+    return module.emitError(
+        "compileKunIrToPtx: no gpu.module found after lowering");
 
   llvm::LLVMContext llvmCtx;
   std::unique_ptr<llvm::Module> llvmModule =
-      translateModuleToLLVMIR(module, llvmCtx);
+      translateModuleToLLVMIR(gpuMod, llvmCtx);
   if (!llvmModule)
     return module.emitError(
         "compileKunIrToPtx: translation to LLVM IR failed");
@@ -162,6 +286,56 @@ LogicalResult compileKunIrToPtx(ModuleOp module,
   return success();
 }
 
-} // namespace kungpu
+//===----------------------------------------------------------------------===//
+// All-in-one: kunir → cubin + metadata
+//===----------------------------------------------------------------------===//
 
-#endif // KUN_HAS_NVPTX
+LogicalResult compileKunIrToExecutable(ModuleOp module,
+                                        const PtxCompileOptions &ptxOpts,
+                                        const PtxToCubinOptions &cubinOpts,
+                                        ::kun_cuda::ExecutableData &out) {
+  // 1.  Run the kunir → LLVM dialect pipeline + emit PTX.  This mutates
+  //     `module` in place so the discardable kunir metadata ends up on
+  //     the lowered llvm.func.
+  std::string ptx;
+  if (failed(compileKunIrToPtx(module, ptxOpts, ptx)))
+    return failure();
+
+  // 2.  Find the lowered kernel function (the one carrying our
+  //     kungpu.* discardable attributes) and pull metadata off it.
+  LLVM::LLVMFuncOp kernel;
+  module.walk([&](LLVM::LLVMFuncOp f) {
+    if (f->hasAttr(kFuncTargetSpecAttr)) {
+      kernel = f;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  if (!kernel)
+    return module.emitError(
+        "compileKunIrToExecutable: cannot find a llvm.func with kungpu "
+        "metadata in the lowered module");
+
+  out.kernelName = kernel.getSymName().str();
+  if (auto inNames = getFuncInputNames(kernel)) {
+    for (auto a : inNames)
+      out.inputNames.push_back(llvm::cast<StringAttr>(a).str());
+  }
+  if (auto outNames = getFuncOutputNames(kernel)) {
+    for (auto a : outNames)
+      out.outputNames.push_back(llvm::cast<StringAttr>(a).str());
+  }
+  if (auto ts = getFuncTargetSpec(kernel)) {
+    out.warpsPerCta = ts.getWarpsPerCta();
+    out.vectorSize  = ts.getVectorSize();
+  }
+
+  // 3.  Assemble PTX → CUBIN.
+  std::string err;
+  if (failed(compilePtxToCubin(ptx, cubinOpts, out.cubin, err)))
+    return module.emitError("compileKunIrToExecutable: ") << err;
+
+  return success();
+}
+
+} // namespace kungpu
