@@ -67,13 +67,13 @@ void buildKunIrToLLVMPipeline(OpPassManager &pm) {
 
   // ── 9.  gpu.thread_id / block_id / block_dim → nvvm intrinsics, plus
   //       gpu.func → llvm.func (with `nvvm.kernel`).
-  // indexBitwidth = 32 matches our function-signature i32 (no spurious
-  // sext/trunc around the i32 NVVM intrinsics).
-  {
-    ConvertGpuOpsToNVVMOpsOptions gpuOpts;
-    gpuOpts.indexBitwidth = 32;
-    pm.addNestedPass<gpu::GPUModuleOp>(createConvertGpuOpsToNVVMOps(gpuOpts));
-  }
+  // We deliberately match the default index bitwidth (64) used by the
+  // earlier arith/cf/index→LLVM passes — mixing 32 and 64 leaves
+  // i32 → index → i64 unrealized_conversion_cast chains that
+  // reconcile-unrealized-casts can't fold.  The downside is a single
+  // sext after each NVVM intrinsic, which LLVM's later DCE/InstCombine
+  // erases.
+  pm.addNestedPass<gpu::GPUModuleOp>(createConvertGpuOpsToNVVMOps());
 
   // ── 10.  func.func → llvm.func (host-side helpers, if any).
   pm.addPass(createConvertFuncToLLVMPass());

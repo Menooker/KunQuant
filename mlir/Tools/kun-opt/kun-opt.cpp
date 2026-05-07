@@ -51,6 +51,7 @@ int main(int argc, char **argv) {
   mlir::registerConvertIndexToLLVMPass();
   mlir::registerConvertFuncToLLVMPass();
   mlir::registerConvertGpuOpsToNVVMOpsPass();
+  mlir::registerConvertToLLVMPass();
   mlir::registerReconcileUnrealizedCastsPass();
 
   return mlir::asMainReturnCode(
