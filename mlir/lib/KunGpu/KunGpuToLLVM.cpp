@@ -1,16 +1,19 @@
-//===- KunGpuToLLVM.cpp - Lower kungpu + kunir.func → func + LLVM ---------===//
+//===- KunGpuToLLVM.cpp - Lower kungpu + kunir.func → gpu.func + LLVM ---===//
 //
-// Two-phase pass.
+// Assumes the input module is a `gpu.module` (or that the kunir.func lives
+// inside one).  Two-phase pass.
 //
 // Phase 1 (convertFuncSignature, simple imperative helper):
 //   kunir.func @f(%a: !kunir.ts<…>, …)
-//     → func.func @f(%t: i32, %n: i32, %a: !kunir.ts<…>, …)
+//     → gpu.func @f(%t: i32, %n: i32, %a: !kunir.ts<…>, …) kernel
+//   inserted into the same gpu.module that contained the kunir.func.
 //   The two prepended i32 arguments are time_length and num_stocks
 //   (i32 because 64-bit ops are slow on GPUs; the linear gmem address
-//   is still computed in i64).  ts arg types are preserved.
+//   is still computed in i64).  ts arg types are preserved here — phase 2
+//   converts them to !llvm.ptr via the standard signature-conversion pat.
 //   target_spec, input_names and output_names are moved to discardable
 //   attributes (see KunGpuUtils.h accessors).
-//   kunir.return → func.return.
+//   kunir.return → gpu.return.
 //
 // Phase 2 (applyPartialConversion, one OpConversionPattern per op):
 //   TypeConverter:  !kunir.ts<T,N> → !llvm.ptr
@@ -51,6 +54,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Transforms/DialectConversion.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
@@ -95,14 +99,22 @@ static void convertFuncSignature(kunir::FuncOp fn) {
   for (Type t : oldFT.getInputs())
     newArgTypes.push_back(t);
 
+  // Build gpu.func right before the kunir.func — both live inside the
+  // enclosing gpu.module.
   OpBuilder b(fn);
-  auto newFunc = b.create<func::FuncOp>(
+  auto newFunc = b.create<gpu::GPUFuncOp>(
       loc, fn.getSymName(), FunctionType::get(ctx, newArgTypes, {}));
-  newFunc.setVisibility(SymbolTable::Visibility::Public);
+  // Mark as a kernel (sets the op-level `kernel` attribute) so that
+  // convert-gpu-to-nvvm tags the resulting llvm.func with `nvvm.kernel`.
+  newFunc.setKernelAttr(UnitAttr::get(ctx));
   setFuncTargetSpec (newFunc, fn.getTargetSpecAttr());
   setFuncInputNames (newFunc, fn.getInputNames());
   setFuncOutputNames(newFunc, fn.getOutputNames());
 
+  // gpu.func's auto-created entry block is replaced with the kunir.func
+  // body.  Block-arg types initially still match the kunir.func signature;
+  // phase 2's signature-conversion pattern reconciles them with the new
+  // gpu.func type (ts → !llvm.ptr).
   newFunc.getBody().takeBody(fn.getBody());
   Block &entry = newFunc.getBody().front();
   entry.insertArgument(0u, i32Ty, loc);
@@ -112,7 +124,7 @@ static void convertFuncSignature(kunir::FuncOp fn) {
   newFunc.walk([&](kunir::ReturnOp r) { returns.push_back(r); });
   for (kunir::ReturnOp r : returns) {
     OpBuilder rb(r);
-    rb.create<func::ReturnOp>(r.getLoc());
+    rb.create<gpu::ReturnOp>(r.getLoc());
     r.erase();
   }
   fn.erase();
@@ -134,7 +146,7 @@ static Value emitStockId(OpBuilder &b, Location loc, Type idxTy) {
 // address computation.  The bare i32 value is in arg[1]; we extend at every
 // use site (cheap, and lets the caller decide).
 static Value getNumStocksI64(OpBuilder &b, Operation *op, Location loc) {
-  Value ns32 = op->getParentOfType<func::FuncOp>()
+  Value ns32 = op->getParentOfType<gpu::GPUFuncOp>()
                    .getBody().front().getArgument(1);
   return b.create<arith::ExtSIOp>(loc, b.getI64Type(), ns32);
 }
@@ -167,7 +179,7 @@ struct TimeLengthPattern : OpConversionPattern<TimeLengthOp> {
   LogicalResult
   matchAndRewrite(TimeLengthOp op, OpAdaptor /*a*/,
                   ConversionPatternRewriter &rewriter) const override {
-    Value tl32 = op->getParentOfType<func::FuncOp>()
+    Value tl32 = op->getParentOfType<gpu::GPUFuncOp>()
                      .getBody().front().getArgument(0);
     rewriter.replaceOpWithNewOp<arith::IndexCastOp>(
         op, rewriter.getIndexType(), tl32);
@@ -236,18 +248,18 @@ struct WindowedTempPattern : OpConversionPattern<WindowedTempOp> {
     int64_t stride;
 
     if (op.isSmem()) {
-      auto fn = op->getParentOfType<func::FuncOp>();
-      auto module = op->getParentOfType<ModuleOp>();
+      auto fn = op->getParentOfType<gpu::GPUFuncOp>();
+      auto gpuModule = op->getParentOfType<gpu::GPUModuleOp>();
       auto tsAttr = getFuncTargetSpec(fn);
       int64_t blockSize = tsAttr ? (tsAttr.getWarpsPerCta() * 32) : 32;
       stride = blockSize;
 
       std::string name =
-          ("__smem_" + fn.getSymName() + "_" +
+          ("__smem_" + fn.getName() + "_" +
            llvm::Twine(smemCounter++)).str();
       {
         OpBuilder::InsertionGuard g(rewriter);
-        Block *modBody = module.getBody();
+        Block *modBody = &gpuModule.getBodyRegion().front();
         rewriter.setInsertionPoint(modBody, modBody->begin());
         rewriter.create<LLVM::GlobalOp>(
             loc, LLVM::LLVMArrayType::get(elemTy, N * blockSize), false,
@@ -454,26 +466,26 @@ struct ConvertKunGpuToLLVMPass
     typeConv.addTargetMaterialization(materialize);
 
     ConversionTarget target(*ctx);
-    target.addLegalDialect<func::FuncDialect, arith::ArithDialect,
-                           scf::SCFDialect, LLVM::LLVMDialect,
-                           gpu::GPUDialect>();
+    target.addLegalDialect<arith::ArithDialect, scf::SCFDialect,
+                           LLVM::LLVMDialect, gpu::GPUDialect>();
     target.addLegalOp<ModuleOp, UnrealizedConversionCastOp>();
     target.addIllegalOp<WindowedTempOp, TsGetOp, TsPutOp,
                         TimeLengthOp, StockIdOp, BlockStockCountOp>();
-    target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp op) {
+    // gpu.func is legal only after its signature has been converted from
+    // (...kunir.ts) to (...!llvm.ptr) by the FunctionOpInterface pattern
+    // we register below.
+    target.addDynamicallyLegalOp<gpu::GPUFuncOp>([&](gpu::GPUFuncOp op) {
       return typeConv.isSignatureLegal(op.getFunctionType()) &&
              typeConv.isLegal(&op.getBody());
     });
-    target.addDynamicallyLegalOp<func::ReturnOp>(
-        [&](func::ReturnOp op) { return typeConv.isLegal(op.getOperandTypes()); });
+    // gpu.return is void in our IR — always legal.
 
     WTDescMap descMap;
     int smemCounter = 0;
 
     RewritePatternSet patterns(ctx);
-    populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(patterns,
-                                                                   typeConv);
-    populateReturnOpTypeConversionPattern(patterns, typeConv);
+    populateFunctionOpInterfaceTypeConversionPattern<gpu::GPUFuncOp>(
+        patterns, typeConv);
     patterns.add<TimeLengthPattern, StockIdPattern, BlockStockCountPattern>(
         typeConv, ctx);
     patterns.add<WindowedTempPattern>(typeConv, ctx, descMap, smemCounter);

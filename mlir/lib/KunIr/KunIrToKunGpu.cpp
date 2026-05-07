@@ -363,4 +363,7 @@ namespace kunir {
 void registerKunIrToKunGpuPass() {
   PassRegistration<LowerKunIrToKunGpuPass>();
 }
+std::unique_ptr<mlir::Pass> createKunIrToKunGpuPass() {
+  return std::make_unique<LowerKunIrToKunGpuPass>();
+}
 } // namespace kunir

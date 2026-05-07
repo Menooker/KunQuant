@@ -21,6 +21,18 @@ target_link_libraries(kun-opt PRIVATE
   MLIRSCFDialect
   MLIRGPUDialect
   MLIRLLVMDialect
+  MLIRControlFlowDialect
+  MLIRIndexDialect
+
+  # Conversion passes used by the kunir-to-llvm pipeline
+  MLIRSCFToControlFlow
+  MLIRControlFlowToLLVM
+  MLIRArithToLLVM
+  MLIRFuncToLLVM
+  MLIRIndexToLLVM
+  MLIRGPUToNVVMTransforms
+  MLIRNVVMDialect
+  MLIRReconcileUnrealizedCasts
 
   # Core MLIR libraries
   MLIRIR

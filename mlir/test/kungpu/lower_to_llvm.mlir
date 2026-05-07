@@ -1,23 +1,31 @@
 // RUN: %kun-opt --convert-kungpu-to-llvm %s | %FileCheck %s
+//
+// All kernels live in a single gpu.module — convert-kungpu-to-llvm rewrites
+// each kunir.func to a gpu.func (kernel) inside that gpu.module, with the
+// signature prepended by (i32 time_len, i32 num_stocks).
+
+gpu.module @kungpu_kernels {
 
 // =====================================================================
-// Smem global emitted by `test_windowed_smem` lands at module scope.
+// Smem global emitted by `test_windowed_smem` lands inside gpu.module.
 // =====================================================================
-// CHECK:       llvm.mlir.global internal @[[SMEM:__smem_test_windowed_smem_[0-9]+]]()
-// CHECK-SAME:  {addr_space = 3 : i32}
-// CHECK-SAME:  !llvm.array<{{[0-9]+}} x f32>
+// CHECK:       gpu.module @kungpu_kernels {
+// CHECK:         llvm.mlir.global internal @[[SMEM:__smem_test_windowed_smem_[0-9]+]]()
+// CHECK-SAME:    {addr_space = 3 : i32}
+// CHECK-SAME:    !llvm.array<{{[0-9]+}} x f32>
 
 
 // =====================================================================
 // Case 1 — gmem-only: signature change, time_length lowering, TxS GEPs.
 // =====================================================================
 //
-// CHECK-LABEL: func.func @test_copy(
+// CHECK-LABEL: gpu.func @test_copy(
 // CHECK-SAME:    %[[TL:[^:]+]]: i32,
 // CHECK-SAME:    %[[NS:[^:]+]]: i32,
 // CHECK-SAME:    %[[IN:[^:]+]]: !llvm.ptr,
 // CHECK-SAME:    %[[OUT:[^:]+]]: !llvm.ptr
-// kunir-func metadata is preserved as discardable attributes on func.func.
+// kernel attribute is set, kunir-func metadata preserved as discardables:
+// CHECK-SAME:    kernel
 // CHECK-SAME:    kungpu.input_names = ["in"]
 // CHECK-SAME:    kungpu.output_names = ["out"]
 // CHECK-SAME:    kungpu.target_spec = #kunir<target_spec{
@@ -53,7 +61,7 @@
 // CHECK:         %[[LIN2:.*]] = arith.addi %[[ROW2]],
 // CHECK:         %[[GEP2:.*]] = llvm.getelementptr %[[OUT]][%[[LIN2]]]
 // CHECK:         llvm.store %[[V]], %[[GEP2]]
-// CHECK:       return
+// CHECK:       gpu.return
 kunir.func @test_copy(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
     inputs {%in = "in"}
     outputs {%out = "out"}
@@ -75,7 +83,7 @@ kunir.func @test_copy(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
 //          circular put/get (no modulo).
 // =====================================================================
 //
-// CHECK-LABEL: func.func @test_windowed_local
+// CHECK-LABEL: gpu.func @test_windowed_local
 // CHECK-SAME:  i32
 // CHECK-SAME:  i32
 // CHECK-SAME:  !llvm.ptr
@@ -131,7 +139,6 @@ kunir.func @test_windowed_local(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1
   scf.for %t = %c0 to %tl step %c1 {
     %v  = kungpu.ts.get %in[%off0] : !kunir.ts<f32, inf> -> f32
     kungpu.ts.put %wt, %v : !kunir.ts<f32, 5>, f32
-    // dynamic offset (so we exercise the SSA pos→idx computation)
     %off_idx = arith.subi %t, %c0 : index
     %off_i32 = arith.index_cast %off_idx : index to i32
     %w  = kungpu.ts.get %wt[%off_i32] : !kunir.ts<f32, 5> -> f32
@@ -151,9 +158,8 @@ kunir.func @test_windowed_local(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1
 // =====================================================================
 //
 // Global has 5*128 = 640 elements (N=5, warps_per_cta=4 → K=128).
-// (already checked at the top: !llvm.array<{{[0-9]+}} x f32>)
 //
-// CHECK-LABEL: func.func @test_windowed_smem
+// CHECK-LABEL: gpu.func @test_windowed_smem
 // CHECK:       %[[RAW:.*]] = llvm.mlir.addressof @[[SMEM]] : !llvm.ptr<3>
 // CHECK:       %[[GEN:.*]] = llvm.addrspacecast %[[RAW]] : !llvm.ptr<3> to !llvm.ptr
 // CHECK:       %[[TID:.*]] = gpu.thread_id  x
@@ -198,7 +204,7 @@ kunir.func @test_windowed_smem(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>
 // Case 4 — stock_id and block_stock_count lowering.
 // =====================================================================
 //
-// CHECK-LABEL: func.func @test_indexing
+// CHECK-LABEL: gpu.func @test_indexing
 // CHECK:       gpu.thread_id  x
 // CHECK-NEXT:  gpu.block_id   x
 // CHECK-NEXT:  gpu.block_dim  x
@@ -214,3 +220,5 @@ kunir.func @test_indexing(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
   %sum = arith.addi %sid, %bsc : index
   kunir.return
 }
+
+}  // gpu.module

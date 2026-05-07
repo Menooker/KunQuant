@@ -3,6 +3,7 @@ add_mlir_dialect_library(MLIRKunGpuDialect
   KunGpuOps.cpp
   KunGpuMemoryPlanning.cpp
   KunGpuToLLVM.cpp
+  Pipelines.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${PROJECT_SOURCE_DIR}/mlir/include
@@ -20,7 +21,15 @@ add_mlir_dialect_library(MLIRKunGpuDialect
   MLIRArithDialect
   MLIRGPUDialect
   MLIRLLVMDialect
+  MLIRTransforms
   MLIRTransformUtils
   MLIRSideEffectInterfaces
   MLIRKunIrDialect
+  MLIRSCFToControlFlow
+  MLIRControlFlowToLLVM
+  MLIRArithToLLVM
+  MLIRFuncToLLVM
+  MLIRIndexToLLVM
+  MLIRGPUToNVVMTransforms
+  MLIRNVVMDialect
 )
