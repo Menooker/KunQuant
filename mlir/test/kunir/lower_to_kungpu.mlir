@@ -13,11 +13,14 @@ kunir.func @test_binary_lower(%a: !kunir.ts<f32, inf>, %b: !kunir.ts<f32, inf>)
   // CHECK:      %[[TL:.*]] = kungpu.time_length
   // CHECK:      %[[C0:.*]] = arith.constant 0 : index
   // CHECK:      %[[C1:.*]] = arith.constant 1 : index
+  // outer-loop offset = 0 (i32) used by every gmem ts.get/put
+  // CHECK:      %[[OFF:.*]] = arith.constant 0 : i32
   // CHECK:      scf.for %{{.*}} = %[[C0]] to %[[TL]] step %[[C1]]
-  // CHECK:        kungpu.ts.get
-  // CHECK:        kungpu.ts.get
+  // CHECK:        kungpu.ts.get %{{.*}}[%[[OFF]]]
+  // CHECK:        kungpu.ts.get %{{.*}}[%[[OFF]]]
   // CHECK:        arith.addf
   // CHECK:        kungpu.ts.put
+  // CHECK-NOT:    kungpu.ts.put %{{.*}}[
   %sum = kunir.add %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
   kunir.return %sum : !kunir.ts<f32, 1>
 }
@@ -41,13 +44,19 @@ kunir.func @test_windowed_sum(%close: !kunir.ts<f32, inf>)
     -> !kunir.ts<f32, 1> {
   // CHECK:      %[[C0:.*]] = arith.constant 0 : index
   // CHECK:      %[[C1:.*]] = arith.constant 1 : index
+  // CHECK:      %[[OFF0:.*]] = arith.constant 0 : i32
   // CHECK:      %[[WT:.*]] = kungpu.windowed_temp : <f32, 5>
   // CHECK:      scf.for %[[T:.*]] =
-  // CHECK:        kungpu.ts.get %{{.*}}[%[[T]]]
-  // CHECK:        kungpu.ts.put %[[WT]][%[[T]]]
+  // CHECK:        kungpu.ts.get %{{.*}}[%[[OFF0]]]
+  // outer-loop ts.put has no offset operand
+  // CHECK:        kungpu.ts.put %[[WT]], %{{[^[]+}} : <f32, 5>, f32
   // CHECK:        %[[WIN:.*]] = arith.constant 5 : index
-  // CHECK:        scf.for %{{.*}} = %[[C0]] to %[[WIN]] step %[[C1]] iter_args
-  // CHECK:          kungpu.ts.get %[[WT]]
+  // window-loop offset = (window-1) - w  (oldest first)
+  // CHECK:        %[[WM1:.*]] = arith.constant 4 : i32
+  // CHECK:        scf.for %[[W:.*]] = %[[C0]] to %[[WIN]] step %[[C1]] iter_args
+  // CHECK:          %[[WI:.*]] = arith.index_cast %[[W]] : index to i32
+  // CHECK:          %[[OFFW:.*]] = arith.subi %[[WM1]], %[[WI]] : i32
+  // CHECK:          kungpu.ts.get %[[WT]][%[[OFFW]]]
   // CHECK:          arith.addf
   %w = kunir.windowed_output %close [length = 5] : !kunir.ts<f32, inf> -> !kunir.ts<f32, 5>
   %sum = kunir.for_each_back_window
@@ -70,8 +79,8 @@ kunir.func @test_computed_reduce(%x: !kunir.ts<f32, inf>, %y: !kunir.ts<f32, inf
   // CHECK:      %[[WY:.*]] = kungpu.windowed_temp : <f32, 3>
   // CHECK:      scf.for
   // CHECK:        scf.for {{.*}} iter_args
-  // CHECK:          %[[A:.*]] = kungpu.ts.get %[[WX]]
-  // CHECK:          %[[B:.*]] = kungpu.ts.get %[[WY]]
+  // CHECK:          %[[A:.*]] = kungpu.ts.get %[[WX]][%{{.*}}]
+  // CHECK:          %[[B:.*]] = kungpu.ts.get %[[WY]][%{{.*}}]
   // CHECK:          %[[P:.*]] = arith.mulf %[[A]], %[[B]]
   // CHECK:          arith.addf {{.*}}, %[[P]]
   %wx = kunir.windowed_output %x [length = 3] : !kunir.ts<f32, inf> -> !kunir.ts<f32, 3>
@@ -96,17 +105,17 @@ kunir.func @test_multi_reduce(%input: !kunir.ts<f64, inf>)
     -> (!kunir.ts<f64, 1>, !kunir.ts<f64, 1>) {
   // CHECK:      %[[WT:.*]] = kungpu.windowed_temp : <f64, 10>
   // CHECK:      scf.for %[[T:.*]] =
-  // CHECK:        kungpu.ts.get %[[IN]][%[[T]]]
-  // CHECK:        kungpu.ts.put %[[WT]][%[[T]]]
+  // CHECK:        kungpu.ts.get %[[IN]][%{{.*}}]
+  // CHECK:        kungpu.ts.put %[[WT]], %{{[^[]+}} : <f64, 10>, f64
   // CHECK:        %[[CST0:.*]] = arith.constant 0.0{{.*}} : f64
   // CHECK:        %[[NEGINF:.*]] = arith.constant 0xFFF0000000000000 : f64
   // CHECK:        %[[R:.*]]:2 = scf.for {{.*}} iter_args(%{{.*}} = %[[CST0]], %{{.*}} = %[[NEGINF]]) -> (f64, f64)
-  // CHECK:          kungpu.ts.get %[[WT]]
+  // CHECK:          kungpu.ts.get %[[WT]][%{{.*}}]
   // CHECK:          arith.addf
   // CHECK:          arith.maximumf
   // CHECK:          scf.yield {{.*}}, {{.*}} : f64, f64
-  // CHECK:        kungpu.ts.put %[[OUT0]][%[[T]]], %[[R]]#0 : <f64, 1>, f64
-  // CHECK:        kungpu.ts.put %[[OUT1]][%[[T]]], %[[R]]#1 : <f64, 1>, f64
+  // CHECK:        kungpu.ts.put %[[OUT0]], %[[R]]#0 : <f64, 1>, f64
+  // CHECK:        kungpu.ts.put %[[OUT1]], %[[R]]#1 : <f64, 1>, f64
   %w = kunir.windowed_output %input [length = 10] : !kunir.ts<f64, inf> -> !kunir.ts<f64, 10>
   %sum, %max = kunir.for_each_back_window
       (%w : !kunir.ts<f64, 10>) [window = 10]

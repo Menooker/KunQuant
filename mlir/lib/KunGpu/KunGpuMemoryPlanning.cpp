@@ -64,7 +64,6 @@ struct WindowedTempMemoryPlanningPass
 
   void runOnOperation() override {
     kunir::FuncOp funcOp = getOperation();
-    MLIRContext *ctx = &getContext();
 
     // -----------------------------------------------------------------------
     // 1. Read hardware parameters from target_spec.
@@ -106,7 +105,7 @@ struct WindowedTempMemoryPlanningPass
 
       // Infinite-lookback buffers cannot be sized statically → always local.
       if (N == std::numeric_limits<uint64_t>::max()) {
-        op->setAttr("kungpu.smem", BoolAttr::get(ctx, false));
+        op.setSmem(false);
         continue;
       }
 
@@ -118,7 +117,7 @@ struct WindowedTempMemoryPlanningPass
       if (useSmem)
         usedSmem += bytes;
 
-      op->setAttr("kungpu.smem", BoolAttr::get(ctx, useSmem));
+      op.setSmem(useSmem);
 
       LLVM_DEBUG(llvm::dbgs()
                  << "[kungpu-memory-planning] windowed_temp N=" << N

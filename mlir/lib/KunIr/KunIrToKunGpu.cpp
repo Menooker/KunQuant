@@ -47,9 +47,13 @@ enum class TsKind { Handle, Scalar };
 struct TsEntry { TsKind kind; Value value; };
 using TsMap = llvm::DenseMap<Value, TsEntry>;
 
-// If `v` is mapped as a Handle in tsMap, emit ts.get(handle, timeIdx) and
+// If `v` is mapped as a Handle in tsMap, emit ts.get(handle, offsetI32) and
 // promote the entry to Scalar.  Returns the scalar value.
-static Value getScalar(Value v, TsMap &tsMap, Value timeIdx,
+//
+// `offsetI32` is the tail-relative offset (i32):
+//   0 = latest (just put / current time step)
+//   k = k steps earlier
+static Value getScalar(Value v, TsMap &tsMap, Value offsetI32,
                        OpBuilder &b, Location loc) {
   auto it = tsMap.find(v);
   assert(it != tsMap.end() && "value not found in tsMap");
@@ -57,7 +61,7 @@ static Value getScalar(Value v, TsMap &tsMap, Value timeIdx,
     return it->second.value;
   auto tsTy = llvm::cast<TsType>(v.getType());
   Value scalar = b.create<TsGetOp>(loc, tsTy.getElementType(),
-                                    it->second.value, timeIdx);
+                                    it->second.value, offsetI32);
   it->second = {TsKind::Scalar, scalar};
   return scalar;
 }
@@ -75,21 +79,21 @@ static Value getScalar(Value v, TsMap &tsMap, Value timeIdx,
 // Handle-typed operands are loaded via ts.get (getScalar) on first use.
 static LogicalResult lowerBlock(
     llvm::ArrayRef<Operation *> ops,
-    TsMap &tsMap, Value timeIdx, OpBuilder &b, Location loc,
+    TsMap &tsMap, Value offsetI32, OpBuilder &b, Location loc,
     llvm::function_ref<LogicalResult(Operation &)> handleUnknown = nullptr) {
   for (Operation *op : ops) {
     Location ol = op->getLoc();
     if (auto iface = dyn_cast<BinaryArithInterface>(op)) {
-      Value lhs = getScalar(op->getOperand(0), tsMap, timeIdx, b, ol);
-      Value rhs = getScalar(op->getOperand(1), tsMap, timeIdx, b, ol);
+      Value lhs = getScalar(op->getOperand(0), tsMap, offsetI32, b, ol);
+      Value rhs = getScalar(op->getOperand(1), tsMap, offsetI32, b, ol);
       tsMap[op->getResult(0)] = {TsKind::Scalar,
           iface.buildScalarOp(b, ol, lhs, rhs)};
     } else if (auto iface = dyn_cast<UnaryArithInterface>(op)) {
-      Value operand = getScalar(op->getOperand(0), tsMap, timeIdx, b, ol);
+      Value operand = getScalar(op->getOperand(0), tsMap, offsetI32, b, ol);
       tsMap[op->getResult(0)] = {TsKind::Scalar,
           iface.buildScalarOp(b, ol, operand)};
     } else if (auto ri = dyn_cast<ReduceArithInterface>(op)) {
-      Value elem = getScalar(op->getOperand(0), tsMap, timeIdx, b, ol);
+      Value elem = getScalar(op->getOperand(0), tsMap, offsetI32, b, ol);
       auto it = tsMap.find(op->getResult(0));
       assert(it != tsMap.end() && it->second.kind == TsKind::Scalar
              && "reduce result must be pre-seeded in tsMap with current acc");
@@ -107,12 +111,12 @@ static LogicalResult lowerBlock(
 // Overload that collects non-terminator ops from `block` and delegates.
 static LogicalResult lowerBlock(
     Block &block,
-    TsMap &tsMap, Value timeIdx, OpBuilder &b, Location loc,
+    TsMap &tsMap, Value offsetI32, OpBuilder &b, Location loc,
     llvm::function_ref<LogicalResult(Operation &)> handleUnknown = nullptr) {
   SmallVector<Operation *> ops;
   for (Operation &op : block.without_terminator())
     ops.push_back(&op);
-  return lowerBlock(ops, tsMap, timeIdx, b, loc, handleUnknown);
+  return lowerBlock(ops, tsMap, offsetI32, b, loc, handleUnknown);
 }
 
 //===----------------------------------------------------------------------===//
@@ -187,8 +191,12 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
   Value timeLen = b.create<TimeLengthOp>(loc, b.getIndexType());
   Value c0 = b.create<arith::ConstantIndexOp>(loc, 0);
   Value c1 = b.create<arith::ConstantIndexOp>(loc, 1);
+  // Outer-loop ts.get/put always reference the current time step, i.e.
+  // tail-relative offset = 0 (i32).  Created before outerFor so it dominates
+  // every use inside the loop body.
+  Value zeroOffsetI32 = b.create<arith::ConstantOp>(
+      loc, b.getI32Type(), b.getI32IntegerAttr(0));
   auto outerFor = b.create<scf::ForOp>(loc, c0, timeLen, c1);
-  Value t = outerFor.getInductionVar();
 
   // Erase the implicit empty scf.yield (no iter_args → zero-operand yield).
   outerFor.getBody()->back().erase();
@@ -224,8 +232,9 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
     if (auto woOp = dyn_cast<WindowedOutputOp>(op)) {
       auto wt = b.create<WindowedTempOp>(ol, woOp.getResult().getType());
       tsMap[woOp.getResult()] = {TsKind::Handle, wt.getResult()};
-      Value inputScalar = getScalar(woOp.getInput(), tsMap, t, fb, ol);
-      fb.create<TsPutOp>(ol, wt.getResult(), t, inputScalar);
+      Value inputScalar =
+          getScalar(woOp.getInput(), tsMap, zeroOffsetI32, fb, ol);
+      fb.create<TsPutOp>(ol, wt.getResult(), inputScalar);
       return success();
     }
 
@@ -266,17 +275,21 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
       // Create inner scf.for %w = 0 to window step 1 iter_args(acc_i = init_i).
       // The lambda form lets us emit a proper scf.yield as the body terminator
       // without fighting the implicit yield created by ensureTerminator.
-      Value wBound = fb.create<arith::ConstantIndexOp>(ol, window);
-      Value wM1    = fb.create<arith::ConstantIndexOp>(ol, window - 1);
+      Value wBound  = fb.create<arith::ConstantIndexOp>(ol, window);
+      Value wM1_i32 = fb.create<arith::ConstantOp>(
+          ol, fb.getI32Type(), fb.getI32IntegerAttr(window - 1));
 
       // Capture lowerBlock result since the lambda can't return LogicalResult.
       bool innerOk = true;
       auto innerFor = fb.create<scf::ForOp>(
           ol, c0, wBound, c1, initVals,
           [&](OpBuilder &ib, Location il, Value w, ValueRange iterArgs) {
-            // elemIdx = t - (window - 1) + w
-            Value base    = ib.create<arith::SubIOp>(il, t, wM1);
-            Value elemIdx = ib.create<arith::AddIOp>(il, base, w);
+            // Tail-relative offset for this window step.  Iterating w from 0
+            // to window-1 reads oldest-to-newest, i.e. offset = window-1-w.
+            Value w_i32 =
+                ib.create<arith::IndexCastOp>(il, ib.getI32Type(), w);
+            Value offsetI32 =
+                ib.create<arith::SubIOp>(il, wM1_i32, w_i32);
 
             // Seed innerTsMap: block args as handles; reduce results as acc.
             TsMap innerTsMap;
@@ -286,7 +299,7 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
               innerTsMap[yv.getDefiningOp()->getResult(0)] = {TsKind::Scalar,
                                                               iterArgs[i]};
 
-            if (failed(lowerBlock(body, innerTsMap, elemIdx, ib, il))) {
+            if (failed(lowerBlock(body, innerTsMap, offsetI32, ib, il))) {
               innerOk = false;
               ib.create<scf::YieldOp>(il, initVals); // keep IR structurally valid
               return;
@@ -311,7 +324,7 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
     return op.emitError("kunir-to-kungpu: unhandled op in outer block");
   };
 
-  if (failed(lowerBlock(origOps, tsMap, t, fb, loc, outerHandler)))
+  if (failed(lowerBlock(origOps, tsMap, zeroOffsetI32, fb, loc, outerHandler)))
     return signalPassFailure();
 
   // ------------------------------------------------------------------
@@ -320,7 +333,7 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
   for (auto [outParam, rv] : llvm::zip(outParams, tsRetVals)) {
     auto it = tsMap.find(rv);
     assert(it != tsMap.end() && it->second.kind == TsKind::Scalar);
-    fb.create<TsPutOp>(loc, outParam, t, it->second.value);
+    fb.create<TsPutOp>(loc, outParam, it->second.value);
   }
   fb.create<scf::YieldOp>(loc);
 

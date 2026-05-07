@@ -1,5 +1,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/DialectRegistry.h"
@@ -20,6 +22,8 @@ int main(int argc, char **argv) {
   registry.insert<mlir::arith::ArithDialect>();
   registry.insert<mlir::math::MathDialect>();
   registry.insert<mlir::scf::SCFDialect>();
+  registry.insert<mlir::gpu::GPUDialect>();
+  registry.insert<mlir::LLVM::LLVMDialect>();
 
   // KunQuant dialects
   registry.insert<kunir::KunIrDialect>();

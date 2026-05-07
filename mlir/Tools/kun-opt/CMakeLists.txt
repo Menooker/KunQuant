@@ -15,9 +15,12 @@ target_link_libraries(kun-opt PRIVATE
 
   # Standard dialects used inside kunir/kungpu IR
   MLIRFuncDialect
+  MLIRFuncTransforms
   MLIRArithDialect
   MLIRMathDialect
   MLIRSCFDialect
+  MLIRGPUDialect
+  MLIRLLVMDialect
 
   # Core MLIR libraries
   MLIRIR

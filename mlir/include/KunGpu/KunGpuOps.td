@@ -57,40 +57,68 @@ def KunGpu_WindowedTempOp : KunGpu_Op<"windowed_temp", [Pure]> {
     length are encoded in the result type `!kunir.ts<elemType, N>`.
     The buffer is used as the backing store for a windowed reduction;
     it must be the `ts` operand of `ts.get` or `ts.put`.
+
+    Memory placement is decided by the kungpu-memory-planning pass, which
+    sets a discardable `kungpu.smem` boolean attribute (true → shared
+    memory, false / absent → local).  Use `isSmem()` / `setSmem(bool)`
+    rather than reading the attribute by name.
   }];
   let results = (outs KunIr_AnyTs:$result);
   let assemblyFormat = "`:` type($result) attr-dict";
+  let extraClassDeclaration = [{
+    /// Memory-planning result: true if the buffer should live in shared
+    /// memory.  Defaults to false (local) when the attribute is absent.
+    bool isSmem() {
+      auto a = (*this)->getAttrOfType<::mlir::BoolAttr>("kungpu.smem");
+      return a && a.getValue();
+    }
+    /// Set the memory-placement flag (used by kungpu-memory-planning).
+    void setSmem(bool v) {
+      (*this)->setAttr("kungpu.smem",
+                        ::mlir::BoolAttr::get(getContext(), v));
+    }
+  }];
 }
 
 def KunGpu_TsGetOp : KunGpu_Op<"ts.get", [Pure]> {
-  let summary = "Load a scalar element from a time series at a given time index";
+  let summary = "Read a scalar from a time series at a tail-relative offset";
   let description = [{
-    Loads the per-stock element from time series `ts` at time index `time`.
-    The result type must equal the element type of `ts`.
+    Reads the per-stock element from time series `ts` at `offset` steps back
+    from the tail.  The tail is the most recently-written position:
+      offset = 0  →  latest value (just written by the most recent put)
+      offset = 1  →  one step earlier
+      offset = k  →  k steps earlier  (must be < ts.maxLookback for windowed_temp)
+
+    `offset` is i32 (64-bit ops are slow on GPUs).
+    Result type must equal the element type of `ts`.
 
     Example:
-      %v = kungpu.ts.get %close[%t] : !kunir.ts<f32, inf> -> f32
+      %v   = kungpu.ts.get %close[%c0]  : !kunir.ts<f32, inf> -> f32
+      %old = kungpu.ts.get %wt[%c2_i32] : !kunir.ts<f32, 5>  -> f32
   }];
-  let arguments = (ins KunIr_AnyTs:$ts, Index:$time);
+  let arguments = (ins KunIr_AnyTs:$ts, I32:$offset);
   let results = (outs AnyFloat:$result);
   let hasVerifier = 1;
   let assemblyFormat =
-    "$ts `[` $time `]` `:` type($ts) `->` type($result) attr-dict";
+    "$ts `[` $offset `]` `:` type($ts) `->` type($result) attr-dict";
 }
 
 def KunGpu_TsPutOp : KunGpu_Op<"ts.put"> {
-  let summary = "Store a scalar value into a time series at a given time index";
+  let summary = "Append a scalar to the tail of a time series";
   let description = [{
-    Stores scalar `value` into time series `ts` at time index `time`.
+    Appends scalar `value` as the new tail of time series `ts`.  No offset:
+    a put always goes to the next writable position (advancing the tail).
+    Subsequent ts.get on the same `ts` with offset = 0 will see this value.
     `value` must have the same type as the element type of `ts`.
 
     Example:
-      kungpu.ts.put %out[%t], %v : !kunir.ts<f32, 1>, f32
+      kungpu.ts.put %wt,  %v : !kunir.ts<f32, 5>, f32
+      kungpu.ts.put %out, %v : !kunir.ts<f32, 1>, f32
   }];
-  let arguments = (ins KunIr_AnyTs:$ts, Index:$time, AnyFloat:$value);
+  let arguments = (ins KunIr_AnyTs:$ts, AnyFloat:$value);
   let hasVerifier = 1;
   let assemblyFormat =
-    "$ts `[` $time `]` `,` $value `:` type($ts) `,` type($value) attr-dict";
+    "$ts `,` $value `:` type($ts) `,` type($value) attr-dict";
 }
 
 #endif // KUNGPU_OPS_TD

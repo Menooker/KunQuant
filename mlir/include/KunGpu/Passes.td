@@ -25,4 +25,43 @@ def WindowedTempMemoryPlanning
   let dependentDialects = ["::kungpu::KunGpuDialect"];
 }
 
+def ConvertKunGpuToLLVM
+    : Pass<"convert-kungpu-to-llvm", "::mlir::ModuleOp"> {
+  let summary = "Lower kungpu ops and kunir.func to func.func + LLVM/GPU dialects";
+  let description = [{
+    Converts the KunGpu dialect to a mix of func, LLVM, GPU, arith, and scf dialects.
+
+    Type conversion:
+      !kunir.ts<T,N> → !llvm.ptr
+
+    Function signature:
+      kunir.func @f(%a: !kunir.ts<T,N>, ...) → func.func @f(i64, i64, !llvm.ptr, ...)
+      The two prepended i64 arguments are time_len and num_stocks.
+
+    Memory ops:
+      kungpu.windowed_temp → llvm.alloca circular buffer + head-state alloca
+      kungpu.ts.get        → GEP + llvm.load
+      kungpu.ts.put        → advance circular head + GEP + llvm.store
+      Global ts (function arg): TxS layout — element(t,s) = base + t*num_stocks + s
+      windowed_temp: circular index without modulo (compare + conditional subtract)
+
+    Shared memory (kungpu.smem = true):
+      A module-level llvm.mlir.global with addr_space=3 is emitted once per
+      windowed_temp; each thread accesses its own N-element slice at
+      offset threadIdx.x * N.
+
+    Thread indexing:
+      kungpu.time_length       → arith.index_cast %time_len : i64 to index
+      kungpu.stock_id          → blockIdx.x * blockDim.x + threadIdx.x
+      kungpu.block_stock_count → blockDim.x
+  }];
+  let constructor = "::kungpu::createConvertKunGpuToLLVMPass()";
+  let dependentDialects = [
+    "::mlir::func::FuncDialect",
+    "::mlir::LLVM::LLVMDialect",
+    "::mlir::arith::ArithDialect",
+    "::mlir::gpu::GPUDialect"
+  ];
+}
+
 #endif // KUNGPU_PASSES_TD

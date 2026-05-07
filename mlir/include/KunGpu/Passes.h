@@ -12,6 +12,7 @@ namespace kungpu {
 #include "KunGpu/Passes.h.inc"
 
 std::unique_ptr<mlir::Pass> createWindowedTempMemoryPlanningPass();
+std::unique_ptr<mlir::Pass> createConvertKunGpuToLLVMPass();
 
 #define GEN_PASS_REGISTRATION
 #include "KunGpu/Passes.h.inc"
