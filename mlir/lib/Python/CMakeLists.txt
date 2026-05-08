@@ -10,7 +10,10 @@
 string(REPLACE "-Wl,-z,defs" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
 string(REPLACE "-Wl,-z,defs" "" CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS}")
 
-pybind11_add_module(kun_mlir SHARED MlirBinding.cpp)
+pybind11_add_module(kun_mlir SHARED
+  MlirBinding.cpp
+  IRBuilder.cpp
+)
 
 # Co-locate the binding with libKunCudaRuntime.so so $ORIGIN
 # (CMAKE_INSTALL_RPATH set at top level) resolves dependencies as

@@ -92,7 +92,7 @@ def run_one(N: int, expected_placement: str, target: str,
     exe = kun_mlir.compile(mod,
                             graph_inputs=["a", "b"],
                             graph_outputs=["out"],
-                            target_cpu=target, opt_level=3)
+                            gpu_arch=target, opt_level=3)
     print(f"  kernels={exe.kernel_names}  warps_per_cta={exe.warps_per_cta}  "
            f"vector_size={exe.vector_size}  cubin={len(exe.cubin)} bytes")
 

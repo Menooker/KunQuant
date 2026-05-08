@@ -13,32 +13,13 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "mlir/IR/AsmState.h"
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/DialectRegistry.h"
-#include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/OwningOpRef.h"
-#include "mlir/Parser/Parser.h"
-#include "mlir/Support/LLVM.h"
-
-// Dialect registrations
-#include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/ControlFlow/IR/ControlFlow.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/GPU/IR/GPUDialect.h"
-#include "mlir/Dialect/Index/IR/IndexDialect.h"
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-#include "mlir/Dialect/LLVMIR/NVVMDialect.h"
-#include "mlir/Dialect/Math/IR/Math.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "PyModule.h"     // shared MLIRContext + ModuleOp wrapper
+#include "IRBuilder.h"    // pybind class for programmatic kunir construction
 
 #include "KunCuda/Runtime.h"
-#include "KunGpu/KunGpuDialect.h"
 #include "KunGpu/PtxBackend.h"
-#include "KunIr/KunIrDialect.h"
 
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include <memory>
 #include <sstream>
@@ -48,67 +29,23 @@
 
 namespace py = pybind11;
 
+using kun_mlir_py::PyModule;
+
 namespace {
-
-//===----------------------------------------------------------------------===//
-// MLIR module wrapper
-//===----------------------------------------------------------------------===//
-
-class PyModule {
-public:
-  PyModule()
-      : ctx(std::make_unique<mlir::MLIRContext>(makeRegistry(),
-                                                  mlir::MLIRContext::Threading::DISABLED)) {
-    ctx->loadAllAvailableDialects();
-  }
-
-  static mlir::DialectRegistry makeRegistry() {
-    mlir::DialectRegistry registry;
-    registry.insert<mlir::arith::ArithDialect>();
-    registry.insert<mlir::cf::ControlFlowDialect>();
-    registry.insert<mlir::func::FuncDialect>();
-    registry.insert<mlir::gpu::GPUDialect>();
-    registry.insert<mlir::index::IndexDialect>();
-    registry.insert<mlir::LLVM::LLVMDialect>();
-    registry.insert<mlir::math::MathDialect>();
-    registry.insert<mlir::NVVM::NVVMDialect>();
-    registry.insert<mlir::scf::SCFDialect>();
-    registry.insert<kunir::KunIrDialect>();
-    registry.insert<kungpu::KunGpuDialect>();
-    return registry;
-  }
-
-  static std::unique_ptr<PyModule> parse(const std::string &text) {
-    auto pm = std::make_unique<PyModule>();
-    pm->module = mlir::parseSourceString<mlir::ModuleOp>(text, pm->ctx.get());
-    if (!pm->module)
-      throw std::runtime_error("kun_mlir.parse: failed to parse MLIR text");
-    return pm;
-  }
-
-  std::string toString() const {
-    std::string out;
-    llvm::raw_string_ostream os(out);
-    module.get().print(os);
-    os.flush();
-    return out;
-  }
-
-  std::unique_ptr<mlir::MLIRContext> ctx;
-  mlir::OwningOpRef<mlir::ModuleOp> module;
-};
 
 //===----------------------------------------------------------------------===//
 // One-shot helpers
 //===----------------------------------------------------------------------===//
 
-static std::string pyLowerToPtx(PyModule &pm, const std::string &targetCpu,
+static std::string pyLowerToPtx(PyModule &pm, const std::string &gpuArch,
                                   const std::string &targetTriple,
                                   const std::string &targetFeatures,
                                   unsigned optLevel,
                                   unsigned sizeLevel) {
   kungpu::PtxCompileOptions opts;
-  if (!targetCpu.empty())      opts.targetCpu      = targetCpu;
+  // `targetCpu` is what LLVM's TargetMachine API calls the SM arch — for
+  // NVPTX the "CPU" string IS the GPU compute capability ("sm_80" etc.).
+  if (!gpuArch.empty())        opts.targetCpu      = gpuArch;
   if (!targetTriple.empty())   opts.targetTriple   = targetTriple;
   if (!targetFeatures.empty()) opts.targetFeatures = targetFeatures;
   opts.optLevel  = optLevel;
@@ -239,7 +176,7 @@ static std::unique_ptr<kun_cuda::Executable>
 pyCompile(PyModule &pm,
             const std::vector<std::string> &graphInputs,
             const std::vector<std::string> &graphOutputs,
-            const std::string &targetCpu,
+            const std::string &gpuArch,
             const std::string &targetTriple,
             const std::string &targetFeatures, unsigned optLevel,
             unsigned sizeLevel, const std::string &ptxasPath) {
@@ -251,14 +188,14 @@ pyCompile(PyModule &pm,
         "kun_mlir.compile: graph_outputs cannot be empty");
 
   kungpu::PtxCompileOptions popts;
-  if (!targetCpu.empty())      popts.targetCpu      = targetCpu;
+  if (!gpuArch.empty())        popts.targetCpu      = gpuArch;
   if (!targetTriple.empty())   popts.targetTriple   = targetTriple;
   if (!targetFeatures.empty()) popts.targetFeatures = targetFeatures;
   popts.optLevel  = optLevel;
   popts.sizeLevel = sizeLevel;
 
   kungpu::PtxToCubinOptions copts;
-  copts.gpuArch   = targetCpu.empty() ? "sm_80" : targetCpu;
+  copts.gpuArch   = gpuArch.empty() ? "sm_80" : gpuArch;
   copts.ptxasPath = ptxasPath;
 
   kun_cuda::ExecutableData data;
@@ -278,6 +215,9 @@ PYBIND11_MODULE(kun_mlir, m) {
   m.doc() = "Bindings for the KunQuant MLIR compiler (kunir → PTX → CUBIN "
              "→ launch).";
 
+  // Programmatic kunir construction (Value/Type opaque wrappers, IRBuilder).
+  kun_mlir_py::registerIRBuilder(m);
+
   py::class_<PyModule>(m, "ModuleOp")
       .def("to_string", &PyModule::toString,
             "Return the textual MLIR form of the module.")
@@ -291,7 +231,7 @@ PYBIND11_MODULE(kun_mlir, m) {
 
   m.def("lower_to_ptx", &pyLowerToPtx,
          py::arg("module"),
-         py::arg("target_cpu")     = "sm_80",
+         py::arg("gpu_arch")       = "sm_80",
          py::arg("target_triple")  = "nvptx64-nvidia-cuda",
          py::arg("target_features") = "",
          py::arg("opt_level")      = 3u,
@@ -354,7 +294,7 @@ PYBIND11_MODULE(kun_mlir, m) {
          py::arg("module"),
          py::arg("graph_inputs"),
          py::arg("graph_outputs"),
-         py::arg("target_cpu")     = "sm_80",
+         py::arg("gpu_arch")       = "sm_80",
          py::arg("target_triple")  = "nvptx64-nvidia-cuda",
          py::arg("target_features") = "",
          py::arg("opt_level")      = 3u,

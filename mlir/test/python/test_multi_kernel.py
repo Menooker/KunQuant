@@ -63,7 +63,7 @@ def main() -> int:
     exe = kun_mlir.compile(mod,
                             graph_inputs=["a", "b", "c"],
                             graph_outputs=["out"],
-                            target_cpu=args.target, opt_level=3)
+                            gpu_arch=args.target, opt_level=3)
 
     print(f"  kernel_names           = {exe.kernel_names}")
     print(f"  num_kernels            = {exe.num_kernels}")

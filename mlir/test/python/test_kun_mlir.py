@@ -53,7 +53,7 @@ def main() -> int:
 
     print()
     print(f"=== lower_to_ptx (target={args.target}, O3) ===")
-    ptx = kun_mlir.lower_to_ptx(mod, target_cpu=args.target, opt_level=3)
+    ptx = kun_mlir.lower_to_ptx(mod, gpu_arch=args.target, opt_level=3)
     assert "test_addsum" in ptx
     print(f"ok — produced {len(ptx)} bytes of PTX text")
 
@@ -71,7 +71,7 @@ def main() -> int:
     exe = kun_mlir.compile(mod2,
                             graph_inputs=["a", "b"],
                             graph_outputs=["sum"],
-                            target_cpu=args.target, opt_level=3)
+                            gpu_arch=args.target, opt_level=3)
     print(f"  kernel_names           = {exe.kernel_names}")
     print(f"  num_kernels            = {exe.num_kernels}")
     print(f"  launch_order           = {exe.launch_order}")
