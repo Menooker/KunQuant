@@ -83,6 +83,7 @@ def run_one(N: int, expected_placement: str, target: str,
               T: int = 64, S: int = 2048) -> int:
     import kun_mlir
     import cupy as cp
+    from KunQuant.jit.cuda import find_cuda_toolkit
 
     print(f"=== N = {N}  ({expected_placement} temp buffer) ===")
     assert_planning(N, warps_per_cta, smem_size, expected_placement)
@@ -92,7 +93,8 @@ def run_one(N: int, expected_placement: str, target: str,
     exe = kun_mlir.compile(mod,
                             graph_inputs=["a", "b"],
                             graph_outputs=["out"],
-                            gpu_arch=target, opt_level=3)
+                            gpu_arch=target, opt_level=3,
+                            toolkit_path=find_cuda_toolkit())
     print(f"  kernels={exe.kernel_names}  warps_per_cta={exe.warps_per_cta}  "
            f"vector_size={exe.vector_size}  cubin={len(exe.cubin)} bytes")
 

@@ -54,6 +54,7 @@ def main() -> int:
 
     import kun_mlir
     import cupy as cp
+    from KunQuant.jit.cuda import find_cuda_toolkit
 
     cp.cuda.Device(0).use()
     _ = cp.zeros((1,), dtype=cp.float32)
@@ -63,7 +64,8 @@ def main() -> int:
     exe = kun_mlir.compile(mod,
                             graph_inputs=["a", "b", "c"],
                             graph_outputs=["out"],
-                            gpu_arch=args.target, opt_level=3)
+                            gpu_arch=args.target, opt_level=3,
+                            toolkit_path=find_cuda_toolkit())
 
     print(f"  kernel_names           = {exe.kernel_names}")
     print(f"  num_kernels            = {exe.num_kernels}")

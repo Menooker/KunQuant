@@ -1,12 +1,16 @@
-//===- MlirBinding.cpp - Python bindings for the kunir → PTX flow ------===//
+//===- MlirBinding.cpp - Python bindings for the kunir → cubin flow ----===//
 //
 // Exposes:
 //   kun_mlir.parse(text)            → ModuleOp     (loads MLIR text)
 //   ModuleOp.to_string() / __str__  → str          (dumps the module)
-//   kun_mlir.lower_to_ptx(mod, …)   → str          (kunir → PTX)
-//   kun_mlir.ptx_to_cubin(ptx, …)   → bytes        (PTX → CUBIN via ptxas)
+//   kun_mlir.lower_to_ptx(mod, …)   → str          (kunir → PTX, debug only)
 //   kun_mlir.compile(mod, …)        → Executable   (kunir → loadable kernel)
 //   Executable.launch({name: cupy}) → None         (cuLaunchKernel + sync)
+//
+// `compile` is the main path; `lower_to_ptx` is for inspecting the
+// intermediate PTX text that the upstream `gpu-module-to-binary` pass
+// produces (with `format=isa`).  Both go through the same lowering
+// pipeline — see PtxBackend.h.
 //
 //===----------------------------------------------------------------------===//
 
@@ -34,44 +38,25 @@ using kun_mlir_py::PyModule;
 namespace {
 
 //===----------------------------------------------------------------------===//
-// One-shot helpers
+// PTX inspection (debug)
 //===----------------------------------------------------------------------===//
 
 static std::string pyLowerToPtx(PyModule &pm, const std::string &gpuArch,
                                   const std::string &targetTriple,
                                   const std::string &targetFeatures,
                                   unsigned optLevel,
-                                  unsigned sizeLevel) {
+                                  const std::string &toolkitPath) {
   kungpu::PtxCompileOptions opts;
-  // `targetCpu` is what LLVM's TargetMachine API calls the SM arch — for
-  // NVPTX the "CPU" string IS the GPU compute capability ("sm_80" etc.).
   if (!gpuArch.empty())        opts.targetCpu      = gpuArch;
   if (!targetTriple.empty())   opts.targetTriple   = targetTriple;
   if (!targetFeatures.empty()) opts.targetFeatures = targetFeatures;
-  opts.optLevel  = optLevel;
-  opts.sizeLevel = sizeLevel;
+  opts.optLevel    = optLevel;
+  opts.toolkitPath = toolkitPath;
 
   std::string ptx;
   if (failed(kungpu::compileKunIrToPtx(pm.module.get(), opts, ptx)))
     throw std::runtime_error("kun_mlir.lower_to_ptx failed");
   return ptx;
-}
-
-static py::bytes pyPtxToCubin(const std::string &ptx,
-                                const std::string &gpuArch,
-                                const std::vector<std::string> &extraArgs,
-                                const std::string &ptxasPath) {
-  kungpu::PtxToCubinOptions opts;
-  if (!gpuArch.empty())   opts.gpuArch   = gpuArch;
-  if (!ptxasPath.empty()) opts.ptxasPath = ptxasPath;
-  opts.extraArgs = extraArgs;
-
-  std::vector<char> cubin;
-  std::string errMsg;
-  if (failed(kungpu::compilePtxToCubin(ptx, opts, cubin, errMsg)))
-    throw std::runtime_error(errMsg.empty() ? "kun_mlir.ptx_to_cubin failed"
-                                              : errMsg);
-  return py::bytes(cubin.data(), cubin.size());
 }
 
 //===----------------------------------------------------------------------===//
@@ -179,7 +164,7 @@ pyCompile(PyModule &pm,
             const std::string &gpuArch,
             const std::string &targetTriple,
             const std::string &targetFeatures, unsigned optLevel,
-            unsigned sizeLevel, const std::string &ptxasPath) {
+            const std::string &toolkitPath) {
   if (graphInputs.empty())
     throw std::runtime_error(
         "kun_mlir.compile: graph_inputs cannot be empty");
@@ -187,20 +172,15 @@ pyCompile(PyModule &pm,
     throw std::runtime_error(
         "kun_mlir.compile: graph_outputs cannot be empty");
 
-  kungpu::PtxCompileOptions popts;
-  if (!gpuArch.empty())        popts.targetCpu      = gpuArch;
-  if (!targetTriple.empty())   popts.targetTriple   = targetTriple;
-  if (!targetFeatures.empty()) popts.targetFeatures = targetFeatures;
-  popts.optLevel  = optLevel;
-  popts.sizeLevel = sizeLevel;
-
-  kungpu::PtxToCubinOptions copts;
-  copts.gpuArch   = gpuArch.empty() ? "sm_80" : gpuArch;
-  copts.ptxasPath = ptxasPath;
+  kungpu::PtxCompileOptions opts;
+  if (!gpuArch.empty())        opts.targetCpu      = gpuArch;
+  if (!targetTriple.empty())   opts.targetTriple   = targetTriple;
+  if (!targetFeatures.empty()) opts.targetFeatures = targetFeatures;
+  opts.optLevel    = optLevel;
+  opts.toolkitPath = toolkitPath;
 
   kun_cuda::ExecutableData data;
-  if (failed(kungpu::compileKunIrToExecutable(pm.module.get(), popts, copts,
-                                                data)))
+  if (failed(kungpu::compileKunIrToExecutable(pm.module.get(), opts, data)))
     throw std::runtime_error("kun_mlir.compile failed");
   // Graph topology is a runtime concern — fill it in here, just before
   // handing off to Executable's ctor (which validates + plans).
@@ -235,15 +215,10 @@ PYBIND11_MODULE(kun_mlir, m) {
          py::arg("target_triple")  = "nvptx64-nvidia-cuda",
          py::arg("target_features") = "",
          py::arg("opt_level")      = 3u,
-         py::arg("size_level")     = 0u,
-         "Lower kunir → PTX text.  Returns a Python str.");
-
-  m.def("ptx_to_cubin", &pyPtxToCubin,
-         py::arg("ptx"),
-         py::arg("gpu_arch")   = "sm_80",
-         py::arg("extra_args") = std::vector<std::string>{},
-         py::arg("ptxas_path") = "",
-         "Assemble PTX → CUBIN via ptxas.  Returns bytes.");
+         py::arg("toolkit_path")   = "",
+         "Lower kunir → PTX text via the upstream `gpu-module-to-binary` "
+         "pass with `format=isa`.  Debug / inspection only — the main "
+         "compile path goes straight to cubin.");
 
   py::class_<kun_cuda::Executable>(m, "Executable")
       .def_property_readonly("input_names",   &kun_cuda::Executable::graphInputs,
@@ -298,12 +273,19 @@ PYBIND11_MODULE(kun_mlir, m) {
          py::arg("target_triple")  = "nvptx64-nvidia-cuda",
          py::arg("target_features") = "",
          py::arg("opt_level")      = 3u,
-         py::arg("size_level")     = 0u,
-         py::arg("ptxas_path")     = "",
-         "Compile a kunir module all the way to a loaded Executable "
-         "(kunir → LLVM dialect → LLVM IR → PTX → CUBIN → cuModuleLoad). "
-         "graph_inputs / graph_outputs name the buffers that flow in/out "
-         "of the whole kernel graph; everything else produced by the "
-         "kernels is treated as an intermediate and gets a runtime-managed "
-         "slot.");
+         py::arg("toolkit_path")   = "",
+         "Compile a kunir module all the way to a loaded Executable.\n"
+         "\n"
+         "Pipeline: kunir → LLVM dialect → upstream `gpu-module-to-binary`\n"
+         "(format=bin) which handles libdevice linking + LLVM optimization\n"
+         "+ PTX emission + ptxas, → cuModuleLoad on the resulting cubin.\n"
+         "\n"
+         "graph_inputs / graph_outputs name the buffers that flow in/out\n"
+         "of the whole kernel graph; everything else produced by the\n"
+         "kernels is treated as an intermediate and gets a runtime-managed\n"
+         "slot.\n"
+         "\n"
+         "toolkit_path: optional path to the CUDA toolkit (where\n"
+         "libdevice.10.bc and ptxas live).  Empty → search CUDA_HOME /\n"
+         "CUDA_PATH / standard install locations.");
 }

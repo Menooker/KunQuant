@@ -34,11 +34,18 @@ add_mlir_dialect_library(MLIRKunGpuDialect
   MLIRGPUToNVVMTransforms
   MLIRNVVMDialect
 
-  # LLVM IR translation + PTX emission
+  # Main path: kunir → llvm dialect → upstream gpu-module-to-binary.
+  # NVVMTarget supplies the serializeToObject impl that handles libdevice
+  # linking + LLVM optimization + PTX emission + ptxas invocation.
+  MLIRGPUTransforms
+  MLIRNVVMTarget
+  MLIRTargetLLVM
+
+  # LLVM IR translation registrations consumed transitively by
+  # NVVMTargetAttrImpl::serializeToObject.
   MLIRTargetLLVMIRExport
   MLIRBuiltinToLLVMIRTranslation
   MLIRLLVMToLLVMIRTranslation
   MLIRNVVMToLLVMIRTranslation
   MLIRGPUToLLVMIRTranslation
-  MLIRExecutionEngineUtils
 )

@@ -13,6 +13,7 @@ string(REPLACE "-Wl,-z,defs" "" CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER
 pybind11_add_module(kun_mlir SHARED
   MlirBinding.cpp
   IRBuilder.cpp
+  PyModule.cpp
 )
 
 # Co-locate the binding with libKunCudaRuntime.so so $ORIGIN
@@ -52,6 +53,11 @@ target_link_libraries(kun_mlir PRIVATE
   MLIRIndexToLLVM
   MLIRGPUToNVVMTransforms
   MLIRReconcileUnrealizedCasts
+
+  # Required for `gpu-module-to-binary` (the upstream pass we drive in
+  # PtxBackend.cpp) + the NVVM target serializer it dispatches to.
+  MLIRGPUTransforms
+  MLIRNVVMTarget
 
   # Runtime side — owns cuda.h + libcuda; we just hand it ExecutableData
   # and call launch().

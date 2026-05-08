@@ -21,6 +21,7 @@ Scope (v0):
 """
 
 from __future__ import annotations
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -29,6 +30,55 @@ import kun_mlir
 from KunQuant.Driver import optimize
 from KunQuant.Stage import Function
 from KunQuant.passes.CodegenMLIR import TargetSpec, translate_function
+
+
+# Standard locations searched when CudaCompilerConfig.toolkit_path is left
+# empty.  A toolkit dir must contain `nvvm/libdevice/libdevice.10.bc` (the
+# upstream `gpu-module-to-binary` pass links libdevice into the LLVM
+# module) and `bin/ptxas` (PTX → cubin).
+_TOOLKIT_ENV_VARS  = ("CUDA_HOME", "CUDA_PATH", "CUDA_TOOLKIT_PATH",
+                       "CUDA_ROOT")
+_TOOLKIT_FALLBACKS = ("/usr/local/cuda", "/opt/cuda", "/opt/nvidia/cuda")
+
+
+def _is_toolkit_dir(path: str) -> bool:
+    return (path
+            and os.path.isfile(os.path.join(path, "nvvm", "libdevice",
+                                              "libdevice.10.bc"))
+            and os.path.isfile(os.path.join(path, "bin", "ptxas")))
+
+
+def find_cuda_toolkit(override: str = "") -> str:
+    """Locate a CUDA toolkit root suitable for `gpu-module-to-binary`.
+
+    Search order:
+      1. `override` (if non-empty and looks like a toolkit dir)
+      2. $CUDA_HOME / $CUDA_PATH / $CUDA_TOOLKIT_PATH / $CUDA_ROOT
+      3. Standard install paths (/usr/local/cuda, /opt/cuda, …)
+
+    Raises FileNotFoundError if nothing usable is found — the message
+    lists every location consulted so the caller can fix the env.
+    """
+    tried = []
+    if override:
+        tried.append(f"override={override!r}")
+        if _is_toolkit_dir(override):
+            return override
+    for env in _TOOLKIT_ENV_VARS:
+        val = os.environ.get(env, "")
+        if val:
+            tried.append(f"${env}={val!r}")
+            if _is_toolkit_dir(val):
+                return val
+    for fallback in _TOOLKIT_FALLBACKS:
+        tried.append(f"fallback={fallback!r}")
+        if _is_toolkit_dir(fallback):
+            return fallback
+    raise FileNotFoundError(
+        "Could not locate a CUDA toolkit (need "
+        "<root>/nvvm/libdevice/libdevice.10.bc and <root>/bin/ptxas). "
+        "Searched: " + ", ".join(tried) +
+        ". Set CUDA_PATH or pass toolkit_path explicitly.")
 
 
 @dataclass
@@ -49,9 +99,11 @@ class CudaCompilerConfig:
     smem_size:     int = 49152
     vector_size:   int = 1
 
-    # ptx → cubin
+    # LLVM optimization level (forwarded to #nvvm.target<O = ...>).
     opt_level:     int  = 3
-    ptxas_path:    str  = ""
+    # Path to the CUDA toolkit (where libdevice.10.bc + ptxas live).
+    # Empty → upstream search: CUDA_HOME / CUDA_PATH / standard locations.
+    toolkit_path:  str  = ""
 
     # Pass-list options forwarded to optimize().  We seed reasonable GPU
     # defaults; user-supplied keys override.
@@ -103,6 +155,11 @@ def compileit(f: Function, cfg: CudaCompilerConfig) -> kun_mlir.Executable:
             f"CudaCompilerConfig.dtype must be 'float' or 'double', got "
             f"{cfg.dtype!r}")
 
+    # Resolve the CUDA toolkit before invoking C++.  Auto-search if the
+    # user didn't pass an explicit path.  Failure here gives a useful
+    # message; failure later (in ptxas / libdevice link) is opaque.
+    toolkit_path = find_cuda_toolkit(cfg.toolkit_path)
+
     # 1.  Same optimizer pipeline the CPU path runs.  This is where
     #     WindowedSum etc. decompose into ForeachBackWindow + Reduce.
     options = _gpu_pass_options(cfg)
@@ -125,7 +182,7 @@ def compileit(f: Function, cfg: CudaCompilerConfig) -> kun_mlir.Executable:
         graph_outputs=out_names,
         gpu_arch=cfg.gpu_arch,
         opt_level=cfg.opt_level,
-        ptxas_path=cfg.ptxas_path,
+        toolkit_path=toolkit_path,
     )
 
 

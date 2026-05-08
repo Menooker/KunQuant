@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end test for the `kun_mlir` Python bindings.
 
-  parse → to_string → lower_to_ptx → ptx_to_cubin → compile → launch
+  parse → to_string → lower_to_ptx (debug only) → compile → launch
 
 Usage:
     PATH=$CUDA_BIN:$PATH PYTHONPATH=<build>/mlir/lib/Python \
@@ -39,6 +39,7 @@ def main() -> int:
     import kun_mlir
     import cupy as cp
     import numpy as np
+    from KunQuant.jit.cuda import find_cuda_toolkit
 
     # Force-initialise the CUDA driver + create the primary context now,
     # so subsequent kun_mlir.compile() / Executable.launch() find one.
@@ -51,27 +52,27 @@ def main() -> int:
     assert "kunir.func @test_addsum" in text, "module text missing kunir.func"
     print("ok — module round-trips through parse/to_string")
 
+    toolkit = find_cuda_toolkit()
+
     print()
-    print(f"=== lower_to_ptx (target={args.target}, O3) ===")
-    ptx = kun_mlir.lower_to_ptx(mod, gpu_arch=args.target, opt_level=3)
+    print(f"=== lower_to_ptx (target={args.target}, O3, debug only) ===")
+    # Debug entry point — same lowering pipeline as compile() but stops
+    # at PTX text via gpu-module-to-binary{format=isa}.  Mutates `mod`
+    # (replaces the gpu.module with a gpu.binary), so we re-parse for
+    # the main compile step below.
+    ptx = kun_mlir.lower_to_ptx(mod, gpu_arch=args.target, opt_level=3,
+                                  toolkit_path=toolkit)
     assert "test_addsum" in ptx
     print(f"ok — produced {len(ptx)} bytes of PTX text")
 
     print()
-    print(f"=== ptx_to_cubin ({args.target}) ===")
-    cubin = kun_mlir.ptx_to_cubin(ptx, gpu_arch=args.target)
-    assert isinstance(cubin, bytes) and cubin[:4] == b"\x7fELF"
-    print(f"ok — produced {len(cubin)} bytes of CUBIN (ELF magic verified)")
-
-    print()
     print(f"=== compile (all-in-one) ===")
-    # `mod` was already mutated by lower_to_ptx above; re-parse so compile()
-    # gets a fresh kunir.func module.
     mod2 = kun_mlir.parse(SAMPLE_KUNIR)
     exe = kun_mlir.compile(mod2,
                             graph_inputs=["a", "b"],
                             graph_outputs=["sum"],
-                            gpu_arch=args.target, opt_level=3)
+                            gpu_arch=args.target, opt_level=3,
+                            toolkit_path=toolkit)
     print(f"  kernel_names           = {exe.kernel_names}")
     print(f"  num_kernels            = {exe.num_kernels}")
     print(f"  launch_order           = {exe.launch_order}")
