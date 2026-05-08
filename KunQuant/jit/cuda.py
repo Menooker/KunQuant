@@ -1,7 +1,7 @@
 """GPU JIT entry point for KunQuant.
 
 Mirror of `KunQuant.jit.cfake.compileit` but targets a CUDA backend
-through the kun_mlir / kunir pipeline.  Reuses the existing Driver pass
+through the KunMLIR / kunir pipeline.  Reuses the existing Driver pass
 list (`Driver.optimize`) so any IR rewrites the CPU path benefits from
 also apply here — only the codegen layer is replaced.
 
@@ -25,7 +25,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-import kun_mlir
+from KunQuant.jit import KunMLIR
 
 from KunQuant.Driver import optimize
 from KunQuant.Stage import Function
@@ -139,8 +139,8 @@ def _to_dtype_token(dtype: str) -> str:
                        f"lowers float on GPU)")
 
 
-def compileit(f: Function, cfg: CudaCompilerConfig) -> kun_mlir.Executable:
-    """Compile a single KunQuant Function to a GPU `kun_mlir.Executable`.
+def compileit(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.Executable:
+    """Compile a single KunQuant Function to a GPU `KunMLIR.Executable`.
 
     The Function is mutated in place by Driver.optimize() (same as the
     CPU path).  Inputs/Outputs declared via `Input(name)` / `Output(...,
@@ -161,18 +161,18 @@ def compileit(f: Function, cfg: CudaCompilerConfig) -> kun_mlir.Executable:
     options = _gpu_pass_options(cfg)
     optimize(f, options)
 
-    # 2.  Translate the post-optimize IR to a kun_mlir module.
+    # 2.  Translate the post-optimize IR to a KunMLIR module.
     target = TargetSpec(occupancy=cfg.occupancy,
                           warps_per_cta=cfg.warps_per_cta,
                           smem_size=cfg.smem_size,
                           vector_size=cfg.vector_size)
-    ir = kun_mlir.IRBuilder()
+    ir = KunMLIR.IRBuilder()
     in_names, out_names = translate_function(
         f, target, ir, dtype=_to_dtype_token(cfg.dtype))
     mod = ir.finish()
 
-    # 3.  Hand off to the kun_mlir compile pipeline.
-    return kun_mlir.compile(
+    # 3.  Hand off to the KunMLIR compile pipeline.
+    return KunMLIR.compile(
         mod,
         graph_inputs=in_names,
         graph_outputs=out_names,
@@ -182,15 +182,15 @@ def compileit(f: Function, cfg: CudaCompilerConfig) -> kun_mlir.Executable:
     )
 
 
-def to_mlir(f: Function, cfg: CudaCompilerConfig) -> kun_mlir.ModuleOp:
+def to_mlir(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.ModuleOp:
     """Run the same passes + translator as `compileit`, but return the
-    kun_mlir module before PTX/CUBIN.  Useful for debugging the IR."""
+    KunMLIR module before PTX/CUBIN.  Useful for debugging the IR."""
     options = _gpu_pass_options(cfg)
     optimize(f, options)
     target = TargetSpec(occupancy=cfg.occupancy,
                           warps_per_cta=cfg.warps_per_cta,
                           smem_size=cfg.smem_size,
                           vector_size=cfg.vector_size)
-    ir = kun_mlir.IRBuilder()
+    ir = KunMLIR.IRBuilder()
     translate_function(f, target, ir, dtype=_to_dtype_token(cfg.dtype))
     return ir.finish()

@@ -81,7 +81,7 @@ def assert_planning(N: int, warps_per_cta: int, smem_size: int,
 def run_one(N: int, expected_placement: str, target: str,
               warps_per_cta: int = 4, smem_size: int = 49152,
               T: int = 64, S: int = 2048) -> int:
-    import kun_mlir
+    from KunQuant.jit import KunMLIR
     import cupy as cp
     from KunQuant.jit.cuda import find_cuda_toolkit
 
@@ -89,8 +89,8 @@ def run_one(N: int, expected_placement: str, target: str,
     assert_planning(N, warps_per_cta, smem_size, expected_placement)
 
     ir = build_ir(N, warps_per_cta=warps_per_cta, smem_size=smem_size)
-    mod = kun_mlir.parse(ir)
-    exe = kun_mlir.compile(mod,
+    mod = KunMLIR.parse(ir)
+    exe = KunMLIR.compile(mod,
                             graph_inputs=["a", "b"],
                             graph_outputs=["out"],
                             gpu_arch=target, opt_level=3,

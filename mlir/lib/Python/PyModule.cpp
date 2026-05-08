@@ -86,7 +86,7 @@ std::unique_ptr<PyModule> PyModule::parse(const std::string &text) {
   auto pm = std::make_unique<PyModule>();
   pm->module = mlir::parseSourceString<mlir::ModuleOp>(text, pm->ctx.get());
   if (!pm->module)
-    throw std::runtime_error("kun_mlir.parse: failed to parse MLIR text");
+    throw std::runtime_error("KunMLIR.parse: failed to parse MLIR text");
   return pm;
 }
 

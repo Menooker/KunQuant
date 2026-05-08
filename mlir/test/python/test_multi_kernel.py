@@ -52,7 +52,7 @@ def main() -> int:
     ap.add_argument("-S", "--num-stocks", type=int, default=2048)
     args = ap.parse_args()
 
-    import kun_mlir
+    from KunQuant.jit import KunMLIR
     import cupy as cp
     from KunQuant.jit.cuda import find_cuda_toolkit
 
@@ -60,8 +60,8 @@ def main() -> int:
     _ = cp.zeros((1,), dtype=cp.float32)
 
     print("=== compile two-kernel graph ===")
-    mod = kun_mlir.parse(SAMPLE_KUNIR)
-    exe = kun_mlir.compile(mod,
+    mod = KunMLIR.parse(SAMPLE_KUNIR)
+    exe = KunMLIR.compile(mod,
                             graph_inputs=["a", "b", "c"],
                             graph_outputs=["out"],
                             gpu_arch=args.target, opt_level=3,

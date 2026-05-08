@@ -3,7 +3,7 @@
 
 Builds a KunQuant Function with the high-level Op API, runs the same
 Driver.optimize() pipeline the CPU compileit uses, then compiles to a
-CUDA Executable via kun_mlir and validates against numpy.
+CUDA Executable via KunMLIR and validates against numpy.
 
 Three factors are exercised:
   * elemwise:   out = (a + b) * a - b * b           (binary elemwise only;

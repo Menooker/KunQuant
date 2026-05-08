@@ -1,10 +1,10 @@
 //===- MlirBinding.cpp - Python bindings for the kunir → cubin flow ----===//
 //
 // Exposes:
-//   kun_mlir.parse(text)            → ModuleOp     (loads MLIR text)
+//   KunMLIR.parse(text)            → ModuleOp     (loads MLIR text)
 //   ModuleOp.to_string() / __str__  → str          (dumps the module)
-//   kun_mlir.lower_to_ptx(mod, …)   → str          (kunir → PTX, debug only)
-//   kun_mlir.compile(mod, …)        → Executable   (kunir → loadable kernel)
+//   KunMLIR.lower_to_ptx(mod, …)   → str          (kunir → PTX, debug only)
+//   KunMLIR.compile(mod, …)        → Executable   (kunir → loadable kernel)
 //   Executable.launch({name: cupy}) → None         (cuLaunchKernel + sync)
 //
 // `compile` is the main path; `lower_to_ptx` is for inspecting the
@@ -55,7 +55,7 @@ static std::string pyLowerToPtx(PyModule &pm, const std::string &gpuArch,
 
   std::string ptx;
   if (failed(kungpu::compileKunIrToPtx(pm.module.get(), opts, ptx)))
-    throw std::runtime_error("kun_mlir.lower_to_ptx failed");
+    throw std::runtime_error("KunMLIR.lower_to_ptx failed");
   return ptx;
 }
 
@@ -167,10 +167,10 @@ pyCompile(PyModule &pm,
             const std::string &toolkitPath) {
   if (graphInputs.empty())
     throw std::runtime_error(
-        "kun_mlir.compile: graph_inputs cannot be empty");
+        "KunMLIR.compile: graph_inputs cannot be empty");
   if (graphOutputs.empty())
     throw std::runtime_error(
-        "kun_mlir.compile: graph_outputs cannot be empty");
+        "KunMLIR.compile: graph_outputs cannot be empty");
 
   kungpu::PtxCompileOptions opts;
   if (!gpuArch.empty())        opts.targetCpu      = gpuArch;
@@ -181,7 +181,7 @@ pyCompile(PyModule &pm,
 
   kun_cuda::ExecutableData data;
   if (failed(kungpu::compileKunIrToExecutable(pm.module.get(), opts, data)))
-    throw std::runtime_error("kun_mlir.compile failed");
+    throw std::runtime_error("KunMLIR.compile failed");
   // Graph topology is a runtime concern — fill it in here, just before
   // handing off to Executable's ctor (which validates + plans).
   data.graphInputs  = graphInputs;
@@ -191,7 +191,7 @@ pyCompile(PyModule &pm,
 
 } // namespace
 
-PYBIND11_MODULE(kun_mlir, m) {
+PYBIND11_MODULE(KunMLIR, m) {
   m.doc() = "Bindings for the KunQuant MLIR compiler (kunir → PTX → CUBIN "
              "→ launch).";
 
@@ -203,7 +203,7 @@ PYBIND11_MODULE(kun_mlir, m) {
             "Return the textual MLIR form of the module.")
       .def("__str__",  &PyModule::toString)
       .def("__repr__", [](const PyModule &m) {
-        return "<kun_mlir.ModuleOp>\n" + m.toString();
+        return "<KunMLIR.ModuleOp>\n" + m.toString();
       });
 
   m.def("parse", &PyModule::parse, py::arg("text"),

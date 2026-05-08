@@ -10,19 +10,22 @@
 string(REPLACE "-Wl,-z,defs" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
 string(REPLACE "-Wl,-z,defs" "" CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS}")
 
-pybind11_add_module(kun_mlir SHARED
+pybind11_add_module(KunMLIR SHARED
   MlirBinding.cpp
   IRBuilder.cpp
   PyModule.cpp
 )
 
-# Co-locate the binding with libKunCudaRuntime.so so $ORIGIN
-# (CMAKE_INSTALL_RPATH set at top level) resolves dependencies as
-# siblings — same pattern as KunRunner ↔ KunRuntime.
-set_target_properties(kun_mlir PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/mlir/python")
+# Drop the .so directly into the source tree's KunQuant/jit/ so it
+# imports as `KunQuant.jit.KunMLIR` (alongside cuda.py) without any
+# PYTHONPATH gymnastics.  libKunCudaRuntime.so is co-located there too
+# (see mlir/lib/KunCuda/CMakeLists.txt) so the $ORIGIN rpath resolves
+# the sibling at load time — same pattern KunRunner ↔ KunRuntime use
+# under KunQuant/runner/.
+set_target_properties(KunMLIR PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/KunQuant/jit")
 
-target_link_libraries(kun_mlir PRIVATE
+target_link_libraries(KunMLIR PRIVATE
   # Compiler side
   MLIRKunIrDialect
   MLIRKunGpuDialect

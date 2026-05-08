@@ -1,9 +1,9 @@
-"""Translate a (post-optimize) KunQuant Function into a kun_mlir module
+"""Translate a (post-optimize) KunQuant Function into a KunMLIR module
 holding a single kunir.func inside a gpu.module.
 
 This is the GPU-side counterpart to passes.CodegenCpp.codegen_cpp; it
 runs after the same Driver.optimize() pipeline the CPU path uses, then
-walks the lowered IR and emits kunir ops via the kun_mlir.IRBuilder
+walks the lowered IR and emits kunir ops via the KunMLIR.IRBuilder
 pybind class.
 
 Scope (v0): only the ops kunir currently supports.
@@ -119,10 +119,10 @@ def _emit_reduction(op: ReductionOp, ir, val_map: Dict[OpBase, object]):
 
 def translate_function(f: Function, target: TargetSpec, ir,
                         dtype: str = "f32"):
-    """Emit `f` as a single kunir.func into the open `ir` (kun_mlir.IRBuilder).
+    """Emit `f` as a single kunir.func into the open `ir` (KunMLIR.IRBuilder).
 
     Returns the list of (input_name, output_name) declared on the func,
-    so the caller can pass them straight to kun_mlir.compile() as
+    so the caller can pass them straight to KunMLIR.compile() as
     graph_inputs / graph_outputs.
     """
     # 1.  Boundary ops in topo order — the kunir.func's I/O.

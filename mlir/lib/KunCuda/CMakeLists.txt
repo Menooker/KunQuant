@@ -7,17 +7,17 @@ add_library(KunCudaRuntime SHARED Runtime.cpp)
 
 # Project-wide compile flags set -fvisibility=hidden + inlines-hidden to
 # minimise the size of MLIR static libs.  This shared runtime needs to
-# export its public class methods so downstream .so's (kun_mlir, host
+# export its public class methods so downstream .so's (KunMLIR, host
 # runners, …) can resolve them at load time.
 #
-# We also put the .so next to the kun_mlir Python module, mirroring the
+# We also put the .so next to the KunMLIR Python module, mirroring the
 # existing project pattern (INSTALL_RPATH=$ORIGIN at the top level): all
 # co-distributed shared libs live in one directory and find each other
 # as siblings.
 set_target_properties(KunCudaRuntime PROPERTIES
     CXX_VISIBILITY_PRESET default
     VISIBILITY_INLINES_HIDDEN OFF
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/mlir/python")
+    LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/KunQuant/jit")
 
 target_include_directories(KunCudaRuntime PUBLIC
     "${PROJECT_SOURCE_DIR}/mlir/include")

@@ -41,7 +41,7 @@ public:
     Location loc = b_.getUnknownLoc();
     pm_->module = OwningOpRef<ModuleOp>(ModuleOp::create(loc));
     b_.setInsertionPointToEnd(pm_->module.get().getBody());
-    // One gpu.module per IRBuilder — kun_mlir's pipeline expects exactly
+    // One gpu.module per IRBuilder — KunMLIR's pipeline expects exactly
     // one container for all kunir.func ops.
     gpuMod_ = b_.create<gpu::GPUModuleOp>(loc, "kungpu_kernels");
     b_.setInsertionPointToStart(&gpuMod_.getBodyRegion().front());
@@ -272,11 +272,11 @@ void registerIRBuilder(py::module &m) {
   // identity / repr.  They live as long as the IRBuilder + its resulting
   // PyModule.
   py::class_<Value>(m, "Value")
-      .def("__repr__", [](Value v) { return "<kun_mlir.Value " + valueRepr(v) + ">"; })
+      .def("__repr__", [](Value v) { return "<KunMLIR.Value " + valueRepr(v) + ">"; })
       .def("__str__",  [](Value v) { return valueRepr(v); });
 
   py::class_<Type>(m, "Type")
-      .def("__repr__", [](Type t) { return "<kun_mlir.Type " + typeRepr(t) + ">"; })
+      .def("__repr__", [](Type t) { return "<KunMLIR.Type " + typeRepr(t) + ">"; })
       .def("__str__",  [](Type t) { return typeRepr(t); });
 
   py::class_<IRBuilder>(m, "IRBuilder",
@@ -345,7 +345,7 @@ void registerIRBuilder(py::module &m) {
             "Print the module under construction (for debugging — does "
             "not consume the builder).")
       .def("finish", &IRBuilder::finish,
-            "Hand off the module to a kun_mlir.ModuleOp.  Builder is "
+            "Hand off the module to a KunMLIR.ModuleOp.  Builder is "
             "consumed.");
 }
 

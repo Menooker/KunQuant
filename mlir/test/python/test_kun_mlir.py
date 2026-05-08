@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end test for the `kun_mlir` Python bindings.
+"""End-to-end test for the `KunMLIR` Python bindings.
 
   parse → to_string → lower_to_ptx (debug only) → compile → launch
 
@@ -36,18 +36,18 @@ def main() -> int:
     ap.add_argument("-S", "--num-stocks", type=int, default=2048)
     args = ap.parse_args()
 
-    import kun_mlir
+    from KunQuant.jit import KunMLIR
     import cupy as cp
     import numpy as np
     from KunQuant.jit.cuda import find_cuda_toolkit
 
     # Force-initialise the CUDA driver + create the primary context now,
-    # so subsequent kun_mlir.compile() / Executable.launch() find one.
+    # so subsequent KunMLIR.compile() / Executable.launch() find one.
     cp.cuda.Device(0).use()
     _ = cp.zeros((1,), dtype=cp.float32)
 
     print(f"=== parse + to_string ===")
-    mod = kun_mlir.parse(SAMPLE_KUNIR)
+    mod = KunMLIR.parse(SAMPLE_KUNIR)
     text = mod.to_string()
     assert "kunir.func @test_addsum" in text, "module text missing kunir.func"
     print("ok — module round-trips through parse/to_string")
@@ -60,15 +60,15 @@ def main() -> int:
     # at PTX text via gpu-module-to-binary{format=isa}.  Mutates `mod`
     # (replaces the gpu.module with a gpu.binary), so we re-parse for
     # the main compile step below.
-    ptx = kun_mlir.lower_to_ptx(mod, gpu_arch=args.target, opt_level=3,
+    ptx = KunMLIR.lower_to_ptx(mod, gpu_arch=args.target, opt_level=3,
                                   toolkit_path=toolkit)
     assert "test_addsum" in ptx
     print(f"ok — produced {len(ptx)} bytes of PTX text")
 
     print()
     print(f"=== compile (all-in-one) ===")
-    mod2 = kun_mlir.parse(SAMPLE_KUNIR)
-    exe = kun_mlir.compile(mod2,
+    mod2 = KunMLIR.parse(SAMPLE_KUNIR)
+    exe = KunMLIR.compile(mod2,
                             graph_inputs=["a", "b"],
                             graph_outputs=["sum"],
                             gpu_arch=args.target, opt_level=3,
