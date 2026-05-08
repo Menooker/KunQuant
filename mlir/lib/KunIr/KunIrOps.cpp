@@ -118,6 +118,54 @@ LogicalResult ReduceMaxOp::verify() { return verifyInsideForEachBackWindow(*this
 LogicalResult ReduceMinOp::verify() { return verifyInsideForEachBackWindow(*this); }
 
 //===----------------------------------------------------------------------===//
+// BackRef + FastWindowedSum — share a verifier (same shape / constraints)
+//===----------------------------------------------------------------------===//
+
+static LogicalResult
+verifyWindowedScalarOrTsResultOp(Operation *op, Value input, int64_t window,
+                                  Type resultTy) {
+  auto inputTy = llvm::cast<TsType>(input.getType());
+  if (window <= 0)
+    return op->emitOpError("window must be positive, got ") << window;
+
+  // Need both the current value and the value `window` steps back, so the
+  // input must retain at least `window + 1` time steps.
+  uint64_t need = static_cast<uint64_t>(window) + 1;
+  uint64_t have = inputTy.getMaxLookback();
+  if (have != kInfLookback && have < need)
+    return op->emitOpError("input.maxLookback (")
+           << have << ") must be >= window+1 (" << need << ")";
+
+  // Result type: either ts<inputElemType, 1> (source form) or the input's
+  // element type itself (lowered form, after kunir-to-kungpu).
+  Type elemTy = inputTy.getElementType();
+  if (auto resTs = llvm::dyn_cast<TsType>(resultTy)) {
+    if (resTs.getElementType() != elemTy)
+      return op->emitOpError("result element type '")
+             << resTs.getElementType()
+             << "' must match input element type '" << elemTy << "'";
+    if (resTs.getMaxLookback() != 1)
+      return op->emitOpError("result maxLookback must be 1, got ")
+             << resTs.getMaxLookback();
+    return success();
+  }
+  if (resultTy != elemTy)
+    return op->emitOpError(
+               "scalar result type must equal input element type '")
+           << elemTy << "', got '" << resultTy << "'";
+  return success();
+}
+
+LogicalResult BackRefOp::verify() {
+  return verifyWindowedScalarOrTsResultOp(*this, getInput(), getWindow(),
+                                            getResult().getType());
+}
+LogicalResult FastWindowedSumOp::verify() {
+  return verifyWindowedScalarOrTsResultOp(*this, getInput(), getWindow(),
+                                            getResult().getType());
+}
+
+//===----------------------------------------------------------------------===//
 // ForEachBackWindowOp — verifier + custom assembly format
 //
 // Format:

@@ -318,6 +318,38 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
       return success();
     }
 
+    // back_ref → ts.get(handle, offset = window).  Stateless, so we can
+    // fully lower here (the op does not survive into the kungpu IR).
+    if (auto br = dyn_cast<BackRefOp>(op)) {
+      auto inputTs = llvm::cast<TsType>(br.getInput().getType());
+      auto inputIt = tsMap.find(br.getInput());
+      if (inputIt == tsMap.end() || inputIt->second.kind != TsKind::Handle)
+        return op.emitError(
+            "kunir-to-kungpu: back_ref input must be a ts handle");
+      Value offset = fb.create<arith::ConstantOp>(
+          ol, fb.getI32Type(), fb.getI32IntegerAttr(br.getWindow()));
+      Value scalar = fb.create<TsGetOp>(ol, inputTs.getElementType(),
+                                          inputIt->second.value, offset);
+      tsMap[br.getResult()] = {TsKind::Scalar, scalar};
+      return success();
+    }
+
+    // fast_windowed_sum → preserved as a kunir op with scalar result and
+    // ts-handle input.  The kungpu-to-llvm pass owns the actual lowering
+    // (per-thread state allocas + the Kahan-corrected step).
+    if (auto fws = dyn_cast<FastWindowedSumOp>(op)) {
+      auto inputTs = llvm::cast<TsType>(fws.getInput().getType());
+      auto inputIt = tsMap.find(fws.getInput());
+      if (inputIt == tsMap.end() || inputIt->second.kind != TsKind::Handle)
+        return op.emitError(
+            "kunir-to-kungpu: fast_windowed_sum input must be a ts handle");
+      auto newOp = fb.create<FastWindowedSumOp>(
+          ol, /*resultType=*/inputTs.getElementType(),
+          /*input=*/inputIt->second.value, fws.getWindowAttr());
+      tsMap[fws.getResult()] = {TsKind::Scalar, newOp.getResult()};
+      return success();
+    }
+
     if (isa<CsRankOp>(op)) {
       return op.emitError("kunir-to-kungpu: cs_rank lowering not yet implemented");
     }

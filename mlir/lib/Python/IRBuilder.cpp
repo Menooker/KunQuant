@@ -150,6 +150,19 @@ public:
                                                 length);
   }
 
+  // ── Back-reference + Fast windowed sum (high-level: ts → ts<T,1>) ─
+  Value backRefOp(Value x, int64_t window) {
+    auto inTs = llvm::cast<kunir::TsType>(x.getType());
+    auto resultTy = kunir::TsType::get(pm_->ctx.get(), inTs.getElementType(), 1);
+    return b_.create<kunir::BackRefOp>(b_.getUnknownLoc(), resultTy, x, window);
+  }
+  Value fastWindowedSumOp(Value x, int64_t window) {
+    auto inTs = llvm::cast<kunir::TsType>(x.getType());
+    auto resultTy = kunir::TsType::get(pm_->ctx.get(), inTs.getElementType(), 1);
+    return b_.create<kunir::FastWindowedSumOp>(b_.getUnknownLoc(), resultTy, x,
+                                                 window);
+  }
+
   // ── For-each-back-window region ───────────────────────────────────
   std::vector<Value>
   beginForEachBackWindow(std::vector<Value> inputs, int64_t window,
@@ -304,6 +317,12 @@ void registerIRBuilder(py::module &m) {
       // Windowed materialization
       .def("windowed_output", &IRBuilder::windowedOutputOp,
             py::arg("x"), py::arg("length"))
+
+      // Back-reference + Fast windowed sum
+      .def("back_ref",          &IRBuilder::backRefOp,
+            py::arg("x"), py::arg("window"))
+      .def("fast_windowed_sum", &IRBuilder::fastWindowedSumOp,
+            py::arg("x"), py::arg("window"))
 
       // Loop
       .def("begin_for_each_back_window", &IRBuilder::beginForEachBackWindow,

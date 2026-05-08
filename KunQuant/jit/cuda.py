@@ -125,10 +125,6 @@ def _gpu_pass_options(cfg: CudaCompilerConfig) -> dict:
         # don't map cleanly onto the GPU primitives we lower today.
         # Keep it off until the corresponding kunir lowerings exist.
         "no_fast_stat":   True,
-        # opt_reduce rewrites WindowedSum etc. into the stateful
-        # FastWindowedSum op, which kunir doesn't have a counterpart
-        # for yet — keep the canonical ForeachBackWindow + Reduce shape.
-        "opt_reduce":     False,
     }
     if cfg.options:
         opts.update(cfg.options)

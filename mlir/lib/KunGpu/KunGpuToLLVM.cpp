@@ -500,6 +500,191 @@ struct TsPutPattern : OpConversionPattern<TsPutOp> {
 };
 
 //===----------------------------------------------------------------------===//
+// FastWindowedSum — running sum with Kahan compensation + NaN tracking.
+//
+// Per-thread state (4 cells, alloca'd at function entry, promoted to
+// registers by mem2reg):
+//   v             — running sum                                    (T)
+//   compAdd       — Kahan compensation for the +cur step           (T)
+//   compSub       — Kahan compensation for the -old step           (T)
+//   numNans       — count of NaNs currently inside the trailing-N window (i32)
+//
+// Algorithm — direct port of cpp/Kun/Ops.hpp::FastWindowedSum::step:
+//
+//   cur = input[t]                                                 ts.get  off=0
+//   old = (t >= window) ? input[t - window] : NaN                  ts.get  off=window  (guarded)
+//   old_is_nan = isnan(old)
+//   new_is_nan = isnan(cur)
+//   v = old_is_nan ? v : kahanAdd(v, -old, &compSub)               // subtract old
+//   v = new_is_nan ? v : kahanAdd(v, +cur, &compAdd)               // add cur
+//   numNans += (new_is_nan ? 1 : 0) - (old_is_nan ? 1 : 0)
+//   out = (numNans == 0) ? v : NaN
+//
+// The `t >= window` guard on `old` matches CPU's
+// `windowedRef`/`getWindow` which return NaN for index < window.
+// Without it, a function-arg gmem load at offset > t can fall before the
+// allocation start and segfault on some drivers.
+//===----------------------------------------------------------------------===//
+
+struct FastWindowedSumPattern : OpConversionPattern<FastWindowedSumOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(FastWindowedSumOp op, OpAdaptor /*adaptor*/,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto *ctx    = op.getContext();
+    Location loc = op.getLoc();
+    auto i32Ty   = rewriter.getI32Type();
+    auto idxTy   = rewriter.getIndexType();
+    auto ptrTy   = LLVM::LLVMPointerType::get(ctx);
+
+    auto resultTy = op.getResult().getType();
+    auto floatTy  = llvm::dyn_cast<FloatType>(resultTy);
+    if (!floatTy)
+      return rewriter.notifyMatchFailure(
+          op, "fast_windowed_sum result must be a scalar float "
+              "(post kunir-to-kungpu lowering)");
+
+    int64_t window = op.getWindow();
+    Value origInput = op.getInput();
+
+    // ── 1. Allocate state at function entry + initialise. ──────────
+    auto fn = op->getParentOfType<gpu::GPUFuncOp>();
+    if (!fn)
+      return rewriter.notifyMatchFailure(
+          op, "fast_windowed_sum must be inside a gpu.func");
+
+    Value vPtr, addPtr, subPtr, nansPtr;
+    {
+      OpBuilder::InsertionGuard g(rewriter);
+      Block &entry = fn.getBody().front();
+      rewriter.setInsertionPointToStart(&entry);
+      Value c1_i32 = rewriter.create<LLVM::ConstantOp>(
+          loc, i32Ty, rewriter.getI32IntegerAttr(1));
+      Value zeroF = rewriter.create<LLVM::ConstantOp>(
+          loc, floatTy, rewriter.getFloatAttr(floatTy, 0.0));
+      Value windowI32 = rewriter.create<LLVM::ConstantOp>(
+          loc, i32Ty, rewriter.getI32IntegerAttr(window));
+
+      vPtr    = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, floatTy, c1_i32);
+      addPtr  = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, floatTy, c1_i32);
+      subPtr  = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, floatTy, c1_i32);
+      nansPtr = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, i32Ty,   c1_i32);
+
+      rewriter.create<LLVM::StoreOp>(loc, zeroF,     vPtr);
+      rewriter.create<LLVM::StoreOp>(loc, zeroF,     addPtr);
+      rewriter.create<LLVM::StoreOp>(loc, zeroF,     subPtr);
+      rewriter.create<LLVM::StoreOp>(loc, windowI32, nansPtr);
+    }
+
+    // ── 2. Read cur (off=0) and old (off=window, guarded). ─────────
+    Value zeroOff   = rewriter.create<arith::ConstantOp>(
+        loc, i32Ty, rewriter.getI32IntegerAttr(0));
+    Value windowOff = rewriter.create<arith::ConstantOp>(
+        loc, i32Ty, rewriter.getI32IntegerAttr(window));
+    Value cur = rewriter.create<TsGetOp>(loc, floatTy, origInput, zeroOff);
+
+    Value timeIdx = getCurrentTimeIdx(op);
+    if (!timeIdx)
+      return rewriter.notifyMatchFailure(
+          op, "fast_windowed_sum must be inside a scf.for time loop");
+    Value windowIdx  = rewriter.create<arith::ConstantIndexOp>(loc, window);
+    Value tGeWindow  = rewriter.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::sge, timeIdx, windowIdx);
+
+    auto ifOp = rewriter.create<scf::IfOp>(
+        loc, TypeRange{floatTy}, tGeWindow, /*withElseRegion=*/true);
+    {
+      OpBuilder::InsertionGuard g(rewriter);
+      rewriter.setInsertionPointToStart(&ifOp.getThenRegion().front());
+      Value loaded =
+          rewriter.create<TsGetOp>(loc, floatTy, origInput, windowOff);
+      rewriter.create<scf::YieldOp>(loc, loaded);
+    }
+    {
+      OpBuilder::InsertionGuard g(rewriter);
+      rewriter.setInsertionPointToStart(&ifOp.getElseRegion().front());
+      Value nanV = rewriter.create<LLVM::ConstantOp>(
+          loc, floatTy,
+          rewriter.getFloatAttr(
+              floatTy, std::numeric_limits<double>::quiet_NaN()));
+      rewriter.create<scf::YieldOp>(loc, nanV);
+    }
+    Value old = ifOp.getResult(0);
+
+    // ── 3. Algorithm step.  All arith is via LLVM ops at this phase. ──
+    auto fcmp_isnan = [&](Value x) {
+      // isnan(x) ⇔ x != x  (UNE catches NaN, == NaN is false)
+      return rewriter.create<LLVM::FCmpOp>(loc, LLVM::FCmpPredicate::une, x, x);
+    };
+    Value oldIsNan = fcmp_isnan(old);
+    Value newIsNan = fcmp_isnan(cur);
+
+    // Loaded state.
+    Value v       = rewriter.create<LLVM::LoadOp>(loc, floatTy, vPtr);
+    Value compAdd = rewriter.create<LLVM::LoadOp>(loc, floatTy, addPtr);
+    Value compSub = rewriter.create<LLVM::LoadOp>(loc, floatTy, subPtr);
+    Value numNans = rewriter.create<LLVM::LoadOp>(loc, i32Ty,   nansPtr);
+
+    Value zeroF = rewriter.create<LLVM::ConstantOp>(
+        loc, floatTy, rewriter.getFloatAttr(floatTy, 0.0));
+
+    // kahanAdd(isnan_small, sum, small, &comp):
+    //   y = small - comp;  t = sum + y;
+    //   newComp = (t - sum) - y;
+    //   comp = isnan_small ? comp : newComp;
+    //   return t
+    auto kahanAdd = [&](Value isnan_small, Value sum, Value small, Value &comp) {
+      Value y     = rewriter.create<LLVM::FSubOp>(loc, small, comp);
+      Value t     = rewriter.create<LLVM::FAddOp>(loc, sum, y);
+      Value tMs   = rewriter.create<LLVM::FSubOp>(loc, t, sum);
+      Value newC  = rewriter.create<LLVM::FSubOp>(loc, tMs, y);
+      comp = rewriter.create<LLVM::SelectOp>(loc, isnan_small, comp, newC);
+      return t;
+    };
+
+    // v -= old  (skip when old is NaN)
+    Value negOld = rewriter.create<LLVM::FSubOp>(loc, zeroF, old);
+    Value tSub   = kahanAdd(oldIsNan, v, negOld, compSub);
+    v = rewriter.create<LLVM::SelectOp>(loc, oldIsNan, v, tSub);
+
+    // v += cur  (skip when cur is NaN)
+    Value tAdd   = kahanAdd(newIsNan, v, cur, compAdd);
+    v = rewriter.create<LLVM::SelectOp>(loc, newIsNan, v, tAdd);
+
+    // numNans += (new_is_nan ? 1 : 0) - (old_is_nan ? 1 : 0)
+    Value oneI32  = rewriter.create<LLVM::ConstantOp>(
+        loc, i32Ty, rewriter.getI32IntegerAttr(1));
+    Value zeroI32 = rewriter.create<LLVM::ConstantOp>(
+        loc, i32Ty, rewriter.getI32IntegerAttr(0));
+    Value oldDelta = rewriter.create<LLVM::SelectOp>(
+        loc, oldIsNan, oneI32, zeroI32);
+    Value newDelta = rewriter.create<LLVM::SelectOp>(
+        loc, newIsNan, oneI32, zeroI32);
+    numNans = rewriter.create<LLVM::SubOp>(loc, numNans, oldDelta);
+    numNans = rewriter.create<LLVM::AddOp>(loc, numNans, newDelta);
+
+    // result = (numNans == 0) ? v : NaN
+    Value isFull = rewriter.create<LLVM::ICmpOp>(
+        loc, LLVM::ICmpPredicate::eq, numNans, zeroI32);
+    Value nanV = rewriter.create<LLVM::ConstantOp>(
+        loc, floatTy,
+        rewriter.getFloatAttr(floatTy,
+                                std::numeric_limits<double>::quiet_NaN()));
+    Value out = rewriter.create<LLVM::SelectOp>(loc, isFull, v, nanV);
+
+    // ── 4. Store back state. ────────────────────────────────────────
+    rewriter.create<LLVM::StoreOp>(loc, v,       vPtr);
+    rewriter.create<LLVM::StoreOp>(loc, compAdd, addPtr);
+    rewriter.create<LLVM::StoreOp>(loc, compSub, subPtr);
+    rewriter.create<LLVM::StoreOp>(loc, numNans, nansPtr);
+
+    rewriter.replaceOp(op, out);
+    return success();
+  }
+};
+
+//===----------------------------------------------------------------------===//
 // Pass
 //===----------------------------------------------------------------------===//
 
@@ -538,6 +723,7 @@ struct ConvertKunGpuToLLVMPass
     target.addLegalOp<ModuleOp, UnrealizedConversionCastOp>();
     target.addIllegalOp<WindowedTempOp, TsGetOp, TsPutOp,
                         TimeLengthOp, StockIdOp, BlockStockCountOp>();
+    target.addIllegalOp<kunir::FastWindowedSumOp>();
     // gpu.func is legal only after its signature has been converted from
     // (...kunir.ts) to (...!llvm.ptr) by the FunctionOpInterface pattern
     // we register below.
@@ -557,6 +743,7 @@ struct ConvertKunGpuToLLVMPass
         typeConv, ctx);
     patterns.add<WindowedTempPattern>(typeConv, ctx, descMap, smemCounter);
     patterns.add<TsGetPattern, TsPutPattern>(typeConv, ctx, descMap);
+    patterns.add<FastWindowedSumPattern>(typeConv, ctx);
 
     if (failed(applyPartialConversion(module, target, std::move(patterns))))
       signalPassFailure();

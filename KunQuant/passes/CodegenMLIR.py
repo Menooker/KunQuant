@@ -30,6 +30,7 @@ from KunQuant.ops.ElewiseOp import (
 from KunQuant.ops.ReduceOp import (
     ReduceAdd, ReduceMul, ReduceMax, ReduceMin,
 )
+from KunQuant.ops.MiscOp import BackRef, FastWindowedSum
 from KunQuant.Stage import Function
 
 
@@ -91,6 +92,11 @@ def _emit_simple(op: OpBase, ir, val_map: Dict[OpBase, object]):
     if isinstance(op, WindowedTempOutput):
         return ir.windowed_output(val_map[op.inputs[0]],
                                     int(op.attrs["window"]))
+    if isinstance(op, BackRef):
+        return ir.back_ref(val_map[op.inputs[0]], int(op.attrs["window"]))
+    if isinstance(op, FastWindowedSum):
+        return ir.fast_windowed_sum(val_map[op.inputs[0]],
+                                      int(op.attrs["window"]))
     raise NotImplementedError(
         f"CodegenMLIR: op type {cls.__name__} is not supported by the "
         f"GPU backend yet (op = {op})")

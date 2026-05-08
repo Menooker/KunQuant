@@ -222,6 +222,61 @@ def KunIr_ReduceMinOp : KunIr_ReduceOp<"reduce_min"> {
 }
 
 //===----------------------------------------------------------------------===//
+// BackRef — read input value at t - window
+//
+// At time step t, returns input[t - window]; semantically NaN when t < window
+// (the upstream pipeline writes the high time-domain region first, so cells
+// before t = window-1 should be ignored by the user).
+//
+// The op carries through `kunir-to-kungpu` in two forms:
+//   * Source kunir:  result = !kunir.ts<T, 1>
+//   * Lowered form:  result = T (scalar) — a single ts.get on the ts handle
+//
+// Constraints:
+//   * input.maxLookback >= window + 1   (or inf — function args)
+//   * window > 0
+//   * if result is ts: must be ts<input.elemType, 1>
+//   * if result is scalar: must equal input.elemType
+//===----------------------------------------------------------------------===//
+
+def KunIr_BackRefOp : KunIr_Op<"back_ref", [Pure]> {
+  let summary = "Reference the input value `window` time steps in the past";
+  let arguments = (ins KunIr_AnyTs:$input, I64Attr:$window);
+  let results = (outs AnyType:$result);
+  let hasVerifier = 1;
+  let assemblyFormat =
+    "$input `[` `window` `=` $window `]` `:` type($input) `->` type($result) attr-dict";
+}
+
+//===----------------------------------------------------------------------===//
+// FastWindowedSum — running sum over the trailing `window` time steps
+//
+// Equivalent to KunQuant's CPU `FastWindowedSum<T, stride, window>` (see
+// cpp/Kun/Ops.hpp:325).  Per time step:
+//
+//     v_t = v_{t-1}                              (init 0, Kahan-corrected)
+//         - input[t-window]   if input[t-window] not NaN
+//         + input[t]          if input[t]        not NaN
+//     out_t = (num_nans == 0) ? v_t : NaN
+//
+// The op is preserved past `kunir-to-kungpu` (with ts→scalar result rewrite)
+// because its 4-element per-thread state (v, compAdd, compSub, num_nans) is
+// most naturally materialised as LLVM allocas in the kungpu-to-llvm pass.
+// See FastWindowedSumPattern there.
+//
+// Constraints (same as BackRef): input.maxLookback >= window + 1, window > 0.
+//===----------------------------------------------------------------------===//
+
+def KunIr_FastWindowedSumOp : KunIr_Op<"fast_windowed_sum", [Pure]> {
+  let summary = "Stateful rolling-window sum with Kahan compensation + NaN tracking";
+  let arguments = (ins KunIr_AnyTs:$input, I64Attr:$window);
+  let results = (outs AnyType:$result);
+  let hasVerifier = 1;
+  let assemblyFormat =
+    "$input `[` `window` `=` $window `]` `:` type($input) `->` type($result) attr-dict";
+}
+
+//===----------------------------------------------------------------------===//
 // FuncOp — function with named I/O and hardware target spec
 //
 // Custom assembly format:
