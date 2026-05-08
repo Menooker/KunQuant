@@ -30,6 +30,7 @@ from KunQuant.Op import Builder, Input, Output
 from KunQuant.ops import Add, Sub, Mul, Abs, Log, Sign, WindowedSum
 from KunQuant.ops.MiscOp import BackRef, FastWindowedSum
 from KunQuant.Stage import Function
+from KunQuant.jit import KunMLIR
 from KunQuant.jit.cuda import compileit, CudaCompilerConfig, to_mlir
 
 
@@ -110,8 +111,9 @@ def _run_one(label: str, build_fn, expected_fn, target: str, T: int, S: int,
     b_h = rng.standard_normal((T, S), dtype=np.float32)
     out = cp.zeros((T, S), dtype=cp.float32)
 
-    exe.launch({"a": cp.asarray(a_h), "b": cp.asarray(b_h), "out": out})
-    cp.cuda.runtime.deviceSynchronize()
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe, {"a": cp.asarray(a_h),
+                              "b": cp.asarray(b_h), "out": out})
     out_h = cp.asnumpy(out)
 
     expected = expected_fn(a_h, b_h)
@@ -159,8 +161,9 @@ def run_backref(target: str, T: int, S: int, N: int) -> int:
     b_h = rng.standard_normal((T, S), dtype=np.float32)
     out = cp.zeros((T, S), dtype=cp.float32)
 
-    exe.launch({"a": cp.asarray(a_h), "b": cp.asarray(b_h), "out": out})
-    cp.cuda.runtime.deviceSynchronize()
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe, {"a": cp.asarray(a_h),
+                              "b": cp.asarray(b_h), "out": out})
     out_h = cp.asnumpy(out)
 
     # Reference: out[t] = (a+b)[t-N] for t >= N; undefined for t < N.
@@ -194,8 +197,9 @@ def run_fastwindowedsum(target: str, T: int, S: int, N: int) -> int:
     b_h = rng.standard_normal((T, S), dtype=np.float32)
     out = cp.zeros((T, S), dtype=cp.float32)
 
-    exe.launch({"a": cp.asarray(a_h), "b": cp.asarray(b_h), "ws": out})
-    cp.cuda.runtime.deviceSynchronize()
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe, {"a": cp.asarray(a_h),
+                              "b": cp.asarray(b_h), "ws": out})
     out_h = cp.asnumpy(out)
 
     # Reference matches WindowedSum (same window, no NaN inputs).
@@ -238,8 +242,9 @@ def run_windowed(target: str, T: int, S: int, N: int) -> int:
     b_h = rng.standard_normal((T, S), dtype=np.float32)
     out = cp.zeros((T, S), dtype=cp.float32)
 
-    exe.launch({"a": cp.asarray(a_h), "b": cp.asarray(b_h), "ws": out})
-    cp.cuda.runtime.deviceSynchronize()
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe, {"a": cp.asarray(a_h),
+                              "b": cp.asarray(b_h), "ws": out})
     out_h = cp.asnumpy(out)
 
     c = a_h + b_h

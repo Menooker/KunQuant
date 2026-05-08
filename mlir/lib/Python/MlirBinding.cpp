@@ -253,17 +253,60 @@ PYBIND11_MODULE(KunMLIR, m) {
             [](const kun_cuda::Executable &e) {
               const auto &b = e.data().cubin;
               return py::bytes(b.data(), b.size());
-            })
-      .def("launch",
-            [](kun_cuda::Executable &e, py::dict pyArgs) {
-              auto c = collectArgs(e, pyArgs);
-              e.launch(c.timeLength, c.numStocks, c.args);
-            },
-            py::arg("args"),
-            "Launch the kernel.  `args` is a {name → cupy_array} dict; "
-            "names must match input_names ++ output_names.  All arrays "
-            "must be float32, 2-D, shape (time_length, num_stocks) — TS "
-            "layout — and reside on the GPU.");
+            });
+
+  // ── Executor ────────────────────────────────────────────────────────
+  // Mirrors the CPU `kun::Executor` shape: an opaque object that wraps a
+  // CUDA stream and exposes run_graph / synchronize.  Constructor accepts
+  // either a raw int (uintptr_t — e.g. the stream's `.ptr` from cupy) or
+  // a duck-typed object with a `.ptr` attribute (so passing a
+  // `cupy.cuda.Stream` directly Just Works).  None / no arg → default
+  // CUDA stream.
+  py::class_<kun_cuda::Executor>(m, "Executor",
+        "Wraps a CUDA stream + provides `run_graph(exe, args)` (async) "
+        "and `synchronize()`.  Default constructor uses the CUDA default "
+        "stream; pass a cupy stream (or its `.ptr` integer) to share one "
+        "with caller-managed code.")
+      .def(py::init([](py::object stream_arg) {
+            uintptr_t ptr = 0;
+            if (!stream_arg.is_none()) {
+              if (py::hasattr(stream_arg, "ptr"))
+                ptr = stream_arg.attr("ptr").cast<uintptr_t>();
+              else
+                ptr = stream_arg.cast<uintptr_t>();
+            }
+            return std::make_unique<kun_cuda::Executor>(
+                reinterpret_cast<CUstream>(ptr));
+          }),
+          py::arg("stream") = py::none(),
+          "Build an Executor.  `stream=None` → default CUDA stream; "
+          "otherwise expects either an int (uintptr_t handle) or a "
+          "cupy.cuda.Stream-like object exposing `.ptr`.")
+      .def_property_readonly("stream",
+          [](const kun_cuda::Executor &e) -> uintptr_t {
+            return reinterpret_cast<uintptr_t>(e.stream());
+          },
+          "Raw stream handle as an int (0 ↔ CUDA default stream).")
+      .def("runGraph",
+          [](kun_cuda::Executor &e, kun_cuda::Executable &exe,
+              py::dict pyArgs) {
+            auto c = collectArgs(exe, pyArgs);
+            e.runGraph(exe, c.timeLength, c.numStocks, c.args);
+          },
+          py::arg("exe"), py::arg("args"),
+          "Queue every kernel in `exe` onto this executor's stream.\n"
+          "**Asynchronous** — call `.synchronize()` (or otherwise wait\n"
+          "on the stream) before reading results back to host.\n"
+          "\n"
+          "`args` is a {name → cupy_array} dict; names must equal "
+          "`exe.input_names ++ exe.output_names`.  Arrays must be "
+          "float32, 2-D, shape `(time_length, num_stocks)` (TS layout), "
+          "and reside on the GPU.\n"
+          "\n"
+          "Named to match the CPU executor API "
+          "(`KunRunner.runGraph(executor, mod, ...)`).")
+      .def("synchronize", &kun_cuda::Executor::synchronize,
+          "Block until every kernel queued on this stream completes.");
 
   m.def("compile", &pyCompile,
          py::arg("module"),

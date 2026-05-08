@@ -455,16 +455,17 @@ int Executable::peakIntermediateSlots() const noexcept {
   return plan_->peakIntermediateSlots;
 }
 
-void Executable::launch(
+void Executable::launchOnStream(
     int64_t timeLength, int64_t numStocks,
-    const std::vector<std::pair<std::string, uintptr_t>> &args) {
+    const std::vector<std::pair<std::string, uintptr_t>> &args,
+    CUstream stream) {
   // 1.  Shape sanity (kernel signature is i32 i32).
   if (timeLength > std::numeric_limits<int32_t>::max() ||
       numStocks  > std::numeric_limits<int32_t>::max() ||
       timeLength < 0 || numStocks < 0)
     throw std::runtime_error(
-        "kun_cuda::launch: time_length / num_stocks out of i32 range "
-        "(kernel signature uses i32, i32)");
+        "kun_cuda::launchOnStream: time_length / num_stocks out of i32 "
+        "range (kernel signature uses i32, i32)");
 
   // 2.  Allocate intermediate slot pool if needed.
   ensureSlotPool(timeLength, numStocks);
@@ -484,7 +485,7 @@ void Executable::launch(
       idx = itOut->second;
     else
       throw std::runtime_error(
-          "kun_cuda::launch: unexpected argument '" + kv.first +
+          "kun_cuda::launchOnStream: unexpected argument '" + kv.first +
           "' (expected: " + joinNames(data_.graphInputs) + " | " +
           joinNames(data_.graphOutputs) + ")");
     bufPtrs[idx] = kv.second;
@@ -499,7 +500,7 @@ void Executable::launch(
     if (missing.empty())
       for (auto &kv : plan_->graphOutputIdx) if (kv.second == i) missing = kv.first;
     throw std::runtime_error(
-        "kun_cuda::launch: missing argument '" + missing + "'");
+        "kun_cuda::launchOnStream: missing argument '" + missing + "'");
   }
 
   // 5.  Fill intermediate slots from the pre-allocated pool.
@@ -509,10 +510,12 @@ void Executable::launch(
     bufPtrs[i] = slotBufs_[slot];
   }
 
-  // 6.  Launch each kernel in topo order.
+  // 6.  Launch each kernel in topo order on `stream`.  Async — the
+  //     caller (Executor) owns waiting via cuStreamSynchronize.
   unsigned blockX = static_cast<unsigned>(data_.warpsPerCta * 32);
   if (blockX == 0)
-    throw std::runtime_error("kun_cuda::launch: warps_per_cta is 0");
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: warps_per_cta is 0");
   uint64_t stocksPerBlock =
       static_cast<uint64_t>(blockX) * static_cast<uint64_t>(data_.vectorSize);
   unsigned gridX = static_cast<unsigned>(
@@ -541,12 +544,28 @@ void Executable::launch(
     // cubin's `.shared` section); the dynamic-smem launch parameter does
     // not apply.
     checkCu(cuLaunchKernel(cuFuncs_[kIdx], gridX, 1, 1, blockX, 1, 1,
-                             /*sharedMemBytes=*/0, /*stream=*/nullptr,
+                             /*sharedMemBytes=*/0, stream,
                              argPtrs.data(), nullptr),
              "cuLaunchKernel");
   }
+}
 
-  checkCu(cuCtxSynchronize(), "cuCtxSynchronize");
+//===----------------------------------------------------------------------===//
+// Executor — thin CUstream wrapper, mirrors the CPU `kun::Executor` shape.
+//===----------------------------------------------------------------------===//
+
+Executor::Executor() : stream_(nullptr) {}
+Executor::Executor(CUstream stream) : stream_(stream) {}
+Executor::~Executor() = default;
+
+void Executor::runGraph(
+    Executable &exe, int64_t timeLength, int64_t numStocks,
+    const std::vector<std::pair<std::string, uintptr_t>> &args) {
+  exe.launchOnStream(timeLength, numStocks, args, stream_);
+}
+
+void Executor::synchronize() {
+  checkCu(cuStreamSynchronize(stream_), "cuStreamSynchronize");
 }
 
 } // namespace kun_cuda

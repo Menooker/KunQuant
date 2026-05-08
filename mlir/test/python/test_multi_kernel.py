@@ -100,10 +100,15 @@ def main() -> int:
     c = cp.asarray(c_h)
     out = cp.zeros((T, S), dtype=cp.float32)
 
+    # Default-stream Executor — the simplest path.  No explicit sync
+    # needed because cp.asnumpy's D2H memcpy goes through cupy's default
+    # stream (= legacy stream 0), which is the same stream our kernels
+    # are queued on.
+    executor = KunMLIR.Executor()
     print()
-    print(f"=== launch ({T} × {S}) ===")
-    exe.launch({"a": a, "b": b, "c": c, "out": out})
-    cp.cuda.runtime.deviceSynchronize()
+    print(f"=== launch ({T} × {S}) — default stream ===")
+    print(f"  executor.stream = {executor.stream}  (0 ↔ CUDA default)")
+    executor.runGraph(exe, {"a": a, "b": b, "c": c, "out": out})
     out_h = cp.asnumpy(out)
 
     expected = (a_h + b_h) * c_h
@@ -116,24 +121,34 @@ def main() -> int:
 
     print(f"  ok — output matches (a+b)*c on every (t, s) cell ({T*S} cells)")
 
-    # === second launch with different shape — exercises slot pool re-alloc ===
+    # === second launch with different shape on a user-supplied stream ===
+    # Exercises (a) slot-pool re-alloc on shape change, (b) injecting a
+    # cupy-managed CUstream into the Executor.
     T2, S2 = T // 2, S + 64
     a2 = cp.asarray(rng.standard_normal((T2, S2), dtype=np.float32))
     b2 = cp.asarray(rng.standard_normal((T2, S2), dtype=np.float32))
     c2 = cp.asarray(rng.standard_normal((T2, S2), dtype=np.float32))
     out2 = cp.zeros((T2, S2), dtype=cp.float32)
 
+    cp_stream = cp.cuda.Stream(non_blocking=True)
+    executor2 = KunMLIR.Executor(stream=cp_stream)   # cupy stream injected
     print()
-    print(f"=== launch ({T2} × {S2}) — different shape, slot pool re-alloc ===")
-    exe.launch({"a": a2, "b": b2, "c": c2, "out": out2})
-    cp.cuda.runtime.deviceSynchronize()
+    print(f"=== launch ({T2} × {S2}) — cupy stream {hex(cp_stream.ptr)} ===")
+    print(f"  executor.stream = {hex(executor2.stream)}")
+    assert executor2.stream == cp_stream.ptr, \
+        (executor2.stream, cp_stream.ptr)
+    executor2.runGraph(exe, {"a": a2, "b": b2, "c": c2, "out": out2})
+    # Sync is REQUIRED here: cp_stream is non-blocking, so cp.asnumpy's
+    # D2H memcpy on cupy's default stream wouldn't otherwise wait for
+    # our kernels.
+    executor2.synchronize()
     out2_h = cp.asnumpy(out2)
     expected2 = (cp.asnumpy(a2) + cp.asnumpy(b2)) * cp.asnumpy(c2)
     if not np.allclose(out2_h, expected2, atol=1e-5):
         diff = np.abs(out2_h - expected2)
         print(f"  FAIL — max abs diff {diff.max()}", file=sys.stderr)
         return 1
-    print(f"  ok — re-launched with new shape, output matches")
+    print(f"  ok — re-launched on cupy stream, output matches")
     return 0
 
 

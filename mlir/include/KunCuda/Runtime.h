@@ -41,8 +41,9 @@
 #include <vector>
 
 extern "C" {
-typedef struct CUmod_st  *CUmodule;
-typedef struct CUfunc_st *CUfunction;
+typedef struct CUmod_st    *CUmodule;
+typedef struct CUfunc_st   *CUfunction;
+typedef struct CUstream_st *CUstream;
 } // extern "C"
 
 namespace kun_cuda {
@@ -134,7 +135,9 @@ public:
   /// runtime (after slot reuse).
   int  peakIntermediateSlots() const noexcept;
 
-  /// Launch every kernel in `launchOrder` on the default stream.
+  /// Launch every kernel in `launchOrder` asynchronously on `stream`.
+  /// **Does not synchronize** — the caller (typically `Executor::runGraph`
+  /// + `Executor::synchronize`) owns waiting for completion.
   ///
   /// `args` keys must equal `graphInputs ++ graphOutputs` (order
   /// doesn't matter; the runtime hashes them into the buffer table).
@@ -146,10 +149,11 @@ public:
   ///   block_x = warps_per_cta * 32
   ///   grid_x  = ceil_div(numStocks, block_x * vector_size)
   ///
-  /// Synchronous: `cuCtxSynchronize` is called once after the last
-  /// kernel.  Throws std::runtime_error on validation or driver errors.
-  void launch(int64_t timeLength, int64_t numStocks,
-              const std::vector<std::pair<std::string, uintptr_t>> &args);
+  /// Throws std::runtime_error on validation or driver errors.  This is
+  /// a low-level entry point — most users go through `Executor::runGraph`.
+  void launchOnStream(int64_t timeLength, int64_t numStocks,
+                       const std::vector<std::pair<std::string, uintptr_t>> &args,
+                       CUstream stream);
 
 private:
   /// Allocate (or re-allocate, if shape changed) the intermediate slot
@@ -169,6 +173,56 @@ private:
   std::vector<uintptr_t> slotBufs_;
   int64_t cachedT_ = -1;
   int64_t cachedS_ = -1;
+};
+
+//===----------------------------------------------------------------------===//
+// Executor — wraps a CUDA stream and exposes the runGraph / synchronize
+// pair, mirroring the CPU `kun::Executor` shape.
+//
+// Default constructor uses the CUDA default (NULL) stream.  The
+// stream-injecting constructor lets callers reuse a stream they already
+// own (e.g. `cupy.cuda.Stream`'s `.ptr`); the Executor does NOT take
+// ownership and never destroys the stream.
+//
+// `runGraph` is asynchronous — it queues every kernel in the executable
+// onto this stream and returns immediately.  Call `synchronize` (or wait
+// on the stream by other means) before reading results back to host.
+//
+// Thread / Executable model: an `Executable`'s intermediate slot pool
+// is mutable state shared by every `runGraph` call against it.  Driving
+// the same Executable from two Executors concurrently is unsafe — pair
+// them 1:1, or serialize the calls externally.
+//===----------------------------------------------------------------------===//
+
+class Executor {
+public:
+  /// Use the CUDA default stream.
+  Executor();
+  /// Reuse a stream the caller owns (e.g. cupy's `.ptr`).  We do not
+  /// destroy it; lifetime is the caller's responsibility.
+  explicit Executor(CUstream stream);
+  ~Executor();
+
+  Executor(const Executor &)            = delete;
+  Executor &operator=(const Executor &) = delete;
+  Executor(Executor &&)                 = delete;
+  Executor &operator=(Executor &&)      = delete;
+
+  /// Queue all kernels in `exe` on this executor's stream.  Async — does
+  /// not synchronize.  Throws std::runtime_error on validation / driver
+  /// errors.
+  void runGraph(Executable &exe,
+                int64_t timeLength, int64_t numStocks,
+                const std::vector<std::pair<std::string, uintptr_t>> &args);
+
+  /// Block until all queued work on this stream completes.
+  void synchronize();
+
+  /// Raw stream handle (default-stream Executor returns nullptr).
+  CUstream stream() const noexcept { return stream_; }
+
+private:
+  CUstream stream_ = nullptr;
 };
 
 } // namespace kun_cuda

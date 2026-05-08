@@ -7,10 +7,13 @@ also apply here — only the codegen layer is replaced.
 
 User entry point::
 
+    from KunQuant.jit import KunMLIR
     from KunQuant.jit.cuda import compileit, CudaCompilerConfig
 
     exe = compileit(f, CudaCompilerConfig(gpu_arch="sm_80"))
-    exe.launch({"a": cp_a, "b": cp_b, "out": cp_out})
+    executor = KunMLIR.Executor()                       # default stream
+    executor.runGraph(exe, {"a": cp_a, "b": cp_b, "out": cp_out})
+    executor.synchronize()
 
 Scope (v0):
   * Single Function in, single kunir.func out.  Multi-Function /

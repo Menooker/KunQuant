@@ -108,9 +108,9 @@ def run_one(N: int, expected_placement: str, target: str,
     b   = cp.asarray(b_h)
     out = cp.zeros((T, S), dtype=cp.float32)
 
-    exe.launch({"a": a, "b": b, "out": out})
-    cp.cuda.runtime.deviceSynchronize()
-    out_h = cp.asnumpy(out)
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe, {"a": a, "b": b, "out": out})
+    out_h = cp.asnumpy(out)            # implicitly waits via stream 0
 
     expected = reference_sum_window(a_h, b_h, N)
 

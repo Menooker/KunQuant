@@ -42,7 +42,7 @@ def main() -> int:
     from KunQuant.jit.cuda import find_cuda_toolkit
 
     # Force-initialise the CUDA driver + create the primary context now,
-    # so subsequent KunMLIR.compile() / Executable.launch() find one.
+    # so subsequent KunMLIR.compile() / Executor.runGraph() find one.
     cp.cuda.Device(0).use()
     _ = cp.zeros((1,), dtype=cp.float32)
 
@@ -115,8 +115,12 @@ def main() -> int:
         a   = cp.asarray(a_h)
         b   = cp.asarray(b_h)
         out = cp.zeros((T, S), dtype=cp.float32)
-        exe.launch({"a": a, "b": b, "sum": out})
-        cp.cuda.runtime.deviceSynchronize()
+        executor = KunMLIR.Executor()
+        executor.runGraph(exe, {"a": a, "b": b, "sum": out})
+        # No explicit synchronize: default-stream Executor + cupy's
+        # default stream → cp.asnumpy's D2H memcpy goes on the same
+        # stream and waits for our kernels.  See test_multi_kernel.py
+        # for the case where sync IS required (non-blocking user stream).
         out_h = cp.asnumpy(out)
         expected = a_h + b_h
         if not np.allclose(out_h, expected, atol=1e-5):
