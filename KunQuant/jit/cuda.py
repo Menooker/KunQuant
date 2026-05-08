@@ -30,7 +30,9 @@ from typing import Optional
 
 from KunQuant.jit import KunMLIR
 
-from KunQuant.Driver import optimize
+from KunQuant.Driver import optimize, post_optimize
+from KunQuant.Op import Input, Output
+from KunQuant.passes import do_partition
 from KunQuant.Stage import Function
 from KunQuant.passes.CodegenMLIR import TargetSpec, translate_function
 
@@ -108,6 +110,13 @@ class CudaCompilerConfig:
     # Empty → upstream search: CUDA_HOME / CUDA_PATH / standard locations.
     toolkit_path:  str  = ""
 
+    # Forwarded to `do_partition` — same default as KunCompilerConfig.
+    # Larger factor ⇒ coarser partitions (fewer, bigger kernels).  After
+    # partition each sub-Function becomes one kunir.func inside the
+    # generated gpu.module; intermediate buffers between them are
+    # auto-managed by the runtime's slot pool.
+    partition_factor: int = 3
+
     # Pass-list options forwarded to optimize().  We seed reasonable GPU
     # defaults; user-supplied keys override.
     options:       Optional[dict] = None
@@ -142,43 +151,82 @@ def _to_dtype_token(dtype: str) -> str:
                        f"lowers float on GPU)")
 
 
-def compileit(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.Executable:
-    """Compile a single KunQuant Function to a GPU `KunMLIR.Executable`.
+def _graph_io_names(f: Function):
+    """User-facing graph inputs/outputs.  Captured BEFORE optimize +
+    do_partition because those passes mutate `f` and may scatter the
+    Input/Output ops across multiple sub-Functions (some of which then
+    look like 'TEMP' from the partition's POV but stay user-visible at
+    the graph boundary)."""
+    ins  = [op.attrs["name"] for op in f.ops if isinstance(op, Input)]
+    outs = [op.attrs["name"] for op in f.ops if isinstance(op, Output)]
+    if not ins:
+        raise ValueError("CudaCompilerConfig: function has no Input ops")
+    if not outs:
+        raise ValueError("CudaCompilerConfig: function has no Output ops")
+    return ins, outs
 
-    The Function is mutated in place by Driver.optimize() (same as the
-    CPU path).  Inputs/Outputs declared via `Input(name)` / `Output(...,
-    name)` become the resulting Executable's graph_inputs / graph_outputs.
+
+def _run_full_pipeline(f: Function, cfg: CudaCompilerConfig):
+    """Same pass pipeline the CPU `compileit` runs:
+
+        optimize  →  do_partition  →  post_optimize
+
+    Returns the list of post-partition Functions that the translator
+    should walk (one kunir.func per Function).  Mutates `f` in place.
+    """
+    options = _gpu_pass_options(cfg)
+    optimize(f, options)
+    _mainf, impl = do_partition(f, cfg.partition_factor, options)
+    post_optimize(impl, options)
+    return impl
+
+
+def _translate_partitions(impl, cfg: CudaCompilerConfig) -> KunMLIR.ModuleOp:
+    """Emit one kunir.func per partitioned Function into a single
+    KunMLIR module (single `gpu.module` with N siblings).  Cross-
+    partition buffers stitch up automatically because each impl's
+    Input/Output names match the producing/consuming partition's
+    Output/Input names."""
+    target = TargetSpec(occupancy=cfg.occupancy,
+                          warps_per_cta=cfg.warps_per_cta,
+                          smem_size=cfg.smem_size,
+                          vector_size=cfg.vector_size)
+    ir = KunMLIR.IRBuilder()
+    dtype = _to_dtype_token(cfg.dtype)
+    for sub in impl:
+        translate_function(sub, target, ir, dtype=dtype)
+    return ir.finish()
+
+
+def compileit(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.Executable:
+    """Compile a KunQuant Function to a GPU `KunMLIR.Executable`.
+
+    Pipeline mirrors `KunQuant.jit.cfake.compileit` on the CPU path:
+
+      1. Capture user-facing Input/Output names (graph_inputs/outputs).
+      2. Run Driver.optimize on `f` in place.
+      3. do_partition splits `f` into one or more sub-Functions.
+      4. post_optimize per sub-Function (TempWindowElim + MergeLoops + …).
+      5. Translate each sub-Function into a kunir.func (siblings in one
+         gpu.module).
+      6. Hand off to KunMLIR.compile, which generates the cubin and
+         resolves cross-kernel data flow via I/O names.
     """
     if cfg.dtype not in ("float", "double"):
         raise ValueError(
             f"CudaCompilerConfig.dtype must be 'float' or 'double', got "
             f"{cfg.dtype!r}")
 
-    # Resolve the CUDA toolkit before invoking C++.  Auto-search if the
-    # user didn't pass an explicit path.  Failure here gives a useful
-    # message; failure later (in ptxas / libdevice link) is opaque.
     toolkit_path = find_cuda_toolkit(cfg.toolkit_path)
 
-    # 1.  Same optimizer pipeline the CPU path runs.  This is where
-    #     WindowedSum etc. decompose into ForeachBackWindow + Reduce.
-    options = _gpu_pass_options(cfg)
-    optimize(f, options)
+    graph_inputs, graph_outputs = _graph_io_names(f)
+    impl = _run_full_pipeline(f, cfg)
+    mod  = _translate_partitions(impl, cfg)
 
-    # 2.  Translate the post-optimize IR to a KunMLIR module.
-    target = TargetSpec(occupancy=cfg.occupancy,
-                          warps_per_cta=cfg.warps_per_cta,
-                          smem_size=cfg.smem_size,
-                          vector_size=cfg.vector_size)
-    ir = KunMLIR.IRBuilder()
-    in_names, out_names = translate_function(
-        f, target, ir, dtype=_to_dtype_token(cfg.dtype))
-    mod = ir.finish()
-
-    # 3.  Hand off to the KunMLIR compile pipeline.
     return KunMLIR.compile(
         mod,
-        graph_inputs=in_names,
-        graph_outputs=out_names,
+        graph_inputs=graph_inputs,
+        graph_outputs=graph_outputs,
         gpu_arch=cfg.gpu_arch,
         opt_level=cfg.opt_level,
         toolkit_path=toolkit_path,
@@ -187,13 +235,8 @@ def compileit(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.Executable:
 
 def to_mlir(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.ModuleOp:
     """Run the same passes + translator as `compileit`, but return the
-    KunMLIR module before PTX/CUBIN.  Useful for debugging the IR."""
-    options = _gpu_pass_options(cfg)
-    optimize(f, options)
-    target = TargetSpec(occupancy=cfg.occupancy,
-                          warps_per_cta=cfg.warps_per_cta,
-                          smem_size=cfg.smem_size,
-                          vector_size=cfg.vector_size)
-    ir = KunMLIR.IRBuilder()
-    translate_function(f, target, ir, dtype=_to_dtype_token(cfg.dtype))
-    return ir.finish()
+    KunMLIR module before PTX/CUBIN.  Useful for debugging the IR.
+    Mutates `f` in place (same as `compileit`)."""
+    _graph_io_names(f)              # raises if no Input / Output ops
+    impl = _run_full_pipeline(f, cfg)
+    return _translate_partitions(impl, cfg)

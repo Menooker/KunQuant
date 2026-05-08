@@ -90,6 +90,21 @@ def build_func_fastwindowedsum(N: int) -> Function:
     return Function(builder.ops, name="fastwindowedsum_kernel")
 
 
+def build_func_multipartition() -> Function:
+    """A graph with three independent outputs.  Combined with
+    `partition_factor=1` this drives `do_partition` to split into
+    multiple sub-Functions, each becoming its own kunir.func — the
+    primary thing this test exercises."""
+    builder = Builder()
+    with builder:
+        a = Input("a")
+        bin_ = Input("b")
+        Output(Add(a, bin_), "add_out")
+        Output(Mul(a, bin_), "mul_out")
+        Output(Sub(a, bin_), "sub_out")
+    return Function(builder.ops, name="multi")
+
+
 def _run_one(label: str, build_fn, expected_fn, target: str, T: int, S: int,
               atol: float = 1e-5) -> int:
     """Compile a Function, launch it, validate against numpy."""
@@ -223,6 +238,63 @@ def run_fastwindowedsum(target: str, T: int, S: int, N: int) -> int:
     return 0
 
 
+def run_multipartition(target: str, T: int, S: int) -> int:
+    """End-to-end test of the do_partition + post_optimize path:
+    three independent outputs forced into separate partitions by
+    `partition_factor=1`, each becoming a sibling kunir.func in the
+    generated gpu.module."""
+    print("=== multipartition: 3 outputs (add/mul/sub) split via "
+           "partition_factor=1 ===")
+    f = build_func_multipartition()
+    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4,
+                              partition_factor=1)
+
+    mod = to_mlir(build_func_multipartition(), cfg)
+    print("--- mlir ---")
+    print(mod.to_string())
+
+    exe = compileit(f, cfg)
+    print(f"  kernel_names           = {exe.kernel_names}")
+    print(f"  num_kernels            = {exe.num_kernels}")
+    print(f"  launch_order           = {exe.launch_order}")
+    print(f"  num_buffers            = {exe.num_buffers}")
+    print(f"  peak_intermediate_slots= {exe.peak_intermediate_slots}")
+
+    # The point of the test: the partitioner actually produced more
+    # than one kunir.func.  No intermediates because the three outputs
+    # are independent (each consumes only graph inputs).
+    assert exe.num_kernels >= 2, exe.num_kernels
+    assert exe.peak_intermediate_slots == 0, exe.peak_intermediate_slots
+    assert set(exe.input_names)  == {"a", "b"}
+    assert set(exe.output_names) == {"add_out", "mul_out", "sub_out"}
+
+    import cupy as cp
+    rng = np.random.default_rng(7)
+    a_h = rng.standard_normal((T, S), dtype=np.float32)
+    b_h = rng.standard_normal((T, S), dtype=np.float32)
+    add_out = cp.zeros((T, S), dtype=cp.float32)
+    mul_out = cp.zeros((T, S), dtype=cp.float32)
+    sub_out = cp.zeros((T, S), dtype=cp.float32)
+
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe, {"a": cp.asarray(a_h), "b": cp.asarray(b_h),
+                              "add_out": add_out,
+                              "mul_out": mul_out,
+                              "sub_out": sub_out})
+
+    add_h = cp.asnumpy(add_out)
+    mul_h = cp.asnumpy(mul_out)
+    sub_h = cp.asnumpy(sub_out)
+    if not (np.allclose(add_h, a_h + b_h, atol=1e-5)
+            and np.allclose(mul_h, a_h * b_h, atol=1e-5)
+            and np.allclose(sub_h, a_h - b_h, atol=1e-5)):
+        print(f"  FAIL — at least one of add/mul/sub mismatch",
+                file=sys.stderr)
+        return 1
+    print(f"  ok — all 3 outputs match across {exe.num_kernels} kernels")
+    return 0
+
+
 def run_windowed(target: str, T: int, S: int, N: int) -> int:
     print(f"=== windowed: ws = WindowedSum(a + b, N={N}) ===")
     f = build_func_windowed(N)
@@ -290,6 +362,8 @@ def main() -> int:
     print()
     rc |= run_fastwindowedsum(args.target, args.time_length, args.num_stocks,
                                 args.window)
+    print()
+    rc |= run_multipartition(args.target, args.time_length, args.num_stocks)
     return rc
 
 
