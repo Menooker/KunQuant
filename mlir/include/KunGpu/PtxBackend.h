@@ -86,11 +86,20 @@ struct PtxToCubinOptions {
                                           std::vector<char> &cubinOut,
                                           std::string &errorMsg);
 
-/// All-in-one: run the kunir → LLVM dialect pipeline, translate to LLVM
-/// IR, optimize, emit PTX, assemble to CUBIN, and pull the kernel
-/// metadata (name + I/O argument names + target-spec fields) off the
-/// lowered function so callers can hand the result to
-/// `kun_cuda::Executable` without re-walking the IR.
+/// Compile-only: run the kunir → LLVM dialect pipeline, translate to
+/// LLVM IR, optimize, emit PTX, assemble to CUBIN, then walk the
+/// lowered module to populate the per-kernel name metadata (one
+/// `KernelMeta` per `llvm.func` carrying `kungpu.target_spec`).  The
+/// caller is expected to fill in `out.graphInputs` / `out.graphOutputs`
+/// before constructing a `kun_cuda::Executable` from the result —
+/// graph topology is a runtime concern, not a compile-time one.
+///
+/// On success `out` is populated with: cubin, warpsPerCta, vectorSize
+/// (validated to be uniform across kernels), and the unordered list of
+/// kernels (each with its name and the input/output names from
+/// `kungpu.input_names` / `kungpu.output_names`).  Topology validation,
+/// topo sort, buffer indexing and slot planning all happen later, in
+/// the `Executable` ctor.
 ///
 /// The module is mutated in-place by the pipeline (same as
 /// `compileKunIrToPtx`).

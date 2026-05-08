@@ -195,9 +195,9 @@ struct CollectedArgs {
 static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
                                    py::dict pyArgs) {
   std::vector<std::string> ordered;
-  ordered.reserve(exe.inputNames().size() + exe.outputNames().size());
-  for (auto &n : exe.inputNames())  ordered.push_back(n);
-  for (auto &n : exe.outputNames()) ordered.push_back(n);
+  ordered.reserve(exe.graphInputs().size() + exe.graphOutputs().size());
+  for (auto &n : exe.graphInputs())  ordered.push_back(n);
+  for (auto &n : exe.graphOutputs()) ordered.push_back(n);
   if (ordered.empty())
     throw std::runtime_error("launch: kernel has no I/O arguments");
 
@@ -236,10 +236,20 @@ static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
 }
 
 static std::unique_ptr<kun_cuda::Executable>
-pyCompile(PyModule &pm, const std::string &targetCpu,
+pyCompile(PyModule &pm,
+            const std::vector<std::string> &graphInputs,
+            const std::vector<std::string> &graphOutputs,
+            const std::string &targetCpu,
             const std::string &targetTriple,
             const std::string &targetFeatures, unsigned optLevel,
             unsigned sizeLevel, const std::string &ptxasPath) {
+  if (graphInputs.empty())
+    throw std::runtime_error(
+        "kun_mlir.compile: graph_inputs cannot be empty");
+  if (graphOutputs.empty())
+    throw std::runtime_error(
+        "kun_mlir.compile: graph_outputs cannot be empty");
+
   kungpu::PtxCompileOptions popts;
   if (!targetCpu.empty())      popts.targetCpu      = targetCpu;
   if (!targetTriple.empty())   popts.targetTriple   = targetTriple;
@@ -255,6 +265,10 @@ pyCompile(PyModule &pm, const std::string &targetCpu,
   if (failed(kungpu::compileKunIrToExecutable(pm.module.get(), popts, copts,
                                                 data)))
     throw std::runtime_error("kun_mlir.compile failed");
+  // Graph topology is a runtime concern — fill it in here, just before
+  // handing off to Executable's ctor (which validates + plans).
+  data.graphInputs  = graphInputs;
+  data.graphOutputs = graphOutputs;
   return std::make_unique<kun_cuda::Executable>(std::move(data));
 }
 
@@ -292,11 +306,34 @@ PYBIND11_MODULE(kun_mlir, m) {
          "Assemble PTX → CUBIN via ptxas.  Returns bytes.");
 
   py::class_<kun_cuda::Executable>(m, "Executable")
-      .def_property_readonly("kernel_name",   &kun_cuda::Executable::kernelName)
-      .def_property_readonly("input_names",   &kun_cuda::Executable::inputNames)
-      .def_property_readonly("output_names",  &kun_cuda::Executable::outputNames)
+      .def_property_readonly("input_names",   &kun_cuda::Executable::graphInputs,
+            "Graph-level input names — match this against the keys of the "
+            "args dict you pass to launch().")
+      .def_property_readonly("output_names",  &kun_cuda::Executable::graphOutputs,
+            "Graph-level output names — match this against the keys of the "
+            "args dict you pass to launch().")
       .def_property_readonly("warps_per_cta", &kun_cuda::Executable::warpsPerCta)
       .def_property_readonly("vector_size",   &kun_cuda::Executable::vectorSize)
+      .def_property_readonly("num_kernels",
+            [](const kun_cuda::Executable &e) {
+              return e.numKernels();
+            })
+      .def_property_readonly("kernel_names",
+            [](const kun_cuda::Executable &e) {
+              std::vector<std::string> r;
+              r.reserve(e.data().kernels.size());
+              for (auto &km : e.data().kernels)
+                r.push_back(km.kernelName);
+              return r;
+            })
+      .def_property_readonly("launch_order",  &kun_cuda::Executable::launchOrder,
+            "Topo-sorted indices into kernel_names; the order kernels run "
+            "on the single CUDA stream.")
+      .def_property_readonly("peak_intermediate_slots",
+            &kun_cuda::Executable::peakIntermediateSlots,
+            "Number of intermediate buffers allocated by the runtime — "
+            "shape `(time_length, num_stocks)` each.")
+      .def_property_readonly("num_buffers",   &kun_cuda::Executable::numBuffers)
       .def_property_readonly("cubin",
             [](const kun_cuda::Executable &e) {
               const auto &b = e.data().cubin;
@@ -315,6 +352,8 @@ PYBIND11_MODULE(kun_mlir, m) {
 
   m.def("compile", &pyCompile,
          py::arg("module"),
+         py::arg("graph_inputs"),
+         py::arg("graph_outputs"),
          py::arg("target_cpu")     = "sm_80",
          py::arg("target_triple")  = "nvptx64-nvidia-cuda",
          py::arg("target_features") = "",
@@ -322,5 +361,9 @@ PYBIND11_MODULE(kun_mlir, m) {
          py::arg("size_level")     = 0u,
          py::arg("ptxas_path")     = "",
          "Compile a kunir module all the way to a loaded Executable "
-         "(kunir → LLVM dialect → LLVM IR → PTX → CUBIN → cuModuleLoad).");
+         "(kunir → LLVM dialect → LLVM IR → PTX → CUBIN → cuModuleLoad). "
+         "graph_inputs / graph_outputs name the buffers that flow in/out "
+         "of the whole kernel graph; everything else produced by the "
+         "kernels is treated as an intermediate and gets a runtime-managed "
+         "slot.");
 }

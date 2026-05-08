@@ -89,8 +89,11 @@ def run_one(N: int, expected_placement: str, target: str,
 
     ir = build_ir(N, warps_per_cta=warps_per_cta, smem_size=smem_size)
     mod = kun_mlir.parse(ir)
-    exe = kun_mlir.compile(mod, target_cpu=target, opt_level=3)
-    print(f"  kernel={exe.kernel_name}  warps_per_cta={exe.warps_per_cta}  "
+    exe = kun_mlir.compile(mod,
+                            graph_inputs=["a", "b"],
+                            graph_outputs=["out"],
+                            target_cpu=target, opt_level=3)
+    print(f"  kernels={exe.kernel_names}  warps_per_cta={exe.warps_per_cta}  "
            f"vector_size={exe.vector_size}  cubin={len(exe.cubin)} bytes")
 
     # Random input.  T must be > N so we have at least one valid window.

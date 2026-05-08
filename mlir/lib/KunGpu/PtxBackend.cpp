@@ -287,7 +287,11 @@ LogicalResult compileKunIrToPtx(ModuleOp module,
 }
 
 //===----------------------------------------------------------------------===//
-// All-in-one: kunir → cubin + metadata
+// All-in-one: kunir → cubin + per-kernel name metadata
+//
+// Compile-time concerns only.  Topology / topo sort / buffer indices /
+// slot planning all happen later, in `kun_cuda::Executable`'s ctor —
+// see KunCuda/Runtime.h.
 //===----------------------------------------------------------------------===//
 
 LogicalResult compileKunIrToExecutable(ModuleOp module,
@@ -296,45 +300,73 @@ LogicalResult compileKunIrToExecutable(ModuleOp module,
                                         ::kun_cuda::ExecutableData &out) {
   // 1.  Run the kunir → LLVM dialect pipeline + emit PTX.  This mutates
   //     `module` in place so the discardable kunir metadata ends up on
-  //     the lowered llvm.func.
+  //     each lowered llvm.func.
   std::string ptx;
   if (failed(compileKunIrToPtx(module, ptxOpts, ptx)))
     return failure();
 
-  // 2.  Find the lowered kernel function (the one carrying our
-  //     kungpu.* discardable attributes) and pull metadata off it.
-  LLVM::LLVMFuncOp kernel;
+  // 2.  Walk every kernel function (carries kungpu.target_spec) and
+  //     emit a KernelMeta with names and target spec.
+  std::vector<::kun_cuda::KernelMeta> kernels;
+  std::vector<std::pair<int64_t, int64_t>> targetSpecs;  // (warps, vector)
+  std::vector<std::string> targetSpecOwners;             // for diagnostics
+
   module.walk([&](LLVM::LLVMFuncOp f) {
-    if (f->hasAttr(kFuncTargetSpecAttr)) {
-      kernel = f;
-      return WalkResult::interrupt();
+    if (!f->hasAttr(kFuncTargetSpecAttr))
+      return WalkResult::advance();
+
+    ::kun_cuda::KernelMeta km;
+    km.kernelName = f.getSymName().str();
+    if (auto inNames = getFuncInputNames(f))
+      for (auto a : inNames)
+        km.inputNames.push_back(llvm::cast<StringAttr>(a).str());
+    if (auto outNames = getFuncOutputNames(f))
+      for (auto a : outNames)
+        km.outputNames.push_back(llvm::cast<StringAttr>(a).str());
+
+    int64_t w = 1, v = 1;
+    if (auto ts = getFuncTargetSpec(f)) {
+      w = ts.getWarpsPerCta();
+      v = ts.getVectorSize();
     }
+    targetSpecs.emplace_back(w, v);
+    targetSpecOwners.push_back(km.kernelName);
+    kernels.push_back(std::move(km));
     return WalkResult::advance();
   });
-  if (!kernel)
+  if (kernels.empty())
     return module.emitError(
-        "compileKunIrToExecutable: cannot find a llvm.func with kungpu "
-        "metadata in the lowered module");
+        "compileKunIrToExecutable: no llvm.func with kungpu metadata "
+        "found in the lowered module");
 
-  out.kernelName = kernel.getSymName().str();
-  if (auto inNames = getFuncInputNames(kernel)) {
-    for (auto a : inNames)
-      out.inputNames.push_back(llvm::cast<StringAttr>(a).str());
-  }
-  if (auto outNames = getFuncOutputNames(kernel)) {
-    for (auto a : outNames)
-      out.outputNames.push_back(llvm::cast<StringAttr>(a).str());
-  }
-  if (auto ts = getFuncTargetSpec(kernel)) {
-    out.warpsPerCta = ts.getWarpsPerCta();
-    out.vectorSize  = ts.getVectorSize();
+  // 3.  Target spec must be uniform across kernels (block / grid config
+  //     is graph-wide in v0).
+  auto [warpsPerCta, vectorSize] = targetSpecs.front();
+  for (size_t i = 1; i < targetSpecs.size(); ++i) {
+    auto [w, v] = targetSpecs[i];
+    if (w != warpsPerCta || v != vectorSize)
+      return module.emitError(
+          "compileKunIrToExecutable: kernels disagree on warps_per_cta / "
+          "vector_size — graph-wide target spec required (")
+          << "kernel '" << targetSpecOwners[i] << "': warps_per_cta="
+          << w << " vector_size=" << v
+          << "; expected warps_per_cta=" << warpsPerCta
+          << " vector_size=" << vectorSize << ")";
   }
 
-  // 3.  Assemble PTX → CUBIN.
+  // 4.  Assemble PTX → CUBIN.
+  std::vector<char> cubin;
   std::string err;
-  if (failed(compilePtxToCubin(ptx, cubinOpts, out.cubin, err)))
+  if (failed(compilePtxToCubin(ptx, cubinOpts, cubin, err)))
     return module.emitError("compileKunIrToExecutable: ") << err;
 
+  // 5.  Populate `out`.  graphInputs / graphOutputs are caller-supplied
+  //     after this returns — leave them empty.
+  out = ::kun_cuda::ExecutableData{};
+  out.cubin       = std::move(cubin);
+  out.warpsPerCta = warpsPerCta;
+  out.vectorSize  = vectorSize;
+  out.kernels     = std::move(kernels);
   return success();
 }
 

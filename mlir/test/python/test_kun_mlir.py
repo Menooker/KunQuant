@@ -68,14 +68,25 @@ def main() -> int:
     # `mod` was already mutated by lower_to_ptx above; re-parse so compile()
     # gets a fresh kunir.func module.
     mod2 = kun_mlir.parse(SAMPLE_KUNIR)
-    exe = kun_mlir.compile(mod2, target_cpu=args.target, opt_level=3)
-    print(f"  kernel_name   = {exe.kernel_name}")
-    print(f"  input_names   = {exe.input_names}")
-    print(f"  output_names  = {exe.output_names}")
-    print(f"  warps_per_cta = {exe.warps_per_cta}")
-    print(f"  vector_size   = {exe.vector_size}")
-    print(f"  cubin bytes   = {len(exe.cubin)}")
-    assert exe.kernel_name == "test_addsum"
+    exe = kun_mlir.compile(mod2,
+                            graph_inputs=["a", "b"],
+                            graph_outputs=["sum"],
+                            target_cpu=args.target, opt_level=3)
+    print(f"  kernel_names           = {exe.kernel_names}")
+    print(f"  num_kernels            = {exe.num_kernels}")
+    print(f"  launch_order           = {exe.launch_order}")
+    print(f"  num_buffers            = {exe.num_buffers}")
+    print(f"  peak_intermediate_slots= {exe.peak_intermediate_slots}")
+    print(f"  input_names            = {exe.input_names}")
+    print(f"  output_names           = {exe.output_names}")
+    print(f"  warps_per_cta          = {exe.warps_per_cta}")
+    print(f"  vector_size            = {exe.vector_size}")
+    print(f"  cubin bytes            = {len(exe.cubin)}")
+    assert exe.kernel_names == ["test_addsum"]
+    assert exe.num_kernels == 1
+    assert exe.launch_order == [0]
+    assert exe.num_buffers == 3      # a, b, sum
+    assert exe.peak_intermediate_slots == 0  # no intermediates
     assert exe.input_names  == ["a", "b"]
     assert exe.output_names == ["sum"]
     assert exe.warps_per_cta == 4
