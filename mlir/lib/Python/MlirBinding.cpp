@@ -19,6 +19,7 @@
 
 #include "PyModule.h"     // shared MLIRContext + ModuleOp wrapper
 #include "IRBuilder.h"    // pybind class for programmatic kunir construction
+#include "dlpack.h"       // vendored DLPack ABI (consumer-only)
 
 #include "KunCuda/Runtime.h"
 #include "KunGpu/PtxBackend.h"
@@ -60,47 +61,122 @@ static std::string pyLowerToPtx(PyModule &pm, const std::string &gpuArch,
 }
 
 //===----------------------------------------------------------------------===//
-// pybind glue: read CAI dict → kun_cuda::DeviceArray, build name list
+// pybind glue: read a Python GPU array via DLPack → device pointer + shape
 //===----------------------------------------------------------------------===//
 
-/// Read CAI from one Python GPU array.  Validates dtype + ndim; shape is
-/// returned to the caller for cross-array consistency checks.
+/// Result of reading one GPU array argument.  `ptr` is the device pointer
+/// the kernel will consume; `(timeLength, numStocks)` is the resolved
+/// 2-D shape used for cross-arg consistency checks.
 struct CudaArrayInfo {
   uintptr_t ptr;
-  int64_t timeLength;   ///< shape[0]
-  int64_t numStocks;    ///< shape[1]
+  int64_t   timeLength;   ///< shape[0]
+  int64_t   numStocks;    ///< shape[1]
 };
 
-static CudaArrayInfo readCudaArray(py::handle obj,
-                                     const std::string &paramName) {
-  if (!py::hasattr(obj, "__cuda_array_interface__")) {
-    throw std::runtime_error(
-        "'" + paramName +
-        "' has no __cuda_array_interface__ — pass a CuPy ndarray (or any "
-        "GPU array implementing CAI).");
-  }
-  py::dict cai = obj.attr("__cuda_array_interface__").cast<py::dict>();
+/// DLPack-spec encoding of the executor's CUDA stream, ready to hand to
+/// `obj.__dlpack__(stream=…)`.  The protocol uses int sentinels for the
+/// two default streams and the actual `CUstream` pointer otherwise:
+///
+///   None  ⇒  producer chooses (no sync)
+///   1     ⇒  legacy default stream
+///   2     ⇒  per-thread default stream
+///   other ⇒  CUstream pointer cast to int
+///
+/// We're never "no sync" — every launch must serialise on the executor's
+/// stream — so `stream_ == nullptr` (default-stream executor) maps to 1.
+static py::object dlpackStreamArg(CUstream stream) {
+  if (stream == nullptr)
+    return py::int_(1);
+  return py::int_(reinterpret_cast<uintptr_t>(stream));
+}
 
-  py::tuple data = cai["data"].cast<py::tuple>();
-  uintptr_t ptr  = data[0].cast<uintptr_t>();
-
-  std::vector<int64_t> shape;
-  for (py::handle s : cai["shape"].cast<py::tuple>())
-    shape.push_back(s.cast<int64_t>());
-  if (shape.size() != 2) {
+/// Throws if `(shape, stridesBytes)` doesn't describe a C-contiguous
+/// 2-D buffer with `elemSize`-byte elements.  `stridesBytes == nullptr`
+/// is the "default row-major" case (always contiguous).
+static void requireRowMajorContiguous2D(const std::string &paramName,
+                                          const int64_t *shape,
+                                          const int64_t *stridesBytes,
+                                          int64_t elemSize) {
+  if (!stridesBytes)
+    return;
+  const int64_t innerStride = elemSize;
+  const int64_t outerStride = elemSize * shape[1];
+  if (stridesBytes[0] != outerStride || stridesBytes[1] != innerStride) {
     std::stringstream ss;
-    ss << "'" << paramName << "' must be 2-D (got " << shape.size() << "-D)";
+    ss << "'" << paramName << "' is not C-contiguous: strides=("
+       << stridesBytes[0] << ", " << stridesBytes[1] << ") bytes, "
+       << "expected (" << outerStride << ", " << innerStride
+       << ") for shape (" << shape[0] << ", " << shape[1] << ")";
     throw std::runtime_error(ss.str());
   }
+}
 
-  std::string typestr = cai["typestr"].cast<std::string>();
-  if (typestr != "<f4" && typestr != "|f4" && typestr != "=f4") {
-    throw std::runtime_error("'" + paramName +
-                              "' must be float32 little-endian (typestr "
-                              "'<f4'); got '" +
-                              typestr + "'");
+/// Read `__dlpack__(stream=…)` — the cross-framework GPU array protocol
+/// implemented by CuPy / PyTorch / JAX / TensorFlow.  Validates every
+/// field the kernel relies on and threads the executor's stream so the
+/// producer can insert the needed cross-stream sync.
+///
+/// Memory lifecycle: `__dlpack__()` returns a PyCapsule named "dltensor"
+/// owning a `DLManagedTensor`; when the capsule is GC'd, its destructor
+/// calls the producer's `deleter`.  We grab the fields we need and let
+/// the capsule fall out of scope at function exit — the underlying
+/// tensor stays alive because the user is still holding `obj`.
+static CudaArrayInfo readDLPack(py::handle obj, const std::string &paramName,
+                                  const py::object &streamArg) {
+  if (!py::hasattr(obj, "__dlpack__"))
+    throw std::runtime_error(
+        "'" + paramName + "' does not implement __dlpack__ — pass a CuPy "
+        "ndarray, a PyTorch CUDA tensor, a JAX device array, or any other "
+        "object exporting the DLPack protocol.");
+
+  py::object capsule = obj.attr("__dlpack__")(py::arg("stream") = streamArg);
+  void *raw = PyCapsule_GetPointer(capsule.ptr(), "dltensor");
+  if (!raw) {
+    PyErr_Clear();
+    throw std::runtime_error(
+        "'" + paramName + "' __dlpack__() did not return a PyCapsule named "
+        "'dltensor' (consumed capsule?  wrong producer?)");
   }
-  return CudaArrayInfo{ptr, shape[0], shape[1]};
+  const DLManagedTensor *mt = reinterpret_cast<const DLManagedTensor *>(raw);
+  const DLTensor &t = mt->dl_tensor;
+
+  // ── device: only CUDA (managed counts as CUDA-addressable) ──────────
+  if (t.device.device_type != kDLCUDA &&
+      t.device.device_type != kDLCUDAManaged)
+    throw std::runtime_error(
+        "'" + paramName + "' is on DLPack device type " +
+        std::to_string(static_cast<int>(t.device.device_type)) +
+        " — only CUDA (=2) and CUDAManaged (=13) are supported");
+
+  // ── ndim ────────────────────────────────────────────────────────────
+  if (t.ndim != 2)
+    throw std::runtime_error(
+        "'" + paramName + "' must be 2-D (got " +
+        std::to_string(t.ndim) + "-D)");
+
+  // ── dtype: kDLFloat, 32-bit, 1 lane ─────────────────────────────────
+  if (t.dtype.code != kDLFloat || t.dtype.bits != 32 || t.dtype.lanes != 1)
+    throw std::runtime_error(
+        "'" + paramName + "' DLPack dtype is (code=" +
+        std::to_string(static_cast<int>(t.dtype.code)) +
+        ", bits=" + std::to_string(static_cast<int>(t.dtype.bits)) +
+        ", lanes=" + std::to_string(static_cast<int>(t.dtype.lanes)) +
+        ") — need float32 (kDLFloat, 32, 1)");
+
+  // ── strides: NULL = row-major contiguous; else validate.  DLPack
+  //    strides are in *elements*, not bytes — convert before checking.
+  if (t.strides) {
+    int64_t sb[2] = {t.strides[0] * 4, t.strides[1] * 4};
+    requireRowMajorContiguous2D(paramName, t.shape, sb, /*elemSize=*/4);
+  }
+
+  // ── data pointer (apply byte_offset before handing to kernel) ───────
+  uintptr_t ptr = reinterpret_cast<uintptr_t>(t.data) + t.byte_offset;
+  if (ptr == 0)
+    throw std::runtime_error(
+        "'" + paramName + "' DLPack data pointer is null");
+
+  return CudaArrayInfo{ptr, t.shape[0], t.shape[1]};
 }
 
 /// Walk the user's {name → cuda_array} dict, validate that every named
@@ -115,7 +191,10 @@ struct CollectedArgs {
 };
 
 static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
-                                   py::dict pyArgs) {
+                                   py::dict pyArgs,
+                                   const py::object &streamArg) {
+  // Graph inputs come first, then outputs — same as the buffer-table
+  // layout the runtime expects.
   std::vector<std::string> ordered;
   ordered.reserve(exe.graphInputs().size() + exe.graphOutputs().size());
   for (auto &n : exe.graphInputs())  ordered.push_back(n);
@@ -126,19 +205,43 @@ static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
   CollectedArgs out;
   out.args.reserve(ordered.size());
 
+  // Reject extras up-front so the error message points at the offending
+  // name (the per-name loop below would otherwise just complain about a
+  // missing graph_input/output, which is misleading when the real issue
+  // is a typo'd key).
+  if (pyArgs.size() > ordered.size()) {
+    for (auto kv : pyArgs) {
+      std::string key = py::cast<std::string>(kv.first);
+      bool known = false;
+      for (auto &n : ordered) if (n == key) { known = true; break; }
+      if (!known) {
+        std::string expected;
+        for (size_t j = 0; j < ordered.size(); ++j) {
+          if (j) expected += ", ";
+          expected += ordered[j];
+        }
+        throw std::runtime_error(
+            "launch: unexpected argument '" + key +
+            "' (kernel expects: " + expected + ")");
+      }
+    }
+  }
+
   bool first = true;
-  for (const std::string &name : ordered) {
+  for (size_t i = 0; i < ordered.size(); ++i) {
+    const std::string &name = ordered[i];
+
     py::object key = py::str(name);
     if (!pyArgs.contains(key)) {
       std::string expected;
-      for (size_t i = 0; i < ordered.size(); ++i) {
-        if (i) expected += ", ";
-        expected += ordered[i];
+      for (size_t j = 0; j < ordered.size(); ++j) {
+        if (j) expected += ", ";
+        expected += ordered[j];
       }
       throw std::runtime_error("launch: missing argument '" + name +
                                 "' (kernel expects: " + expected + ")");
     }
-    CudaArrayInfo info = readCudaArray(pyArgs[key], name);
+    CudaArrayInfo info = readDLPack(pyArgs[key], name, streamArg);
     if (first) {
       out.timeLength = info.timeLength;
       out.numStocks  = info.numStocks;
@@ -344,7 +447,12 @@ PYBIND11_MODULE(KunMLIR, m) {
       .def("runGraph",
           [](kun_cuda::Executor &e, kun_cuda::Executable &exe,
               py::dict pyArgs) {
-            auto c = collectArgs(exe, pyArgs);
+            // Thread the executor's stream into __dlpack__(stream=…)
+            // so producers (CuPy / PyTorch / JAX / TF) can insert the
+            // cross-stream sync needed for data-readiness on our
+            // launch stream.
+            py::object streamArg = dlpackStreamArg(e.stream());
+            auto c = collectArgs(exe, pyArgs, streamArg);
             e.runGraph(exe, c.timeLength, c.numStocks, c.args);
           },
           py::arg("exe"), py::arg("args"),
