@@ -139,7 +139,6 @@ public:
   Value absOp(Value x)  { return makeUn<kunir::AbsOp>(x); }
   Value logOp(Value x)  { return makeUn<kunir::LogOp>(x); }
   Value signOp(Value x) { return makeUn<kunir::SignOp>(x); }
-  Value csRankOp(Value x) { return makeUn<kunir::CsRankOp>(x); }
 
   // ── Windowed buffer materialization ───────────────────────────────
   Value windowedOutputOp(Value x, int64_t length) {
@@ -312,7 +311,6 @@ void registerIRBuilder(py::module &m) {
       .def("abs",    &IRBuilder::absOp,    py::arg("x"))
       .def("log",    &IRBuilder::logOp,    py::arg("x"))
       .def("sign",   &IRBuilder::signOp,   py::arg("x"))
-      .def("cs_rank", &IRBuilder::csRankOp, py::arg("x"))
 
       // Windowed materialization
       .def("windowed_output", &IRBuilder::windowedOutputOp,

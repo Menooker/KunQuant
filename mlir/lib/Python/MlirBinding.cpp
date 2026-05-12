@@ -157,6 +157,30 @@ static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
   return out;
 }
 
+/// Parse one Python `external_kernels=[...]` entry into a KernelMeta.
+/// Expected dict shape:
+///   {"name": str, "kind": str, "inputs": [str...], "outputs": [str...]}
+/// where `kind` is one of "cs_rank_f32" / "cs_rank_f64".
+static kun_cuda::KernelMeta parseExternalKernel(py::handle obj) {
+  py::dict d = obj.cast<py::dict>();
+  kun_cuda::KernelMeta km;
+  km.kernelName = d["name"].cast<std::string>();
+  std::string kind = d["kind"].cast<std::string>();
+  if (kind == "cs_rank_f32")
+    km.kind = kun_cuda::KernelKind::ExtCsRankF32;
+  else if (kind == "cs_rank_f64")
+    km.kind = kun_cuda::KernelKind::ExtCsRankF64;
+  else
+    throw std::runtime_error(
+        "KunMLIR.compile: unknown external kernel kind '" + kind +
+        "' (supported: cs_rank_f32, cs_rank_f64)");
+  for (py::handle n : d["inputs"].cast<py::iterable>())
+    km.inputNames.push_back(n.cast<std::string>());
+  for (py::handle n : d["outputs"].cast<py::iterable>())
+    km.outputNames.push_back(n.cast<std::string>());
+  return km;
+}
+
 static std::unique_ptr<kun_cuda::Executable>
 pyCompile(PyModule &pm,
             const std::vector<std::string> &graphInputs,
@@ -164,7 +188,9 @@ pyCompile(PyModule &pm,
             const std::string &gpuArch,
             const std::string &targetTriple,
             const std::string &targetFeatures, unsigned optLevel,
-            const std::string &toolkitPath) {
+            const std::string &toolkitPath,
+            py::list externalKernels,
+            int warpsPerCta) {
   if (graphInputs.empty())
     throw std::runtime_error(
         "KunMLIR.compile: graph_inputs cannot be empty");
@@ -182,6 +208,34 @@ pyCompile(PyModule &pm,
   kun_cuda::ExecutableData data;
   if (failed(kungpu::compileKunIrToExecutable(pm.module.get(), opts, data)))
     throw std::runtime_error("KunMLIR.compile failed");
+
+  // Append external (pre-compiled, runtime-dispatched) kernels.  The
+  // MLIR pipeline never saw them; they're fabricated here from the
+  // descriptor list the Python frontend collected.
+  for (py::handle obj : externalKernels)
+    data.kernels.push_back(parseExternalKernel(obj));
+
+  if (data.kernels.empty())
+    throw std::runtime_error(
+        "KunMLIR.compile: no kernels (neither MLIR-emitted nor "
+        "external) — refusing to build an empty Executable");
+
+  // No JIT kernels → `compileKunIrToExecutable` left warpsPerCta at
+  // its default of 1.  Override with the caller-supplied value so the
+  // external launch path's blockDim is right.  When there are JIT
+  // kernels they fix warpsPerCta via their kungpu.target_spec, and we
+  // trust that over the parameter (and ignore the parameter).
+  bool anyJit = false;
+  for (const auto &k : data.kernels)
+    if (k.kind == kun_cuda::KernelKind::Jit) { anyJit = true; break; }
+  if (!anyJit) {
+    if (warpsPerCta <= 0)
+      throw std::runtime_error(
+          "KunMLIR.compile: warps_per_cta must be positive when every "
+          "kernel is external; got " + std::to_string(warpsPerCta));
+    data.warpsPerCta = warpsPerCta;
+  }
+
   // Graph topology is a runtime concern — fill it in here, just before
   // handing off to Executable's ctor (which validates + plans).
   data.graphInputs  = graphInputs;
@@ -317,6 +371,8 @@ PYBIND11_MODULE(KunMLIR, m) {
          py::arg("target_features") = "",
          py::arg("opt_level")      = 3u,
          py::arg("toolkit_path")   = "",
+         py::arg("external_kernels") = py::list(),
+         py::arg("warps_per_cta")    = 0,
          "Compile a kunir module all the way to a loaded Executable.\n"
          "\n"
          "Pipeline: kunir → LLVM dialect → upstream `gpu-module-to-binary`\n"

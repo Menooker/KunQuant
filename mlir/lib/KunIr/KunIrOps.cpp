@@ -64,13 +64,12 @@ LogicalResult MaxOp::verify() { return verifyBinaryElemwise(*this, getLhs(), get
 LogicalResult MinOp::verify() { return verifyBinaryElemwise(*this, getLhs(), getRhs()); }
 
 //===----------------------------------------------------------------------===//
-// Unary elemwise ops + CsRankOp — verify only
+// Unary elemwise ops — verify only
 //===----------------------------------------------------------------------===//
 
-LogicalResult AbsOp::verify()    { return success(); }
-LogicalResult LogOp::verify()    { return success(); }
-LogicalResult SignOp::verify()   { return success(); }
-LogicalResult CsRankOp::verify() { return success(); }
+LogicalResult AbsOp::verify()  { return success(); }
+LogicalResult LogOp::verify()  { return success(); }
+LogicalResult SignOp::verify() { return success(); }
 
 //===----------------------------------------------------------------------===//
 // WindowedOutputOp

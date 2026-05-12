@@ -26,6 +26,10 @@
 #include <stdexcept>
 #include <unordered_map>
 
+// Pre-compiled cs_rank PTX, embedded by EmbedFile.cmake.  Exposes
+// `kun_cs_rank_ptx[]` (bytes) and `kun_cs_rank_ptx_len`.
+#include "cs_rank_ptx.inc"
+
 namespace kun_cuda {
 
 //===----------------------------------------------------------------------===//
@@ -347,6 +351,242 @@ SlotPlan planSlots(const std::vector<int> &launchOrder,
   return plan;
 }
 
+//===----------------------------------------------------------------------===//
+// Launch helpers — pure functions used by launchOnStream below.
+//===----------------------------------------------------------------------===//
+
+/// Translate the user-supplied {name → device_ptr} args dict into a
+/// flat buffer-index → pointer array, plug in the executable-owned
+/// intermediate-slot pointers, and verify every graph_input /
+/// graph_output the plan expects was provided.  Throws on unknown or
+/// missing names.
+static std::vector<uintptr_t> resolveBufferPointers(
+    const GraphPlan &plan,
+    const ExecutableData &data,
+    const std::vector<std::pair<std::string, uintptr_t>> &args,
+    const std::vector<uintptr_t> &slotBufs) {
+  std::vector<uintptr_t> bufPtrs(plan.numBuffers, 0);
+  std::vector<bool>      filled(plan.numBuffers, false);
+
+  for (const auto &kv : args) {
+    auto itIn  = plan.graphInputIdx.find(kv.first);
+    auto itOut = plan.graphOutputIdx.find(kv.first);
+    int idx = -1;
+    if (itIn != plan.graphInputIdx.end())
+      idx = itIn->second;
+    else if (itOut != plan.graphOutputIdx.end())
+      idx = itOut->second;
+    else
+      throw std::runtime_error(
+          "kun_cuda::launchOnStream: unexpected argument '" + kv.first +
+          "' (expected: " + joinNames(data.graphInputs) + " | " +
+          joinNames(data.graphOutputs) + ")");
+    bufPtrs[idx] = kv.second;
+    filled[idx] = true;
+  }
+
+  // Confirm every graph_input + graph_output was supplied.
+  for (int i = 0; i < plan.numGraphInputs + plan.numGraphOutputs; ++i) {
+    if (filled[i]) continue;
+    std::string missing;
+    for (auto &kv : plan.graphInputIdx)  if (kv.second == i) missing = kv.first;
+    if (missing.empty())
+      for (auto &kv : plan.graphOutputIdx) if (kv.second == i) missing = kv.first;
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: missing argument '" + missing + "'");
+  }
+
+  // Intermediates: index into the pre-allocated slot pool.
+  for (int i = plan.numGraphInputs + plan.numGraphOutputs;
+        i < plan.numBuffers; ++i) {
+    int slot = plan.intermediateBufToSlot[i];
+    bufPtrs[i] = slotBufs[slot];
+  }
+  return bufPtrs;
+}
+
+/// Stock-major launch: block_x = warps_per_cta*32, grid_x =
+/// ceil(numStocks / (block_x * vector_size)), no dynamic smem.
+static void launchJitKernel(CUfunction fn,
+                              int64_t numStocks,
+                              int64_t warpsPerCta, int64_t vectorSize,
+                              void **args, CUstream stream) {
+  unsigned blockX = static_cast<unsigned>(warpsPerCta * 32);
+  uint64_t stocksPerBlock =
+      static_cast<uint64_t>(blockX) * static_cast<uint64_t>(vectorSize);
+  unsigned gridX = static_cast<unsigned>(
+      (static_cast<uint64_t>(numStocks) + stocksPerBlock - 1) /
+      stocksPerBlock);
+  // sharedMemBytes = 0 — JIT'd kernels declare static smem via
+  // llvm.mlir.global addr_space=3; the dynamic-smem launch parameter
+  // does not apply.
+  checkCu(cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1,
+                           /*sharedMemBytes=*/0, stream, args, nullptr),
+           "cuLaunchKernel");
+}
+
+/// External cs_rank launch: block_x = warps_per_cta*32, grid_x =
+/// time_length (one CTA per timestep), sharedMemBytes = numStocks *
+/// sizeof(T).  Checks the request against the cached device cap so
+/// we fail with a clear, GPU-aware message instead of letting
+/// cuLaunchKernel emit its generic error.
+static void launchExtCsRankKernel(CUfunction fn, KernelKind kind,
+                                    const std::string &kernelName,
+                                    int64_t timeLength, int64_t numStocks,
+                                    int64_t warpsPerCta,
+                                    int devMaxSmemBytes,
+                                    void **args, CUstream stream) {
+  size_t elemSize = (kind == KernelKind::ExtCsRankF64) ? 8u : 4u;
+  uint64_t smemBytes64 =
+      static_cast<uint64_t>(numStocks) * static_cast<uint64_t>(elemSize);
+
+  if (devMaxSmemBytes <= 0)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: external cs_rank kernel '" + kernelName +
+        "' requires Executor's devMaxSmemBytes to be set; got 0.  "
+        "Construct the Executable through Executor::runGraph, or pass "
+        "devMaxSmemBytes when calling launchOnStream directly.");
+  if (smemBytes64 > static_cast<uint64_t>(devMaxSmemBytes))
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: cs_rank dynamic smem "
+        "(num_stocks=" + std::to_string(numStocks) +
+        " * sizeof(T)=" + std::to_string(elemSize) + " = " +
+        std::to_string(smemBytes64) +
+        " bytes) exceeds this GPU's MAX_SHARED_MEMORY_PER_BLOCK_OPTIN (" +
+        std::to_string(devMaxSmemBytes) +
+        " bytes).  Reduce num_stocks or run on a GPU with a larger smem budget.");
+
+  if (timeLength <= 0)
+    return; // empty time chunk — nothing to launch
+
+  unsigned blockX    = static_cast<unsigned>(warpsPerCta * 32);
+  unsigned gridX     = static_cast<unsigned>(timeLength);
+  unsigned smemBytes = static_cast<unsigned>(smemBytes64);
+  checkCu(cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1,
+                           smemBytes, stream, args, nullptr),
+           "cuLaunchKernel(cs_rank)");
+}
+
+//===----------------------------------------------------------------------===//
+// Kernel-module / kernel-symbol helpers — read ExecutableData, mutate
+// the CUmodule and CUfunction handles the ctor is populating.
+//===----------------------------------------------------------------------===//
+
+/// Load the JIT'd cubin if non-empty; otherwise sanity-check that no
+/// kernel actually needs it (every `kind == Jit` requires a cubin).
+static void loadJitCubin(const ExecutableData &data, CUmodule &outModule) {
+  if (!data.cubin.empty()) {
+    checkCu(cuModuleLoadData(&outModule, data.cubin.data()),
+             "cuModuleLoadData");
+    return;
+  }
+  for (const auto &k : data.kernels)
+    if (k.kind == KernelKind::Jit)
+      throw std::runtime_error(
+          "kun_cuda::Executable: JIT kernel '" + k.kernelName +
+          "' declared but no cubin supplied — this is a compile-side bug");
+}
+
+/// Lazy-load the bundled cs_rank PTX as a second CUmodule iff any
+/// kernel uses it.  The driver JITs PTX → SASS on first load (cached
+/// system-wide in ~/.nv/ComputeCache), so this is sub-ms after the
+/// first run on a given GPU.
+static void loadCsRankPtxIfNeeded(const std::vector<KernelMeta> &kernels,
+                                    CUmodule &outModule) {
+  for (const auto &k : kernels) {
+    if (k.kind != KernelKind::Jit) {
+      checkCu(cuModuleLoadData(&outModule, kun_cs_rank_ptx),
+               "cuModuleLoadData(cs_rank.ptx)");
+      return;
+    }
+  }
+}
+
+/// Pick the right CUmodule + symbol name for a kernel and resolve it.
+static CUfunction resolveOneKernelSymbol(const KernelMeta &k,
+                                          CUmodule jitModule,
+                                          CUmodule csRankModule) {
+  CUmodule mod = nullptr;
+  const char *symbol = nullptr;
+  switch (k.kind) {
+    case KernelKind::Jit:
+      mod = jitModule;
+      symbol = k.kernelName.c_str();
+      break;
+    case KernelKind::ExtCsRankF32:
+      mod = csRankModule;
+      symbol = "kun_cs_rank_f32";
+      break;
+    case KernelKind::ExtCsRankF64:
+      mod = csRankModule;
+      symbol = "kun_cs_rank_f64";
+      break;
+  }
+  CUfunction fn = nullptr;
+  checkCu(cuModuleGetFunction(&fn, mod, symbol),
+           "cuModuleGetFunction");
+  return fn;
+}
+
+/// Opt every external (non-Jit) function into the device's full
+/// dynamic-smem budget up-front.  The attribute is purely a permission
+/// cap — raising it doesn't change the carveout or per-launch smem
+/// cost, so we do it eagerly here rather than per-launch.  No-op if
+/// there are no external kernels.
+static void optInExternalSmemMax(const std::vector<KernelMeta> &kernels,
+                                   const std::vector<CUfunction> &funcs) {
+  bool anyExternal = false;
+  for (const auto &k : kernels)
+    if (k.kind != KernelKind::Jit) { anyExternal = true; break; }
+  if (!anyExternal)
+    return;
+
+  CUdevice dev = 0;
+  checkCu(cuCtxGetDevice(&dev), "cuCtxGetDevice");
+  int maxOptIn = 0;
+  checkCu(cuDeviceGetAttribute(
+              &maxOptIn,
+              CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, dev),
+           "cuDeviceGetAttribute(MAX_SHARED_MEMORY_PER_BLOCK_OPTIN)");
+  for (size_t i = 0; i < funcs.size(); ++i) {
+    if (kernels[i].kind == KernelKind::Jit) continue;
+    checkCu(cuFuncSetAttribute(
+                funcs[i],
+                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                maxOptIn),
+             "cuFuncSetAttribute(MAX_DYNAMIC_SHARED_SIZE_BYTES)");
+  }
+}
+
+/// Per-kernel-kind I/O arity check.  External cs_rank kernels have a
+/// fixed signature `(T_in, T_out)` — the kernel signature is set in
+/// stone by `kernels/cs_rank.cu`, so we know the wiring is wrong (not
+/// just unusual) the moment we see any other shape.  Static property
+/// of the graph, so done at construction.
+static void validateKernelIO(const std::vector<KernelMeta> &kernels,
+                               const std::vector<std::vector<int>> &kernelInputBufs,
+                               const std::vector<std::vector<int>> &kernelOutputBufs) {
+  for (size_t i = 0; i < kernels.size(); ++i) {
+    const auto &k    = kernels[i];
+    const size_t nIn = kernelInputBufs[i].size();
+    const size_t nOut = kernelOutputBufs[i].size();
+    switch (k.kind) {
+      case KernelKind::Jit:
+        // JIT kernels can have any arity — they're whatever the MLIR
+        // pipeline emitted.
+        break;
+      case KernelKind::ExtCsRankF32:
+      case KernelKind::ExtCsRankF64:
+        if (nIn != 1 || nOut != 1)
+          throw std::runtime_error(
+              "kun_cuda::Executable: cs_rank kernel '" + k.kernelName +
+              "' must have exactly 1 input and 1 output (have " +
+              std::to_string(nIn) + " / " + std::to_string(nOut) + ")");
+        break;
+    }
+  }
+}
+
 } // namespace
 
 //===----------------------------------------------------------------------===//
@@ -395,14 +635,24 @@ Executable::Executable(ExecutableData &&data) : data_(std::move(data)) {
   plan_->intermediateBufToSlot = std::move(slots.intermediateBufToSlot);
   plan_->peakIntermediateSlots = slots.peakIntermediateSlots;
 
-  // ── Load the cubin and resolve every kernel symbol ───────────────
-  checkCu(cuModuleLoadData(&cuModule_, data_.cubin.data()),
-           "cuModuleLoadData");
+  // ── Per-kernel I/O arity validation ──────────────────────────────
+  // Catches mis-wired external kernels (which have a fixed signature)
+  // at construction time, well before the launch path.
+  validateKernelIO(data_.kernels,
+                    plan_->kernelInputBufs, plan_->kernelOutputBufs);
+
+  // ── Load cubin(s) + resolve every kernel symbol ──────────────────
+  loadJitCubin(data_, cuModule_);
+  loadCsRankPtxIfNeeded(data_.kernels, csRankModule_);
+
   cuFuncs_.resize(data_.kernels.size(), nullptr);
-  for (size_t i = 0; i < data_.kernels.size(); ++i)
-    checkCu(cuModuleGetFunction(&cuFuncs_[i], cuModule_,
-                                 data_.kernels[i].kernelName.c_str()),
-             "cuModuleGetFunction");
+  for (size_t i = 0; i < data_.kernels.size(); ++i) {
+    cuFuncs_[i] = resolveOneKernelSymbol(data_.kernels[i],
+                                          cuModule_, csRankModule_);
+  }
+
+  // ── Opt external kernels into the device's full dynamic smem cap ──
+  optInExternalSmemMax(data_.kernels, cuFuncs_);
 }
 
 Executable::~Executable() {
@@ -411,6 +661,8 @@ Executable::~Executable() {
   freeSlotPool();
   if (cuModule_)
     cuModuleUnload(cuModule_);
+  if (csRankModule_)
+    cuModuleUnload(csRankModule_);
 }
 
 void Executable::freeSlotPool() {
@@ -458,69 +710,29 @@ int Executable::peakIntermediateSlots() const noexcept {
 void Executable::launchOnStream(
     int64_t timeLength, int64_t numStocks,
     const std::vector<std::pair<std::string, uintptr_t>> &args,
-    CUstream stream) {
-  // 1.  Shape sanity (kernel signature is i32 i32).
+    CUstream stream,
+    int devMaxSmemBytes) {
+  // ── Shape sanity (kernel signature is i32, i32) ──────────────────
   if (timeLength > std::numeric_limits<int32_t>::max() ||
       numStocks  > std::numeric_limits<int32_t>::max() ||
       timeLength < 0 || numStocks < 0)
     throw std::runtime_error(
         "kun_cuda::launchOnStream: time_length / num_stocks out of i32 "
         "range (kernel signature uses i32, i32)");
+  if (data_.warpsPerCta <= 0)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: warps_per_cta is " +
+        std::to_string(data_.warpsPerCta));
 
-  // 2.  Allocate intermediate slot pool if needed.
+  // ── Grow / reuse the intermediate slot pool for this shape ───────
   ensureSlotPool(timeLength, numStocks);
 
-  // 3.  Resolve user args into the flat buffer table.  Two hash lookups
-  //     per user arg, that's it.
-  std::vector<uintptr_t> bufPtrs(plan_->numBuffers, 0);
-  std::vector<bool>      filled(plan_->numBuffers, false);
+  // ── Map user args + slot pool into a flat buffer-index → ptr ─────
+  const std::vector<uintptr_t> bufPtrs =
+      resolveBufferPointers(*plan_, data_, args, slotBufs_);
 
-  for (const auto &kv : args) {
-    auto itIn = plan_->graphInputIdx.find(kv.first);
-    auto itOut = plan_->graphOutputIdx.find(kv.first);
-    int idx = -1;
-    if (itIn != plan_->graphInputIdx.end())
-      idx = itIn->second;
-    else if (itOut != plan_->graphOutputIdx.end())
-      idx = itOut->second;
-    else
-      throw std::runtime_error(
-          "kun_cuda::launchOnStream: unexpected argument '" + kv.first +
-          "' (expected: " + joinNames(data_.graphInputs) + " | " +
-          joinNames(data_.graphOutputs) + ")");
-    bufPtrs[idx] = kv.second;
-    filled[idx] = true;
-  }
-
-  // 4.  Confirm every graph input + output was supplied.
-  for (int i = 0; i < plan_->numGraphInputs + plan_->numGraphOutputs; ++i) {
-    if (filled[i]) continue;
-    std::string missing;
-    for (auto &kv : plan_->graphInputIdx)  if (kv.second == i) missing = kv.first;
-    if (missing.empty())
-      for (auto &kv : plan_->graphOutputIdx) if (kv.second == i) missing = kv.first;
-    throw std::runtime_error(
-        "kun_cuda::launchOnStream: missing argument '" + missing + "'");
-  }
-
-  // 5.  Fill intermediate slots from the pre-allocated pool.
-  for (int i = plan_->numGraphInputs + plan_->numGraphOutputs;
-        i < plan_->numBuffers; ++i) {
-    int slot = plan_->intermediateBufToSlot[i];
-    bufPtrs[i] = slotBufs_[slot];
-  }
-
-  // 6.  Launch each kernel in topo order on `stream`.  Async — the
-  //     caller (Executor) owns waiting via cuStreamSynchronize.
-  unsigned blockX = static_cast<unsigned>(data_.warpsPerCta * 32);
-  if (blockX == 0)
-    throw std::runtime_error(
-        "kun_cuda::launchOnStream: warps_per_cta is 0");
-  uint64_t stocksPerBlock =
-      static_cast<uint64_t>(blockX) * static_cast<uint64_t>(data_.vectorSize);
-  unsigned gridX = static_cast<unsigned>(
-      (static_cast<uint64_t>(numStocks) + stocksPerBlock - 1) / stocksPerBlock);
-
+  // ── Launch each kernel in topo order on `stream`.  Async — the
+  //    caller (Executor) waits via cuStreamSynchronize. ─────────────
   int32_t timeLenI32   = static_cast<int32_t>(timeLength);
   int32_t numStocksI32 = static_cast<int32_t>(numStocks);
 
@@ -528,25 +740,28 @@ void Executable::launchOnStream(
     const auto &ins  = plan_->kernelInputBufs[kIdx];
     const auto &outs = plan_->kernelOutputBufs[kIdx];
 
+    // Build the argv: (i32 T, i32 S, ins..., outs...) — same shape
+    // for Jit and external kernels.
     std::vector<CUdeviceptr> ptrs;
     ptrs.reserve(ins.size() + outs.size());
     for (int b : ins)  ptrs.push_back(static_cast<CUdeviceptr>(bufPtrs[b]));
     for (int b : outs) ptrs.push_back(static_cast<CUdeviceptr>(bufPtrs[b]));
-
     std::vector<void *> argPtrs;
     argPtrs.reserve(2 + ptrs.size());
     argPtrs.push_back(&timeLenI32);
     argPtrs.push_back(&numStocksI32);
     for (auto &p : ptrs) argPtrs.push_back(&p);
 
-    // sharedMemBytes = 0 — shared memory is static (declared as
-    // `llvm.mlir.global addr_space=3` and allocated by ptxas into the
-    // cubin's `.shared` section); the dynamic-smem launch parameter does
-    // not apply.
-    checkCu(cuLaunchKernel(cuFuncs_[kIdx], gridX, 1, 1, blockX, 1, 1,
-                             /*sharedMemBytes=*/0, stream,
-                             argPtrs.data(), nullptr),
-             "cuLaunchKernel");
+    const auto &meta = data_.kernels[kIdx];
+    if (meta.kind == KernelKind::Jit) {
+      launchJitKernel(cuFuncs_[kIdx], numStocks,
+                       data_.warpsPerCta, data_.vectorSize,
+                       argPtrs.data(), stream);
+    } else {
+      launchExtCsRankKernel(cuFuncs_[kIdx], meta.kind, meta.kernelName,
+                              timeLength, numStocks, data_.warpsPerCta,
+                              devMaxSmemBytes, argPtrs.data(), stream);
+    }
   }
 }
 
@@ -554,14 +769,36 @@ void Executable::launchOnStream(
 // Executor — thin CUstream wrapper, mirrors the CPU `kun::Executor` shape.
 //===----------------------------------------------------------------------===//
 
-Executor::Executor() : stream_(nullptr) {}
-Executor::Executor(CUstream stream) : stream_(stream) {}
+namespace {
+/// Query the current CUcontext's device for
+/// MAX_SHARED_MEMORY_PER_BLOCK_OPTIN.  Returns 0 if no context is
+/// current — the Executor accepts that and the launch path will only
+/// trip the check if the executable actually has external cs_rank
+/// kernels (in which case the user must have a context anyway).
+int queryDevMaxSmemBytes() {
+  CUcontext cur = nullptr;
+  if (cuCtxGetCurrent(&cur) != CUDA_SUCCESS || !cur) return 0;
+  CUdevice dev = 0;
+  if (cuCtxGetDevice(&dev) != CUDA_SUCCESS) return 0;
+  int v = 0;
+  if (cuDeviceGetAttribute(
+          &v, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, dev)
+      != CUDA_SUCCESS)
+    return 0;
+  return v;
+}
+} // namespace
+
+Executor::Executor()
+    : stream_(nullptr), devMaxSmemBytes_(queryDevMaxSmemBytes()) {}
+Executor::Executor(CUstream stream)
+    : stream_(stream), devMaxSmemBytes_(queryDevMaxSmemBytes()) {}
 Executor::~Executor() = default;
 
 void Executor::runGraph(
     Executable &exe, int64_t timeLength, int64_t numStocks,
     const std::vector<std::pair<std::string, uintptr_t>> &args) {
-  exe.launchOnStream(timeLength, numStocks, args, stream_);
+  exe.launchOnStream(timeLength, numStocks, args, stream_, devMaxSmemBytes_);
 }
 
 void Executor::synchronize() {

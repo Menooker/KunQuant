@@ -11,7 +11,9 @@
 //   - All inputs to kunir.for_each_back_window must be ts handles (function
 //     arguments or kunir.windowed_output results).
 //   - Each yield operand of for_each_back_window must come from a reduce_* op.
-//   - kunir.cs_rank is not yet supported.
+//   - Cross-sectional kernels (cs_rank) never enter kunir — the Python
+//     frontend (CodegenMLIR._maybe_external_partition) routes them
+//     directly to a pre-compiled CUmodule bundled with the runtime.
 //
 //===----------------------------------------------------------------------===//
 
@@ -164,6 +166,7 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
     if (!isa<TsType>(ty)) newRetTys.push_back(ty);
   funcOp.setFunctionTypeAttr(
       TypeAttr::get(FunctionType::get(ctx, newArgTys, newRetTys)));
+
 
   // ------------------------------------------------------------------
   // 2. Snapshot original ops and find the original return.
@@ -350,9 +353,6 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
       return success();
     }
 
-    if (isa<CsRankOp>(op)) {
-      return op.emitError("kunir-to-kungpu: cs_rank lowering not yet implemented");
-    }
     return op.emitError("kunir-to-kungpu: unhandled op in outer block");
   };
 

@@ -57,11 +57,25 @@ struct GraphPlan;
 // Compile-time output (all names — runtime resolves them to indices)
 //===----------------------------------------------------------------------===//
 
+/// Kernel dispatch kind.  `Jit` kernels live in the cubin produced by
+/// the MLIR pipeline and are launched with the project-wide stock-major
+/// grid (block_x = warps_per_cta * 32, grid_x = ceil(S / block_x)).
+/// `ExtCsRank*` kernels are pre-compiled PTX bundled inside
+/// libKunCudaRuntime; the executor lazy-loads them as a second
+/// CUmodule and launches them with a time-major grid + dynamic shared
+/// memory sized to the cross-section (one CTA per timestep).
+enum class KernelKind : int32_t {
+  Jit          = 0,
+  ExtCsRankF32 = 1,
+  ExtCsRankF64 = 2,
+};
+
 /// Per-kernel metadata, in name form.  This is what the compiler can
 /// produce by walking a single lowered llvm.func — no graph topology
 /// reasoning required.
 struct KernelMeta {
-  std::string kernelName;                    ///< symbol in the cubin
+  std::string kernelName;                    ///< symbol in the cubin (Jit) or in the bundled PTX (ExtCsRank*)
+  KernelKind kind = KernelKind::Jit;         ///< picked by the MLIR pass; default is the regular path
   std::vector<std::string> inputNames;       ///< kungpu.input_names, in argv order
   std::vector<std::string> outputNames;      ///< kungpu.output_names, in argv order
 };
@@ -149,11 +163,19 @@ public:
   ///   block_x = warps_per_cta * 32
   ///   grid_x  = ceil_div(numStocks, block_x * vector_size)
   ///
+  /// `devMaxSmemBytes` is the device's MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+  /// cached by the caller (`Executor`) so the runtime can validate
+  /// `num_stocks * sizeof(T)` against the GPU's smem cap before
+  /// invoking cuLaunchKernel for external cs_rank kernels.  Pass 0 if
+  /// there are no external kernels in the executable (the check is a
+  /// no-op in that case).
+  ///
   /// Throws std::runtime_error on validation or driver errors.  This is
   /// a low-level entry point — most users go through `Executor::runGraph`.
   void launchOnStream(int64_t timeLength, int64_t numStocks,
                        const std::vector<std::pair<std::string, uintptr_t>> &args,
-                       CUstream stream);
+                       CUstream stream,
+                       int devMaxSmemBytes);
 
 private:
   /// Allocate (or re-allocate, if shape changed) the intermediate slot
@@ -166,6 +188,10 @@ private:
   std::unique_ptr<GraphPlan> plan_;          ///< pImpl — defined in Runtime.cpp
 
   CUmodule cuModule_ = nullptr;
+  /// Module holding the pre-compiled cs_rank PTX.  Loaded at
+  /// construction time iff any kernel has `kind != Jit`; null
+  /// otherwise.
+  CUmodule csRankModule_ = nullptr;
   std::vector<CUfunction> cuFuncs_;          ///< parallel to data_.kernels
 
   // Lazily allocated intermediate buffers, one CUdeviceptr per slot
@@ -220,9 +246,15 @@ public:
 
   /// Raw stream handle (default-stream Executor returns nullptr).
   CUstream stream() const noexcept { return stream_; }
+  /// Cached MAX_SHARED_MEMORY_PER_BLOCK_OPTIN of the device this
+  /// Executor's CUcontext is bound to, queried once at construction.
+  /// Used to validate cs_rank dynamic-smem requests at launch time
+  /// without a per-launch driver call.
+  int devMaxSmemBytes() const noexcept { return devMaxSmemBytes_; }
 
 private:
   CUstream stream_ = nullptr;
+  int devMaxSmemBytes_ = 0;
 };
 
 } // namespace kun_cuda

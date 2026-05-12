@@ -8,7 +8,19 @@ include_directories(${MLIR_INCLUDE_DIRS})
 include_directories(${KUN_MLIR_SOURCE_DIR}/include)
 include_directories(${KUN_MLIR_BINARY_DIR}/include)
 
-add_definitions(${LLVM_DEFINITIONS})
+# LLVMConfig.cmake exports LLVM_DEFINITIONS as a single space-separated
+# *string* (e.g. "-D_GNU_SOURCE -D_GLIBCXX_USE_CXX11_ABI=1 ...").
+# Plain `add_definitions(${LLVM_DEFINITIONS})` works most of the time
+# (CMake splits on whitespace during unquoted expansion), but some
+# CMake versions cache the string as a single COMPILE_DEFINITIONS
+# entry, which then re-emits as one malformed `-D_GLIBCXX_USE_CXX11_ABI="1
+# -D__STDC_CONSTANT_MACROS ..."` flag — duplicating the macro and
+# producing the "_GLIBCXX_USE_CXX11_ABI redefined" warning.
+#
+# Tokenise the string explicitly first to keep CMake honest, then add.
+separate_arguments(_KUN_LLVM_DEFS UNIX_COMMAND "${LLVM_DEFINITIONS}")
+add_compile_options(${_KUN_LLVM_DEFS})
+unset(_KUN_LLVM_DEFS)
 
 # The MLIR backend requires LLVM to have been built with the NVPTX target
 # — we emit PTX and load cubins.  Fail loudly here so the diagnostic is

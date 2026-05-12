@@ -181,21 +181,34 @@ def _run_full_pipeline(f: Function, cfg: CudaCompilerConfig):
     return impl
 
 
-def _translate_partitions(impl, cfg: CudaCompilerConfig) -> KunMLIR.ModuleOp:
+def _translate_partitions(impl, cfg: CudaCompilerConfig):
     """Emit one kunir.func per partitioned Function into a single
     KunMLIR module (single `gpu.module` with N siblings).  Cross-
     partition buffers stitch up automatically because each impl's
     Input/Output names match the producing/consuming partition's
-    Output/Input names."""
+    Output/Input names.
+
+    Cross-sectional partitions (currently: cs_rank) bypass the kunir
+    pipeline entirely — `translate_function` returns a descriptor and
+    we collect those into `external_kernels`, which the C++ side
+    appends to the executable's kernel list without ever generating
+    LLVM IR / PTX for them.
+
+    Returns (ModuleOp, list[dict]) — the second element is the list
+    of external-kernel descriptors to forward to KunMLIR.compile.
+    """
     target = TargetSpec(occupancy=cfg.occupancy,
                           warps_per_cta=cfg.warps_per_cta,
                           smem_size=cfg.smem_size,
                           vector_size=cfg.vector_size)
     ir = KunMLIR.IRBuilder()
     dtype = _to_dtype_token(cfg.dtype)
+    externals = []
     for sub in impl:
-        translate_function(sub, target, ir, dtype=dtype)
-    return ir.finish()
+        ext = translate_function(sub, target, ir, dtype=dtype)
+        if ext is not None:
+            externals.append(ext)
+    return ir.finish(), externals
 
 
 def compileit(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.Executable:
@@ -221,7 +234,7 @@ def compileit(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.Executable:
 
     graph_inputs, graph_outputs = _graph_io_names(f)
     impl = _run_full_pipeline(f, cfg)
-    mod  = _translate_partitions(impl, cfg)
+    mod, externals = _translate_partitions(impl, cfg)
 
     return KunMLIR.compile(
         mod,
@@ -230,13 +243,23 @@ def compileit(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.Executable:
         gpu_arch=cfg.gpu_arch,
         opt_level=cfg.opt_level,
         toolkit_path=toolkit_path,
+        external_kernels=externals,
+        # Forwarded for the no-JIT-kernel case: when every partition
+        # is external (e.g. a graph that is just `cs_rank(a)`), the
+        # MLIR module is empty and `data.warpsPerCta` would otherwise
+        # default to 1 — but the cs_rank launch uses it to size
+        # blockDim, so feed the config value through.
+        warps_per_cta=cfg.warps_per_cta,
     )
 
 
 def to_mlir(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.ModuleOp:
     """Run the same passes + translator as `compileit`, but return the
-    KunMLIR module before PTX/CUBIN.  Useful for debugging the IR.
-    Mutates `f` in place (same as `compileit`)."""
+    KunMLIR module before PTX/CUBIN.  External (cs_rank) partitions
+    are absent from the returned module — they never become kunir
+    ops.  Useful for debugging the IR.  Mutates `f` in place (same
+    as `compileit`)."""
     _graph_io_names(f)              # raises if no Input / Output ops
     impl = _run_full_pipeline(f, cfg)
-    return _translate_partitions(impl, cfg)
+    mod, _externals = _translate_partitions(impl, cfg)
+    return mod

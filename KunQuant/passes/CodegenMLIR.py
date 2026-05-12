@@ -22,7 +22,7 @@ from typing import Dict, List, Tuple
 
 from KunQuant.Op import (
     OpBase, Input, Output, ForeachBackWindow, IterValue, WindowedTempOutput,
-    ReductionOp, Rank,
+    ReductionOp, SimpleCrossSectionalOp,
 )
 from KunQuant.ops.ElewiseOp import (
     Add, Sub, Mul, Div, Max, Min, Abs, Log, Sign,
@@ -41,7 +41,10 @@ _BINARY = {
     Max: "max", Min: "min",
 }
 _UNARY = {
-    Abs: "abs", Log: "log", Sign: "sign", Rank: "cs_rank",
+    Abs: "abs", Log: "log", Sign: "sign",
+    # NOTE: `Rank` is intentionally absent.  Cross-sectional rank
+    # partitions are routed to a pre-compiled CUmodule by
+    # `_maybe_external_partition` below; they never become kunir ops.
 }
 _REDUCE = {
     ReduceAdd: "reduce_add", ReduceMul: "reduce_mul",
@@ -62,6 +65,25 @@ class TargetSpec:
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
+
+def _kunir_symbol(name: str) -> str:
+    """Coerce a partition name into a valid kunir / PTX symbol.
+
+    The partitioner derives a partition's name from the names of its
+    Output ops; when a partition is "intermediate-only" (every output
+    is consumed by a downstream partition, none is a user-facing
+    Output), those names come from `OpBase.hash_hex` which starts with
+    a digit half the time.  Digits are fine for buffer-table keys
+    (CPU runtime indexes by name) but ptxas rejects them as
+    `.entry` symbols.
+
+    Prefix any such name with a single `_` so the kunir.func symbol
+    is always a valid identifier, while leaving `input_names` /
+    `output_names` (the public buffer-table keys) untouched.
+    """
+    if name and name[0].isdigit():
+        return "_" + name
+    return name
 
 def _index_loop_members(f: Function) -> Tuple[
         Dict[ForeachBackWindow, List[OpBase]],
@@ -117,14 +139,62 @@ def _emit_reduction(op: ReductionOp, ir, val_map: Dict[OpBase, object]):
 
 # ── Main entry point ────────────────────────────────────────────────
 
+def _maybe_external_partition(f: Function, dtype: str):
+    """If `f` is a partition the GPU runtime handles as a pre-compiled
+    external kernel (bundled PTX loaded as a separate CUmodule), return
+    a descriptor dict that KunMLIR.compile() should append to the
+    executable's kernel list.  Otherwise return None.
+
+    The descriptor matches what KunMLIR.compile's `external_kernels=`
+    parameter expects:
+        {"name": <str>, "kind": <str>,
+         "inputs": [<str>...], "outputs": [<str>...]}
+
+    Detection mirrors CodegenCpp's "simple cross-sectional fast path"
+    (CodegenCpp.codegen_cpp's `len(f.ops) == 3` check): a partition
+    whose only compute op is a `SimpleCrossSectionalOp` (Rank, Scale,
+    …).  The partitioner places every CrossSectionalOp into its own
+    partition without other compute, so this shape is what we get.
+
+    The `kind` string is `cs_<lowercased class name>_f{32,64}`, e.g.
+    `cs_rank_f32`, `cs_scale_f64`.  The C++ binding maps it to a
+    `KernelKind` enum; unknown kinds raise there with a clear error,
+    so adding a new SimpleCrossSectionalOp on the Python side does
+    not silently succeed without a matching bundled PTX kernel.
+    """
+    compute = [op for op in f.ops
+                if not isinstance(op, (Input, Output))]
+    if len(compute) != 1 or not isinstance(compute[0], SimpleCrossSectionalOp):
+        return None
+    inputs  = [op for op in f.ops if isinstance(op, Input)]
+    outputs = [op for op in f.ops if isinstance(op, Output)]
+    if len(inputs) != 1 or len(outputs) != 1:
+        return None  # surprising shape, let the regular path emit an error
+    if dtype not in ("f32", "f64"):
+        return None
+    op_kind = compute[0].__class__.__name__.lower()
+    return {
+        "name":    f.name or f"cs_{op_kind}",
+        "kind":    f"cs_{op_kind}_{dtype}",
+        "inputs":  [op.attrs["name"] for op in inputs],
+        "outputs": [op.attrs["name"] for op in outputs],
+    }
+
+
 def translate_function(f: Function, target: TargetSpec, ir,
                         dtype: str = "f32"):
     """Emit `f` as a single kunir.func into the open `ir` (KunMLIR.IRBuilder).
 
-    Returns the list of (input_name, output_name) declared on the func,
-    so the caller can pass them straight to KunMLIR.compile() as
-    graph_inputs / graph_outputs.
+    If `f` is an externally-dispatched partition (e.g. a single cs_rank
+    op handled by the bundled cs_rank.ptx CUmodule), emit nothing into
+    the IRBuilder and return its descriptor dict so the caller can pass
+    it to KunMLIR.compile()'s `external_kernels=` list.  Otherwise
+    return `None` after emitting a kunir.func.
     """
+    ext = _maybe_external_partition(f, dtype)
+    if ext is not None:
+        return ext
+
     # 1.  Boundary ops in topo order — the kunir.func's I/O.
     inputs:  List[Input]  = [op for op in f.ops if isinstance(op, Input)]
     outputs: List[Output] = [op for op in f.ops if isinstance(op, Output)]
@@ -147,7 +217,7 @@ def translate_function(f: Function, target: TargetSpec, ir,
     ts_1   = ir.ts_type(dtype, 1)
 
     func_args = ir.begin_func(
-        name=f.name or "kernel",
+        name=_kunir_symbol(f.name or "kernel"),
         input_types=[ts_inf] * len(inputs),
         input_names=in_names,
         output_names=out_names,
@@ -190,7 +260,7 @@ def translate_function(f: Function, target: TargetSpec, ir,
     # 5.  Close the function with Outputs in declared order.
     return_values = [val_map[o.inputs[0]] for o in outputs]
     ir.end_func(return_values)
-    return in_names, out_names
+    return None
 
 
 def _emit_loop(loop: ForeachBackWindow, ir, val_map, ts_1,

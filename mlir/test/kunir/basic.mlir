@@ -59,17 +59,6 @@ kunir.func @test_windowed_output(%input: !kunir.ts<f32, inf>)
   kunir.return %out : !kunir.ts<f32, 10>
 }
 
-// CHECK-LABEL: kunir.func @test_cs_rank
-kunir.func @test_cs_rank(%input: !kunir.ts<f32, inf>)
-    inputs {%input = "input"}
-    outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
-    -> !kunir.ts<f32, 1> {
-  // CHECK: kunir.cs_rank
-  %ranked = kunir.cs_rank %input : !kunir.ts<f32, inf>
-  kunir.return %ranked : !kunir.ts<f32, 1>
-}
-
 // CHECK-LABEL: kunir.func @test_for_each_back_window_single
 kunir.func @test_for_each_back_window_single(%close: !kunir.ts<f32, 10>)
     inputs {%close = "close"}

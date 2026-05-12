@@ -178,10 +178,15 @@ LogicalResult compileKunIrToExecutable(ModuleOp module,
     kernels.push_back(std::move(km));
     return WalkResult::advance();
   });
+
+  // No JIT kernels at all is legal — every partition could be an
+  // externally-dispatched kernel (e.g. a graph that is only cs_rank).
+  // In that case skip cubin generation entirely; the caller (pyCompile)
+  // is expected to inject external KernelMetas and to provide
+  // warpsPerCta out-of-band.
+  out = ::kun_cuda::ExecutableData{};
   if (kernels.empty())
-    return module.emitError(
-        "compileKunIrToExecutable: no llvm.func with kungpu metadata "
-        "found in the lowered module");
+    return success();
 
   // 3.  Validate target spec is graph-wide.
   auto [warpsPerCta, vectorSize] = targetSpecs.front();
@@ -206,7 +211,6 @@ LogicalResult compileKunIrToExecutable(ModuleOp module,
 
   // 5.  Populate `out`.  graphInputs / graphOutputs are caller-supplied
   //     after this returns — leave them empty.
-  out = ::kun_cuda::ExecutableData{};
   out.cubin.assign(cubin.begin(), cubin.end());
   out.warpsPerCta = warpsPerCta;
   out.vectorSize  = vectorSize;

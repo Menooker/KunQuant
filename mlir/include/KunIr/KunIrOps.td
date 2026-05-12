@@ -86,26 +86,12 @@ def KunIr_SignOp : KunIr_UnaryElemwiseOp<"sign"> {
 //===----------------------------------------------------------------------===//
 // Cross-sectional ops
 //
-// Operates time-step-by-time-step across all stocks. Result has maxLookback=1.
+// kunir has no first-class cross-sectional op.  Cross-sectional kernels
+// (currently only cs_rank) are routed by the Python frontend
+// (KunQuant.passes.CodegenMLIR._maybe_external_partition) directly to a
+// pre-compiled CUmodule bundled with the runtime — they never appear
+// in kunir IR or the MLIR pipeline.
 //===----------------------------------------------------------------------===//
-
-def KunIr_CsRankOp : KunIr_Op<"cs_rank", [
-    Pure,
-    InferTypeOpInterface,
-    NativeOpTrait<"KunIrElemwiseTsResultType">
-]> {
-  let summary = "Cross-sectional rank of a time series";
-  let description = [{
-    For each time step t, computes the rank of each stock's value among
-    all stocks at time t. Output values are in the range [0, 1].
-    The input may have any maxLookback; the result always has maxLookback = 1.
-  }];
-  let arguments = (ins KunIr_AnyTs:$input);
-  let results = (outs KunIr_AnyTs:$result);
-  let hasVerifier = 1;
-  let assemblyFormat =
-    "$input `:` type($input) attr-dict";
-}
 
 //===----------------------------------------------------------------------===//
 // WindowedOutput op
