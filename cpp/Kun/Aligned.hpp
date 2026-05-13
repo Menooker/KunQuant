@@ -21,9 +21,8 @@
 #define kunAlignedFree(ptr)              _aligned_free(ptr)
 #else
 // POSIX `aligned_alloc(alignment, size)` requires size to be a
-// multiple of alignment.  Callers (Buffer::alloc, etc.) pass
-// `count * elem_size` which is already a multiple of
-// KUN_MALLOC_ALIGNMENT in practice, so the macro is a thin pass-through.
+// multiple of alignment.  Callers must round up the size before
+// invoking this macro.
 #define kunAlignedAlloc(alignment, size) aligned_alloc((alignment), (size))
 #define kunAlignedFree(ptr)              free(ptr)
 #endif

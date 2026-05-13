@@ -2,6 +2,7 @@
 #include <Kun/Context.hpp>
 #include <Kun/Module.hpp>
 #include <Kun/IO.hpp>
+#include <Kun/MathUtil.hpp>
 #include <Kun/RunGraph.hpp>
 #include <Kun/StateBuffer.hpp>  // KUN_MALLOC_ALIGNMENT
 #include <KunSIMD/cpu/Table.hpp>
@@ -44,7 +45,10 @@ static std::string shapeToString(const std::vector<size_t> &shape) {
     return ss.str();
 }
 
-static std::vector<size_t> arrayShape(const nb::ndarray<nb::ro> &arr) {
+using CpuArray = nb::ndarray<nb::device::cpu>;
+using CpuArrayRO = nb::ndarray<nb::device::cpu, nb::ro>;
+
+static std::vector<size_t> arrayShape(const CpuArrayRO &arr) {
     std::vector<size_t> r;
     r.reserve(arr.ndim());
     for (size_t i = 0; i < arr.ndim(); i++) {
@@ -53,7 +57,7 @@ static std::vector<size_t> arrayShape(const nb::ndarray<nb::ro> &arr) {
     return r;
 }
 
-static bool dtypeMatches(const nb::ndarray<nb::ro> &arr, kun::Datatype dtype) {
+static bool dtypeMatches(const CpuArrayRO &arr, kun::Datatype dtype) {
     if (dtype == kun::Datatype::Float) {
         return arr.dtype() == nb::dtype<float>();
     }
@@ -65,7 +69,7 @@ static bool dtypeMatches(const nb::ndarray<nb::ro> &arr, kun::Datatype dtype) {
 // in that nanobind reports strides in *elements*, not bytes — so the
 // expected-stride walk uses element counts.
 static void expectContiguousShape(kun::Datatype dtype,
-                                    const nb::ndarray<nb::ro> &arr,
+                                    const CpuArrayRO &arr,
                                     const char *name,
                                     const std::vector<size_t> &shape) {
     if (!dtypeMatches(arr, dtype)) {
@@ -114,10 +118,10 @@ struct StreamContextWrapper {
         : lib{m->lib}, ctx{std::move(exec), m->modu, num_stocks, states} {}
 };
 
-void *checkInput(const nb::ndarray<nb::ro> &arr, const std::string &name,
-                 kun::MemoryLayout mlayout, kun::Datatype dtype,
-                 size_t &known_S, size_t &known_T,
-                 size_t &knownNumStocks, size_t simd_len) {
+const void *checkInput(const CpuArrayRO &arr, const std::string &name,
+                       kun::MemoryLayout mlayout, kun::Datatype dtype,
+                       size_t &known_S, size_t &known_T,
+                       size_t &knownNumStocks, size_t simd_len) {
     if (mlayout == kun::MemoryLayout::STs) {
         if (arr.ndim() != 3) {
             throw std::runtime_error("Bad STs shape at " + name);
@@ -150,11 +154,13 @@ void *checkInput(const nb::ndarray<nb::ro> &arr, const std::string &name,
     } else {
         throw std::runtime_error("Unknown layout at " + name);
     }
-    // The kernel may write through this pointer; drop const here.  We
-    // accept nb::ro at the binding boundary to allow pandas-derived
-    // (read-only) inputs, but the kun:: runtime types everything as
-    // `float *` and we preserve pybind11's pre-existing permissiveness.
-    return const_cast<void *>(arr.data());
+    return arr.data();
+}
+
+static float *runtimeInputPtr(const void *ptr) {
+    // The Kun runtime still types input buffers as float*, while the
+    // Python binding intentionally accepts read-only arrays for inputs.
+    return static_cast<float *>(const_cast<void *>(ptr));
 }
 
 kun::AggregrationKind getAggregrationKind(const std::string &name) {
@@ -168,6 +174,14 @@ kun::AggregrationKind getAggregrationKind(const std::string &name) {
     throw std::runtime_error("Unknown aggregration kind: " + name);
 }
 
+static CpuArray castWritableCpuArray(nb::handle obj, const char *name) {
+    CpuArray arr;
+    if (!nb::try_cast(obj, arr, false)) {
+        throw std::runtime_error(std::string("Expecting writable CPU buffer at ") + name);
+    }
+    return arr;
+}
+
 // Capsule-owned numpy array, KUN_MALLOC_ALIGNMENT-aligned via
 // kunAlignedAlloc.  Python's GC frees the buffer when the array dies.
 template <typename T>
@@ -178,7 +192,8 @@ allocOwnedNumpyArray(const size_t *shape, size_t ndim) {
         total *= shape[i];
     }
     T *data = static_cast<T *>(
-        kunAlignedAlloc(KUN_MALLOC_ALIGNMENT, total * sizeof(T)));
+        kunAlignedAlloc(KUN_MALLOC_ALIGNMENT,
+                        kun::roundUp(total * sizeof(T), KUN_MALLOC_ALIGNMENT)));
     if (!data) {
         throw std::bad_alloc();
     }
@@ -292,8 +307,8 @@ NB_MODULE(KunRunner, m) {
             size_t simd_len = mod->blocking_len;
             for (auto kv : inputs) {
                 auto name = nb::cast<std::string>(kv.first);
-                auto arr  = nb::cast<nb::ndarray<nb::ro>>(kv.second);
-                bufs[name] = (float *)const_cast<void *>(arr.data());
+                auto arr  = nb::cast<CpuArrayRO>(kv.second, false);
+                bufs[name] = runtimeInputPtr(arr.data());
                 if (skip_check) {
                     if (known_S == 0 && strncmp(name.c_str(), "__init", 6)) {
                         if (mod->input_layout == kun::MemoryLayout::STs) {
@@ -406,12 +421,12 @@ NB_MODULE(KunRunner, m) {
                     nb::dict outputs_dict = nb::cast<nb::dict>(outputs);
                     if (outputs_dict.contains(nb::cast(buf.name))) {
                         outbuffer = nb::borrow(outputs_dict[nb::cast(buf.name)]);
-                        nb::ndarray<nb::ro> view = nb::cast<nb::ndarray<nb::ro>>(outbuffer);
+                        CpuArray view = castWritableCpuArray(outbuffer, buf.name);
                         if (!skip_check) {
-                            expectContiguousShape(mod->dtype, view, buf.name,
+                            expectContiguousShape(mod->dtype, CpuArrayRO(view), buf.name,
                                                   expected_out_shape);
                         }
-                        bufs[buf.name] = (float *)const_cast<void *>(view.data());
+                        bufs[buf.name] = static_cast<float *>(view.data());
                         ret[nb::cast(buf.name)] = outbuffer;
                         continue;
                     }
@@ -440,9 +455,9 @@ NB_MODULE(KunRunner, m) {
     m.def(
         "corrWith",
         [](std::shared_ptr<kun::Executor> exec,
-           const std::vector<nb::ndarray<nb::ro>> &inputs,
-           nb::ndarray<nb::ro> corr_with,
-           const std::vector<nb::ndarray<nb::ro>> &outs,
+           const std::vector<CpuArrayRO> &inputs,
+           CpuArrayRO corr_with,
+           const std::vector<CpuArray> &outs,
            const char *layout, bool rank_inputs) {
             kun::MemoryLayout mlayout;
             if (!strcmp(layout, "TS")) {
@@ -462,22 +477,22 @@ NB_MODULE(KunRunner, m) {
             std::vector<float *> bufinputs;
             std::vector<float *> bufoutputs;
 
-            float *bufcorr_with = (float *)checkInput(
+            float *bufcorr_with = runtimeInputPtr(checkInput(
                 corr_with, "corr_with", mlayout, kun::Datatype::Float,
-                known_S, known_T, knownNumStocks, simd_len);
+                known_S, known_T, knownNumStocks, simd_len));
             int idx = -1;
             for (auto &arr : inputs) {
                 idx += 1;
-                bufinputs.push_back((float *)checkInput(
+                bufinputs.push_back(runtimeInputPtr(checkInput(
                     arr, std::string("buffer_") + std::to_string(idx), mlayout,
                     kun::Datatype::Float, known_S, known_T, knownNumStocks,
-                    simd_len));
+                    simd_len)));
             }
             std::vector<size_t> expected_out_shape{known_T};
             for (size_t i = 0; i < outs.size(); i++) {
-                expectContiguousShape(kun::Datatype::Float, outs[i], "",
+                expectContiguousShape(kun::Datatype::Float, CpuArrayRO(outs[i]), "",
                                       expected_out_shape);
-                bufoutputs.push_back((float *)const_cast<void *>(outs[i].data()));
+                bufoutputs.push_back(static_cast<float *>(outs[i].data()));
             }
             kun::corrWith(exec, mlayout, rank_inputs, bufinputs, bufcorr_with,
                           bufoutputs, knownNumStocks, known_T, 0, known_T);
@@ -489,8 +504,8 @@ NB_MODULE(KunRunner, m) {
     m.def(
         "aggregrate",
         [](std::shared_ptr<kun::Executor> exec,
-           const std::vector<nb::ndarray<nb::ro>> &inputs,
-           const std::vector<nb::ndarray<nb::ro>> &labels,
+           const std::vector<CpuArrayRO> &inputs,
+           const std::vector<CpuArrayRO> &labels,
            const std::vector<nb::dict> &outs) {
             if (inputs.size() != labels.size() || inputs.size() != outs.size()) {
                 throw std::runtime_error(
@@ -514,26 +529,24 @@ NB_MODULE(KunRunner, m) {
             bufoutputs.reserve(inputs.size());
 
             for (size_t i = 0; i < inputs.size(); i++) {
-                checkInput(inputs[i],
-                           std::string("buffer_") + std::to_string(i),
-                           kun::MemoryLayout::TS, dtype, known_S,
-                           known_T_input, knownNumStocks, simd_len);
+                bufinputs.push_back(runtimeInputPtr(checkInput(
+                    inputs[i], std::string("buffer_") + std::to_string(i),
+                    kun::MemoryLayout::TS, dtype, known_S, known_T_input,
+                    knownNumStocks, simd_len)));
                 expectContiguousShape(dtype, labels[i], "label",
                                       {known_T_input});
-                bufinputs.push_back((float *)const_cast<void *>(inputs[i].data()));
-                buflabels.push_back((float *)const_cast<void *>(labels[i].data()));
+                buflabels.push_back(runtimeInputPtr(labels[i].data()));
                 size_t known_T_output = 0;
                 kun::AggregrationOutput output{};
                 for (auto kv : outs[i]) {
                     auto name = nb::cast<std::string>(kv.first);
                     auto idx = getAggregrationKind(name);
-                    auto value_arr = nb::cast<nb::ndarray<nb::ro>>(kv.second);
-                    auto output_ptr = checkInput(
-                        value_arr,
-                        std::string("output_") + name + std::to_string(idx),
-                        kun::MemoryLayout::TS, dtype, known_S, known_T_output,
-                        knownNumStocks, simd_len);
-                    output.buffers[idx] = (float *)output_ptr;
+                    auto value_arr = castWritableCpuArray(kv.second, name.c_str());
+                    checkInput(CpuArrayRO(value_arr),
+                               std::string("output_") + name + std::to_string(idx),
+                               kun::MemoryLayout::TS, dtype, known_S, known_T_output,
+                               knownNumStocks, simd_len);
+                    output.buffers[idx] = static_cast<float *>(value_arr.data());
                 }
                 bufoutputs.emplace_back(output);
             }
@@ -580,28 +593,19 @@ NB_MODULE(KunRunner, m) {
                  // it directly as the ndarray owner.
                  auto &ths = nb::cast<StreamContextWrapper &>(self).ctx;
                  if (ths.m->dtype == kun::Datatype::Double) {
-                     auto *buf = const_cast<double *>(
-                         ths.getCurrentBufferPtrDouble(handle));
-                     return nb::cast(nb::ndarray<nb::numpy, double>(
+                     auto *buf = ths.getCurrentBufferPtrDouble(handle);
+                     return nb::cast(nb::ndarray<nb::numpy, const double>(
                          buf, {ths.ctx.stock_count}, self));
                  }
-                 auto *buf = const_cast<float *>(
-                     ths.getCurrentBufferPtrFloat(handle));
-                 return nb::cast(nb::ndarray<nb::numpy, float>(
+                 auto *buf = ths.getCurrentBufferPtrFloat(handle);
+                 return nb::cast(nb::ndarray<nb::numpy, const float>(
                      buf, {ths.ctx.stock_count}, self));
              })
         .def("pushData",
-             [](StreamContextWrapper &t, size_t handle, nb::ndarray<nb::ro> data) {
+             [](StreamContextWrapper &t, size_t handle, CpuArrayRO data) {
                  auto &ths = t.ctx;
-                 if (!dtypeMatches(data, ths.m->dtype)) {
-                     throw std::runtime_error(
-                         "Bad input type to push, expecting float");
-                 }
-                 if (data.ndim() != 1 ||
-                     data.shape(0) != ths.ctx.stock_count) {
-                     throw std::runtime_error(
-                         "Bad dimension for input data to push");
-                 }
+                 expectContiguousShape(ths.m->dtype, data, "input data",
+                                       {ths.ctx.stock_count});
                  if (ths.m->dtype == kun::Datatype::Float) {
                      ths.pushData(handle, (const float *)data.data());
                  } else {

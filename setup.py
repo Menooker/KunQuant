@@ -82,7 +82,7 @@ class CMakeBuildExtension(build_ext):
 
 class CMakeExtension(Extension):
     def __init__(self, name, path, sourcedir=""):
-        super().__init__(name, sources=[])
+        super().__init__(name, sources=[], py_limited_api=_HAS_STABLE_ABI)
         self.sourcedir = os.path.abspath(sourcedir)
         self.path = path
 
