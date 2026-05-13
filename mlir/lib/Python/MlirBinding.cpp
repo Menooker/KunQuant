@@ -14,11 +14,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
+#include <nanobind/stl/unique_ptr.h>
 
 #include "PyModule.h"     // shared MLIRContext + ModuleOp wrapper
-#include "IRBuilder.h"    // pybind class for programmatic kunir construction
+#include "IRBuilder.h"    // nanobind class for programmatic kunir construction
 #include "dlpack.h"       // vendored DLPack ABI (consumer-only)
 
 #include "KunCuda/Runtime.h"
@@ -32,7 +34,7 @@
 #include <string>
 #include <vector>
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 using kun_mlir_py::PyModule;
 
@@ -61,7 +63,7 @@ static std::string pyLowerToPtx(PyModule &pm, const std::string &gpuArch,
 }
 
 //===----------------------------------------------------------------------===//
-// pybind glue: read a Python GPU array via DLPack → device pointer + shape
+// nanobind glue: read a Python GPU array via DLPack → device pointer + shape
 //===----------------------------------------------------------------------===//
 
 /// Result of reading one GPU array argument.  `ptr` is the device pointer
@@ -84,10 +86,10 @@ struct CudaArrayInfo {
 ///
 /// We're never "no sync" — every launch must serialise on the executor's
 /// stream — so `stream_ == nullptr` (default-stream executor) maps to 1.
-static py::object dlpackStreamArg(CUstream stream) {
+static nb::object dlpackStreamArg(CUstream stream) {
   if (stream == nullptr)
-    return py::int_(1);
-  return py::int_(reinterpret_cast<uintptr_t>(stream));
+    return nb::int_(1);
+  return nb::int_(reinterpret_cast<uintptr_t>(stream));
 }
 
 /// Throws if `(shape, stridesBytes)` doesn't describe a C-contiguous
@@ -121,15 +123,15 @@ static void requireRowMajorContiguous2D(const std::string &paramName,
 /// calls the producer's `deleter`.  We grab the fields we need and let
 /// the capsule fall out of scope at function exit — the underlying
 /// tensor stays alive because the user is still holding `obj`.
-static CudaArrayInfo readDLPack(py::handle obj, const std::string &paramName,
-                                  const py::object &streamArg) {
-  if (!py::hasattr(obj, "__dlpack__"))
+static CudaArrayInfo readDLPack(nb::handle obj, const std::string &paramName,
+                                  const nb::object &streamArg) {
+  if (!nb::hasattr(obj, "__dlpack__"))
     throw std::runtime_error(
         "'" + paramName + "' does not implement __dlpack__ — pass a CuPy "
         "ndarray, a PyTorch CUDA tensor, a JAX device array, or any other "
         "object exporting the DLPack protocol.");
 
-  py::object capsule = obj.attr("__dlpack__")(py::arg("stream") = streamArg);
+  nb::object capsule = obj.attr("__dlpack__")(nb::arg("stream") = streamArg);
   void *raw = PyCapsule_GetPointer(capsule.ptr(), "dltensor");
   if (!raw) {
     PyErr_Clear();
@@ -191,8 +193,8 @@ struct CollectedArgs {
 };
 
 static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
-                                   py::dict pyArgs,
-                                   const py::object &streamArg) {
+                                   nb::dict pyArgs,
+                                   const nb::object &streamArg) {
   // Graph inputs come first, then outputs — same as the buffer-table
   // layout the runtime expects.
   std::vector<std::string> ordered;
@@ -211,7 +213,7 @@ static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
   // is a typo'd key).
   if (pyArgs.size() > ordered.size()) {
     for (auto kv : pyArgs) {
-      std::string key = py::cast<std::string>(kv.first);
+      std::string key = nb::cast<std::string>(kv.first);
       bool known = false;
       for (auto &n : ordered) if (n == key) { known = true; break; }
       if (!known) {
@@ -231,7 +233,7 @@ static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
   for (size_t i = 0; i < ordered.size(); ++i) {
     const std::string &name = ordered[i];
 
-    py::object key = py::str(name);
+    nb::object key = nb::str(name.c_str());
     if (!pyArgs.contains(key)) {
       std::string expected;
       for (size_t j = 0; j < ordered.size(); ++j) {
@@ -264,11 +266,11 @@ static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
 /// Expected dict shape:
 ///   {"name": str, "kind": str, "inputs": [str...], "outputs": [str...]}
 /// where `kind` is one of "cs_rank_f32" / "cs_rank_f64".
-static kun_cuda::KernelMeta parseExternalKernel(py::handle obj) {
-  py::dict d = obj.cast<py::dict>();
+static kun_cuda::KernelMeta parseExternalKernel(nb::handle obj) {
+  nb::dict d = nb::cast<nb::dict>(obj);
   kun_cuda::KernelMeta km;
-  km.kernelName = d["name"].cast<std::string>();
-  std::string kind = d["kind"].cast<std::string>();
+  km.kernelName = nb::cast<std::string>(d["name"]);
+  std::string kind = nb::cast<std::string>(d["kind"]);
   if (kind == "cs_rank_f32")
     km.kind = kun_cuda::KernelKind::ExtCsRankF32;
   else if (kind == "cs_rank_f64")
@@ -277,10 +279,12 @@ static kun_cuda::KernelMeta parseExternalKernel(py::handle obj) {
     throw std::runtime_error(
         "KunMLIR.compile: unknown external kernel kind '" + kind +
         "' (supported: cs_rank_f32, cs_rank_f64)");
-  for (py::handle n : d["inputs"].cast<py::iterable>())
-    km.inputNames.push_back(n.cast<std::string>());
-  for (py::handle n : d["outputs"].cast<py::iterable>())
-    km.outputNames.push_back(n.cast<std::string>());
+  nb::iterable inputs  = nb::cast<nb::iterable>(d["inputs"]);
+  nb::iterable outputs = nb::cast<nb::iterable>(d["outputs"]);
+  for (nb::handle n : inputs)
+    km.inputNames.push_back(nb::cast<std::string>(n));
+  for (nb::handle n : outputs)
+    km.outputNames.push_back(nb::cast<std::string>(n));
   return km;
 }
 
@@ -292,7 +296,7 @@ pyCompile(PyModule &pm,
             const std::string &targetTriple,
             const std::string &targetFeatures, unsigned optLevel,
             const std::string &toolkitPath,
-            py::list externalKernels,
+            nb::list externalKernels,
             int warpsPerCta) {
   if (graphInputs.empty())
     throw std::runtime_error(
@@ -315,7 +319,7 @@ pyCompile(PyModule &pm,
   // Append external (pre-compiled, runtime-dispatched) kernels.  The
   // MLIR pipeline never saw them; they're fabricated here from the
   // descriptor list the Python frontend collected.
-  for (py::handle obj : externalKernels)
+  for (nb::handle obj : externalKernels)
     data.kernels.push_back(parseExternalKernel(obj));
 
   if (data.kernels.empty())
@@ -348,14 +352,14 @@ pyCompile(PyModule &pm,
 
 } // namespace
 
-PYBIND11_MODULE(KunMLIR, m) {
+NB_MODULE(KunMLIR, m) {
   m.doc() = "Bindings for the KunQuant MLIR compiler (kunir → PTX → CUBIN "
              "→ launch).";
 
   // Programmatic kunir construction (Value/Type opaque wrappers, IRBuilder).
   kun_mlir_py::registerIRBuilder(m);
 
-  py::class_<PyModule>(m, "ModuleOp")
+  nb::class_<PyModule>(m, "ModuleOp")
       .def("to_string", &PyModule::toString,
             "Return the textual MLIR form of the module.")
       .def("__str__",  &PyModule::toString)
@@ -363,34 +367,34 @@ PYBIND11_MODULE(KunMLIR, m) {
         return "<KunMLIR.ModuleOp>\n" + m.toString();
       });
 
-  m.def("parse", &PyModule::parse, py::arg("text"),
+  m.def("parse", &PyModule::parse, nb::arg("text"),
          "Parse an MLIR text fragment into a ModuleOp.");
 
   m.def("lower_to_ptx", &pyLowerToPtx,
-         py::arg("module"),
-         py::arg("gpu_arch")       = "sm_80",
-         py::arg("target_triple")  = "nvptx64-nvidia-cuda",
-         py::arg("target_features") = "",
-         py::arg("opt_level")      = 3u,
-         py::arg("toolkit_path")   = "",
+         nb::arg("module"),
+         nb::arg("gpu_arch")       = "sm_80",
+         nb::arg("target_triple")  = "nvptx64-nvidia-cuda",
+         nb::arg("target_features") = "",
+         nb::arg("opt_level")      = 3u,
+         nb::arg("toolkit_path")   = "",
          "Lower kunir → PTX text via the upstream `gpu-module-to-binary` "
          "pass with `format=isa`.  Debug / inspection only — the main "
          "compile path goes straight to cubin.");
 
-  py::class_<kun_cuda::Executable>(m, "Executable")
-      .def_property_readonly("input_names",   &kun_cuda::Executable::graphInputs,
+  nb::class_<kun_cuda::Executable>(m, "Executable")
+      .def_prop_ro("input_names",   &kun_cuda::Executable::graphInputs,
             "Graph-level input names — match this against the keys of the "
             "args dict you pass to launch().")
-      .def_property_readonly("output_names",  &kun_cuda::Executable::graphOutputs,
+      .def_prop_ro("output_names",  &kun_cuda::Executable::graphOutputs,
             "Graph-level output names — match this against the keys of the "
             "args dict you pass to launch().")
-      .def_property_readonly("warps_per_cta", &kun_cuda::Executable::warpsPerCta)
-      .def_property_readonly("vector_size",   &kun_cuda::Executable::vectorSize)
-      .def_property_readonly("num_kernels",
+      .def_prop_ro("warps_per_cta", &kun_cuda::Executable::warpsPerCta)
+      .def_prop_ro("vector_size",   &kun_cuda::Executable::vectorSize)
+      .def_prop_ro("num_kernels",
             [](const kun_cuda::Executable &e) {
               return e.numKernels();
             })
-      .def_property_readonly("kernel_names",
+      .def_prop_ro("kernel_names",
             [](const kun_cuda::Executable &e) {
               std::vector<std::string> r;
               r.reserve(e.data().kernels.size());
@@ -398,18 +402,18 @@ PYBIND11_MODULE(KunMLIR, m) {
                 r.push_back(km.kernelName);
               return r;
             })
-      .def_property_readonly("launch_order",  &kun_cuda::Executable::launchOrder,
+      .def_prop_ro("launch_order",  &kun_cuda::Executable::launchOrder,
             "Topo-sorted indices into kernel_names; the order kernels run "
             "on the single CUDA stream.")
-      .def_property_readonly("peak_intermediate_slots",
+      .def_prop_ro("peak_intermediate_slots",
             &kun_cuda::Executable::peakIntermediateSlots,
             "Number of intermediate buffers allocated by the runtime — "
             "shape `(time_length, num_stocks)` each.")
-      .def_property_readonly("num_buffers",   &kun_cuda::Executable::numBuffers)
-      .def_property_readonly("cubin",
+      .def_prop_ro("num_buffers",   &kun_cuda::Executable::numBuffers)
+      .def_prop_ro("cubin",
             [](const kun_cuda::Executable &e) {
               const auto &b = e.data().cubin;
-              return py::bytes(b.data(), b.size());
+              return nb::bytes(b.data(), b.size());
             });
 
   // ── Executor ────────────────────────────────────────────────────────
@@ -419,43 +423,42 @@ PYBIND11_MODULE(KunMLIR, m) {
   // a duck-typed object with a `.ptr` attribute (so passing a
   // `cupy.cuda.Stream` directly Just Works).  None / no arg → default
   // CUDA stream.
-  py::class_<kun_cuda::Executor>(m, "Executor",
+  nb::class_<kun_cuda::Executor>(m, "Executor",
         "Wraps a CUDA stream + provides `run_graph(exe, args)` (async) "
         "and `synchronize()`.  Default constructor uses the CUDA default "
         "stream; pass a cupy stream (or its `.ptr` integer) to share one "
         "with caller-managed code.")
-      .def(py::init([](py::object stream_arg) {
+      .def("__init__", [](kun_cuda::Executor *self, nb::object stream_arg) {
             uintptr_t ptr = 0;
             if (!stream_arg.is_none()) {
-              if (py::hasattr(stream_arg, "ptr"))
-                ptr = stream_arg.attr("ptr").cast<uintptr_t>();
+              if (nb::hasattr(stream_arg, "ptr"))
+                ptr = nb::cast<uintptr_t>(stream_arg.attr("ptr"));
               else
-                ptr = stream_arg.cast<uintptr_t>();
+                ptr = nb::cast<uintptr_t>(stream_arg);
             }
-            return std::make_unique<kun_cuda::Executor>(
-                reinterpret_cast<CUstream>(ptr));
-          }),
-          py::arg("stream") = py::none(),
+            new (self) kun_cuda::Executor(reinterpret_cast<CUstream>(ptr));
+          },
+          nb::arg("stream") = nb::none(),
           "Build an Executor.  `stream=None` → default CUDA stream; "
           "otherwise expects either an int (uintptr_t handle) or a "
           "cupy.cuda.Stream-like object exposing `.ptr`.")
-      .def_property_readonly("stream",
+      .def_prop_ro("stream",
           [](const kun_cuda::Executor &e) -> uintptr_t {
             return reinterpret_cast<uintptr_t>(e.stream());
           },
           "Raw stream handle as an int (0 ↔ CUDA default stream).")
       .def("runGraph",
           [](kun_cuda::Executor &e, kun_cuda::Executable &exe,
-              py::dict pyArgs) {
+              nb::dict pyArgs) {
             // Thread the executor's stream into __dlpack__(stream=…)
             // so producers (CuPy / PyTorch / JAX / TF) can insert the
             // cross-stream sync needed for data-readiness on our
             // launch stream.
-            py::object streamArg = dlpackStreamArg(e.stream());
+            nb::object streamArg = dlpackStreamArg(e.stream());
             auto c = collectArgs(exe, pyArgs, streamArg);
             e.runGraph(exe, c.timeLength, c.numStocks, c.args);
           },
-          py::arg("exe"), py::arg("args"),
+          nb::arg("exe"), nb::arg("args"),
           "Queue every kernel in `exe` onto this executor's stream.\n"
           "**Asynchronous** — call `.synchronize()` (or otherwise wait\n"
           "on the stream) before reading results back to host.\n"
@@ -471,16 +474,16 @@ PYBIND11_MODULE(KunMLIR, m) {
           "Block until every kernel queued on this stream completes.");
 
   m.def("compile", &pyCompile,
-         py::arg("module"),
-         py::arg("graph_inputs"),
-         py::arg("graph_outputs"),
-         py::arg("gpu_arch")       = "sm_80",
-         py::arg("target_triple")  = "nvptx64-nvidia-cuda",
-         py::arg("target_features") = "",
-         py::arg("opt_level")      = 3u,
-         py::arg("toolkit_path")   = "",
-         py::arg("external_kernels") = py::list(),
-         py::arg("warps_per_cta")    = 0,
+         nb::arg("module"),
+         nb::arg("graph_inputs"),
+         nb::arg("graph_outputs"),
+         nb::arg("gpu_arch")       = "sm_80",
+         nb::arg("target_triple")  = "nvptx64-nvidia-cuda",
+         nb::arg("target_features") = "",
+         nb::arg("opt_level")      = 3u,
+         nb::arg("toolkit_path")   = "",
+         nb::arg("external_kernels") = nb::list(),
+         nb::arg("warps_per_cta")    = 0,
          "Compile a kunir module all the way to a loaded Executable.\n"
          "\n"
          "Pipeline: kunir → LLVM dialect → upstream `gpu-module-to-binary`\n"

@@ -20,9 +20,9 @@
 
 #pragma once
 
-#include <pybind11/pybind11.h>
+#include <nanobind/nanobind.h>
 
 namespace kun_mlir_py {
-/// Register the IRBuilder + Value + Type pybind classes on `m`.
-void registerIRBuilder(::pybind11::module &m);
+/// Register the IRBuilder + Value + Type nanobind classes on `m`.
+void registerIRBuilder(::nanobind::module_ &m);
 } // namespace kun_mlir_py

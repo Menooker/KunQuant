@@ -1,16 +1,18 @@
 # Python binding module for the kunir → PTX → CUBIN → launch flow.
 #
-# pybind11 is added at the top-level KunQuant CMakeLists, so the
-# `pybind11_add_module` macro is already in scope.
+# nanobind is added at the top-level KunQuant CMakeLists, so the
+# `nanobind_add_module` macro is already in scope.
 
-# pybind11 modules have undefined symbols (PyObject_*, PyExc_*, …) that
+# nanobind modules have undefined symbols (PyObject_*, PyExc_*, …) that
 # the Python interpreter resolves at module-load time.  MLIR's
 # HandleLLVMOptions adds `-Wl,-z,defs` globally, which is incompatible
 # with that policy.  Strip it locally for this subdirectory.
 string(REPLACE "-Wl,-z,defs" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
 string(REPLACE "-Wl,-z,defs" "" CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS}")
 
-pybind11_add_module(KunMLIR SHARED
+# STABLE_ABI: single .abi3.so on CPython ≥ 3.12; falls back to per-version
+# on older Pythons.  Matches the runner binding (cpp/Python).
+nanobind_add_module(KunMLIR STABLE_ABI
   MlirBinding.cpp
   IRBuilder.cpp
   PyModule.cpp

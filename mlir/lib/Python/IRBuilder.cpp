@@ -3,7 +3,9 @@
 #include "IRBuilder.h"
 #include "PyModule.h"
 
-#include <pybind11/stl.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/unique_ptr.h>
+#include <nanobind/stl/vector.h>
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -24,7 +26,7 @@
 #include <string>
 #include <vector>
 
-namespace py = pybind11;
+namespace nb = nanobind;
 using namespace mlir;
 
 namespace kun_mlir_py {
@@ -266,77 +268,77 @@ std::string typeRepr(Type t) {
 
 } // namespace
 
-void registerIRBuilder(py::module &m) {
+void registerIRBuilder(nb::module_ &m) {
   // Opaque MLIR Value / Type wrappers.  No mutating methods — just an
   // identity / repr.  They live as long as the IRBuilder + its resulting
   // PyModule.
-  py::class_<Value>(m, "Value")
+  nb::class_<Value>(m, "Value")
       .def("__repr__", [](Value v) { return "<KunMLIR.Value " + valueRepr(v) + ">"; })
       .def("__str__",  [](Value v) { return valueRepr(v); });
 
-  py::class_<Type>(m, "Type")
+  nb::class_<Type>(m, "Type")
       .def("__repr__", [](Type t) { return "<KunMLIR.Type " + typeRepr(t) + ">"; })
       .def("__str__",  [](Type t) { return typeRepr(t); });
 
-  py::class_<IRBuilder>(m, "IRBuilder",
+  nb::class_<IRBuilder>(m, "IRBuilder",
         "Stateful builder that constructs a kunir module programmatically.\n"
         "Wrap your translator around this — it's the canonical alternative "
         "to round-tripping through MLIR text via parse().")
-      .def(py::init<>())
+      .def(nb::init<>())
 
       // Type
       .def("ts_type", &IRBuilder::tsType,
-            py::arg("elem_dtype"), py::arg("lookback"),
+            nb::arg("elem_dtype"), nb::arg("lookback"),
             "Build a !kunir.ts<elem_dtype, lookback>.  lookback==0 → 'inf'.")
 
       // Function
       .def("begin_func", &IRBuilder::beginFunc,
-            py::arg("name"),
-            py::arg("input_types"), py::arg("input_names"),
-            py::arg("output_names"),
-            py::arg("occupancy"), py::arg("warps_per_cta"),
-            py::arg("smem_size"), py::arg("vector_size"),
-            py::arg("result_types"),
+            nb::arg("name"),
+            nb::arg("input_types"), nb::arg("input_names"),
+            nb::arg("output_names"),
+            nb::arg("occupancy"), nb::arg("warps_per_cta"),
+            nb::arg("smem_size"), nb::arg("vector_size"),
+            nb::arg("result_types"),
             "Open a new kunir.func.  Returns its argument Values.")
-      .def("end_func", &IRBuilder::endFunc, py::arg("return_values"),
+      .def("end_func", &IRBuilder::endFunc, nb::arg("return_values"),
             "Close the current kunir.func with a kunir.return.")
 
       // Elemwise
-      .def("add",    &IRBuilder::addOp,    py::arg("lhs"), py::arg("rhs"))
-      .def("sub",    &IRBuilder::subOp,    py::arg("lhs"), py::arg("rhs"))
-      .def("mul",    &IRBuilder::mulOp,    py::arg("lhs"), py::arg("rhs"))
-      .def("div",    &IRBuilder::divOp,    py::arg("lhs"), py::arg("rhs"))
-      .def("max",    &IRBuilder::maxOp,    py::arg("lhs"), py::arg("rhs"))
-      .def("min",    &IRBuilder::minOp,    py::arg("lhs"), py::arg("rhs"))
-      .def("abs",    &IRBuilder::absOp,    py::arg("x"))
-      .def("log",    &IRBuilder::logOp,    py::arg("x"))
-      .def("sign",   &IRBuilder::signOp,   py::arg("x"))
+      .def("add",    &IRBuilder::addOp,    nb::arg("lhs"), nb::arg("rhs"))
+      .def("sub",    &IRBuilder::subOp,    nb::arg("lhs"), nb::arg("rhs"))
+      .def("mul",    &IRBuilder::mulOp,    nb::arg("lhs"), nb::arg("rhs"))
+      .def("div",    &IRBuilder::divOp,    nb::arg("lhs"), nb::arg("rhs"))
+      .def("max",    &IRBuilder::maxOp,    nb::arg("lhs"), nb::arg("rhs"))
+      .def("min",    &IRBuilder::minOp,    nb::arg("lhs"), nb::arg("rhs"))
+      .def("abs",    &IRBuilder::absOp,    nb::arg("x"))
+      .def("log",    &IRBuilder::logOp,    nb::arg("x"))
+      .def("sign",   &IRBuilder::signOp,   nb::arg("x"))
 
       // Windowed materialization
       .def("windowed_output", &IRBuilder::windowedOutputOp,
-            py::arg("x"), py::arg("length"))
+            nb::arg("x"), nb::arg("length"))
 
       // Back-reference + Fast windowed sum
       .def("back_ref",          &IRBuilder::backRefOp,
-            py::arg("x"), py::arg("window"))
+            nb::arg("x"), nb::arg("window"))
       .def("fast_windowed_sum", &IRBuilder::fastWindowedSumOp,
-            py::arg("x"), py::arg("window"))
+            nb::arg("x"), nb::arg("window"))
 
       // Loop
       .def("begin_for_each_back_window", &IRBuilder::beginForEachBackWindow,
-            py::arg("inputs"), py::arg("window"), py::arg("result_types"),
+            nb::arg("inputs"), nb::arg("window"), nb::arg("result_types"),
             "Open a for_each_back_window region.  Returns block args (one "
             "per loop input, type ts<elem,1>).")
       .def("end_for_each_back_window", &IRBuilder::endForEachBackWindow,
-            py::arg("yield_values"),
+            nb::arg("yield_values"),
             "Close the current for_each_back_window with a kunir.yield, "
             "returning the loop op's results.")
 
       // Reductions
-      .def("reduce_add", &IRBuilder::reduceAddOp, py::arg("x"))
-      .def("reduce_mul", &IRBuilder::reduceMulOp, py::arg("x"))
-      .def("reduce_max", &IRBuilder::reduceMaxOp, py::arg("x"))
-      .def("reduce_min", &IRBuilder::reduceMinOp, py::arg("x"))
+      .def("reduce_add", &IRBuilder::reduceAddOp, nb::arg("x"))
+      .def("reduce_mul", &IRBuilder::reduceMulOp, nb::arg("x"))
+      .def("reduce_max", &IRBuilder::reduceMaxOp, nb::arg("x"))
+      .def("reduce_min", &IRBuilder::reduceMinOp, nb::arg("x"))
 
       // Finalize / debug
       .def("to_string", &IRBuilder::toString,
