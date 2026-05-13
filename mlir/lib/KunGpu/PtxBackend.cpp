@@ -167,6 +167,7 @@ LogicalResult compileKunIrToExecutable(ModuleOp module,
     if (auto outNames = getFuncOutputNames(f))
       for (auto a : outNames)
         km.outputNames.push_back(llvm::cast<StringAttr>(a).str());
+    km.unreliableCount = getFuncUnreliableCount(f);
 
     int64_t w = 1, v = 1;
     if (auto ts = getFuncTargetSpec(f)) {

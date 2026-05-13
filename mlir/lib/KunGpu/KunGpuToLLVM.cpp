@@ -685,7 +685,7 @@ struct TsPutPattern : OpConversionPattern<TsPutOp> {
 // Algorithm — direct port of cpp/Kun/Ops.hpp::FastWindowedSum::step:
 //
 //   cur = input[t]                                                 ts.get  off=0
-//   old = (t >= window) ? input[t - window] : NaN                  ts.get  off=window  (guarded)
+//   old = (t - loop_lb >= window) ? input[t - window] : NaN        ts.get  off=window  (guarded)
 //   old_is_nan = isnan(old)
 //   new_is_nan = isnan(cur)
 //   v = old_is_nan ? v : kahanAdd(v, -old, &compSub)               // subtract old
@@ -693,10 +693,10 @@ struct TsPutPattern : OpConversionPattern<TsPutOp> {
 //   numNans += (new_is_nan ? 1 : 0) - (old_is_nan ? 1 : 0)
 //   out = (numNans == 0) ? v : NaN
 //
-// The `t >= window` guard on `old` matches CPU's
-// `windowedRef`/`getWindow` which return NaN for index < window.
-// Without it, a function-arg gmem load at offset > t can fall before the
-// allocation start and segfault on some drivers.
+// Guard uses `t - loop_lb`, not bare `t`: state is per-CTA alloca
+// (zero-init) so each chunk needs its own N-step warmup with old=NaN
+// to build v up.  Chunk 0 has loop_lb = 0 so the guard collapses to
+// CPU's `t >= window`.
 //===----------------------------------------------------------------------===//
 
 struct FastWindowedSumPattern : OpConversionPattern<FastWindowedSumOp> {
@@ -757,13 +757,16 @@ struct FastWindowedSumPattern : OpConversionPattern<FastWindowedSumOp> {
         loc, i32Ty, rewriter.getI32IntegerAttr(window));
     Value cur = rewriter.create<TsGetOp>(loc, floatTy, origInput, zeroOff);
 
-    Value timeIdx = getCurrentTimeIdx(op);
-    if (!timeIdx)
+    auto forOp = op->getParentOfType<scf::ForOp>();
+    if (!forOp)
       return rewriter.notifyMatchFailure(
           op, "fast_windowed_sum must be inside a scf.for time loop");
-    Value windowIdx  = rewriter.create<arith::ConstantIndexOp>(loc, window);
-    Value tGeWindow  = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::sge, timeIdx, windowIdx);
+    Value timeIdx   = forOp.getInductionVar();
+    Value loopLb    = forOp.getLowerBound();
+    Value localT    = rewriter.create<arith::SubIOp>(loc, timeIdx, loopLb);
+    Value windowIdx = rewriter.create<arith::ConstantIndexOp>(loc, window);
+    Value tGeWindow = rewriter.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::sge, localT, windowIdx);
 
     auto ifOp = rewriter.create<scf::IfOp>(
         loc, TypeRange{floatTy}, tGeWindow, /*withElseRegion=*/true);

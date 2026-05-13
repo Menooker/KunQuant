@@ -194,11 +194,13 @@ struct CollectedArgs {
 
 static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
                                    nb::dict pyArgs,
-                                   const nb::object &streamArg) {
+                                   const nb::object &streamArg,
+                                   int64_t mask) {
   // Graph inputs come first, then outputs — same as the buffer-table
   // layout the runtime expects.
+  const size_t numInputs = exe.graphInputs().size();
   std::vector<std::string> ordered;
-  ordered.reserve(exe.graphInputs().size() + exe.graphOutputs().size());
+  ordered.reserve(numInputs + exe.graphOutputs().size());
   for (auto &n : exe.graphInputs())  ordered.push_back(n);
   for (auto &n : exe.graphOutputs()) ordered.push_back(n);
   if (ordered.empty())
@@ -229,9 +231,14 @@ static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
     }
   }
 
-  bool first = true;
+  // We need the input time length before validating any output (output
+  // time dim = input time dim − mask).  Walk inputs first to lock it
+  // in, then outputs.
+  out.timeLength = -1;
+  out.numStocks  = -1;
   for (size_t i = 0; i < ordered.size(); ++i) {
     const std::string &name = ordered[i];
+    bool isOutput = i >= numInputs;
 
     nb::object key = nb::str(name.c_str());
     if (!pyArgs.contains(key)) {
@@ -244,17 +251,24 @@ static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
                                 "' (kernel expects: " + expected + ")");
     }
     CudaArrayInfo info = readDLPack(pyArgs[key], name, streamArg);
-    if (first) {
+    int64_t expectT = isOutput ? (out.timeLength - mask) : out.timeLength;
+
+    if (out.timeLength < 0) {
+      // First arg is always an input (numInputs ≥ 1 since the kernel
+      // graph requires at least one input).  Lock in the launch shape.
       out.timeLength = info.timeLength;
       out.numStocks  = info.numStocks;
-      first = false;
-    } else if (info.timeLength != out.timeLength ||
+    } else if (info.timeLength != expectT ||
                  info.numStocks  != out.numStocks) {
       std::stringstream ss;
-      ss << "launch: shape mismatch on '" << name << "': expected ("
-         << out.timeLength << ", " << out.numStocks
-         << ") matching the first array, got ("
-         << info.timeLength << ", " << info.numStocks << ")";
+      ss << "launch: shape mismatch on '" << name
+         << "' (" << (isOutput ? "output" : "input") << "): expected ("
+         << expectT << ", " << out.numStocks
+         << "), got (" << info.timeLength << ", "
+         << info.numStocks << ")";
+      if (isOutput && mask > 0)
+        ss << " — output time dim must equal input time dim ("
+           << out.timeLength << ") minus mask (" << mask << ")";
       throw std::runtime_error(ss.str());
     }
     out.args.emplace_back(name, info.ptr);
@@ -449,16 +463,21 @@ NB_MODULE(KunMLIR, m) {
           "Raw stream handle as an int (0 ↔ CUDA default stream).")
       .def("runGraph",
           [](kun_cuda::Executor &e, kun_cuda::Executable &exe,
-              nb::dict pyArgs) {
+              nb::dict pyArgs, int64_t mask,
+              int minChunkWarmupFactor, double smFillFactor) {
             // Thread the executor's stream into __dlpack__(stream=…)
             // so producers (CuPy / PyTorch / JAX / TF) can insert the
             // cross-stream sync needed for data-readiness on our
             // launch stream.
             nb::object streamArg = dlpackStreamArg(e.stream());
-            auto c = collectArgs(exe, pyArgs, streamArg);
-            e.runGraph(exe, c.timeLength, c.numStocks, c.args);
+            auto c = collectArgs(exe, pyArgs, streamArg, mask);
+            e.runGraph(exe, c.timeLength, c.numStocks, c.args,
+                        mask, minChunkWarmupFactor, smFillFactor);
           },
           nb::arg("exe"), nb::arg("args"),
+          nb::arg("mask") = 0,
+          nb::arg("min_chunk_warmup_factor") = 4,
+          nb::arg("sm_fill_factor") = 1.5,
           "Queue every kernel in `exe` onto this executor's stream.\n"
           "**Asynchronous** — call `.synchronize()` (or otherwise wait\n"
           "on the stream) before reading results back to host.\n"
@@ -467,6 +486,16 @@ NB_MODULE(KunMLIR, m) {
           "`exe.input_names ++ exe.output_names`.  Arrays must be "
           "float32, 2-D, shape `(time_length, num_stocks)` (TS layout), "
           "and reside on the GPU.\n"
+          "\n"
+          "`mask` is the prefix-skip on graph outputs: chunk 0 starts "
+          "writing at time index `mask`, so the output array's time "
+          "dim is `time_length - mask`.  Default 0 (no skip).\n"
+          "`min_chunk_warmup_factor` is the lower bound on "
+          "`chunk_size / warmup` — keeps warmup-overlap overhead below "
+          "`1 / factor` of total compute.  Default 4 (≤ 25% overhead).\n"
+          "`sm_fill_factor` is the target `num_chunks * stock_tiles / "
+          "numSMs`.  1.0 just fills the GPU; > 1 leaves scheduler "
+          "slack.  Default 1.5.\n"
           "\n"
           "Named to match the CPU executor API "
           "(`KunRunner.runGraph(executor, mod, ...)`).")

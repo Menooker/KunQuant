@@ -105,6 +105,31 @@ def build_func_multipartition() -> Function:
     return Function(builder.ops, name="multi")
 
 
+def _compare_post_warmup(out_h: np.ndarray, expected: np.ndarray,
+                            valid_start: int, atol: float) -> int:
+    """Validate kernel output against the reference on rows
+    `[valid_start:]`.  Fails loudly on **any** NaN in the kernel
+    output past the warmup region — the naive `np.abs(NaN-x).max() >
+    atol` form silently returns False because NaN comparisons are
+    False, which would let a multi-chunk regression slip through.
+    """
+    tail = out_h[valid_start:]
+    if np.isnan(tail).any():
+        nrows = int(np.unique(np.where(np.isnan(tail))[0]).size)
+        print(f"  FAIL — {nrows} of {tail.shape[0]} validated rows "
+               f"contain NaN past row {valid_start}", file=sys.stderr)
+        return 1
+    diff = np.abs(tail - expected[valid_start:])
+    max_abs = float(diff.max())
+    if max_abs > atol:
+        idx = np.unravel_index(diff.argmax(), diff.shape)
+        print(f"  FAIL — max |Δ| = {max_abs:.3e} > {atol:.0e} at "
+               f"row {valid_start + idx[0]}, col {idx[1]}", file=sys.stderr)
+        return 1
+    print(f"  ok — max |Δ| = {max_abs:.3e} (atol={atol:.0e})")
+    return 0
+
+
 def _run_one(label: str, build_fn, expected_fn, target: str, T: int, S: int,
               atol: float = 1e-5) -> int:
     """Compile a Function, launch it, validate against numpy."""
@@ -226,16 +251,8 @@ def run_fastwindowedsum(target: str, T: int, S: int, N: int) -> int:
     if T > N:
         expected[N:] = (cumsum[N:] - cumsum[:-N]).astype(np.float32)
 
-    diff = np.abs(out_h[N - 1:] - expected[N - 1:])
-    max_abs = float(diff.max())
-    atol = max(1e-3, 5e-7 * N)
-    if max_abs > atol:
-        idx = np.unravel_index(diff.argmax(), diff.shape)
-        print(f"  FAIL — max |Δ| = {max_abs:.3e} > {atol:.0e} at {idx}",
-                file=sys.stderr)
-        return 1
-    print(f"  ok — max |Δ| = {max_abs:.3e} (atol={atol:.0e})")
-    return 0
+    return _compare_post_warmup(out_h, expected, valid_start=N - 1,
+                                  atol=max(1e-3, 5e-7 * N))
 
 
 def run_multipartition(target: str, T: int, S: int) -> int:
@@ -327,23 +344,114 @@ def run_windowed(target: str, T: int, S: int, N: int) -> int:
     if T > N:
         expected[N:] = (cumsum[N:] - cumsum[:-N]).astype(np.float32)
 
-    diff = np.abs(out_h[N - 1:] - expected[N - 1:])
-    max_abs = float(diff.max())
-    atol = max(1e-3, 5e-7 * N)
-    if max_abs > atol:
-        idx = np.unravel_index(diff.argmax(), diff.shape)
-        print(f"  FAIL — max |Δ| = {max_abs:.3e} > {atol:.0e} at {idx}",
-                file=sys.stderr)
-        return 1
-    print(f"  ok — max |Δ| = {max_abs:.3e} (atol={atol:.0e})")
-    return 0
+    return _compare_post_warmup(out_h, expected, valid_start=N - 1,
+                                  atol=max(1e-3, 5e-7 * N))
+
+
+def run_backref_with_mask(target: str, T: int, S: int, N: int,
+                              mask: int) -> int:
+    """Same BackRef(a+b, N) graph as `run_backref`, but driven with a
+    non-zero `mask`.  Picked over `WindowedSum` for the mask test
+    BackRef is stateless along the time axis (each output is a gmem
+    load at offset -N), so this case isolates the mask/warmup
+    interaction from any rolling-state concerns.  The windowed sum
+    counterpart below covers the stateful path.
+    """
+    print(f"=== backref + mask: out = (a+b)[t - {N}], mask={mask} ===")
+    assert 0 < mask < T, "test requires 0 < mask < T"
+    f = build_func_backref(N)
+    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+
+    exe = compileit(f, cfg)
+    print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
+           f"peak_intermediate_slots={exe.peak_intermediate_slots}")
+
+    import cupy as cp
+    rng = np.random.default_rng(4)
+    a_h = rng.standard_normal((T, S), dtype=np.float32)
+    b_h = rng.standard_normal((T, S), dtype=np.float32)
+    # Output time dim shrinks by mask.
+    out = cp.zeros((T - mask, S), dtype=cp.float32)
+
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe, {"a": cp.asarray(a_h),
+                              "b": cp.asarray(b_h), "out": out},
+                       mask=mask)
+    out_h = cp.asnumpy(out)
+
+    # Reference: out_full[t] = (a+b)[t-N] for t ≥ N; undefined for t < N.
+    # With mask, out_full[mask + i] lands at out_h[i].  Reliable when
+    # mask + i ≥ N, i.e., i ≥ max(0, N - mask).
+    c = a_h + b_h
+    valid_start = max(0, N - mask)
+    # Build a full-(T-mask) expected so _compare_post_warmup can validate
+    # the post-warmup tail uniformly (matches the windowed test below).
+    expected = np.empty((T - mask, S), dtype=np.float32)
+    expected[:valid_start] = np.nan
+    if valid_start < T - mask:
+        in_time = np.arange(mask + valid_start, T)
+        expected[valid_start:] = c[in_time - N]
+    return _compare_post_warmup(out_h, expected,
+                                  valid_start=valid_start, atol=1e-5)
+
+
+def run_windowed_with_mask(target: str, T: int, S: int, N: int,
+                              mask: int) -> int:
+    """`WindowedSum(a + b, N)` driven with mask — same graph as
+    `run_windowed`, but exercises the stateful `fast_windowed_sum`
+    lowering across multi-chunk + mask.  After the chunk-local guard
+    fix (`t - loop_lb ≥ window`), each chunk's per-CTA state primes
+    correctly through its warmup overlap and the post-warmup tail
+    matches the CPU reference at float-precision noise.
+    """
+    print(f"=== windowed + mask: ws = WindowedSum(a + b, N={N}), "
+           f"mask={mask} ===")
+    assert 0 < mask < T, "test requires 0 < mask < T"
+    f = build_func_windowed(N)
+    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+
+    exe = compileit(f, cfg)
+    print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
+           f"peak_intermediate_slots={exe.peak_intermediate_slots}")
+
+    import cupy as cp
+    rng = np.random.default_rng(5)
+    a_h = rng.standard_normal((T, S), dtype=np.float32)
+    b_h = rng.standard_normal((T, S), dtype=np.float32)
+    out = cp.zeros((T - mask, S), dtype=cp.float32)
+
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe, {"a": cp.asarray(a_h),
+                              "b": cp.asarray(b_h), "ws": out},
+                       mask=mask)
+    out_h = cp.asnumpy(out)
+
+    # Full-T reference, then slice from `mask` onward to align with
+    # the output's input-time origin.  Output row i = input time i+mask;
+    # reliable when i + mask ≥ N - 1.
+    c = a_h + b_h
+    cumsum = np.cumsum(c, axis=0, dtype=np.float64)
+    expected_full = np.empty((T, S), dtype=np.float32)
+    expected_full[:N - 1] = np.nan
+    expected_full[N - 1] = cumsum[N - 1]
+    if T > N:
+        expected_full[N:] = (cumsum[N:] - cumsum[:-N]).astype(np.float32)
+    expected = expected_full[mask:]
+    valid_start = max(0, N - 1 - mask)
+    return _compare_post_warmup(out_h, expected,
+                                  valid_start=valid_start,
+                                  atol=max(1e-3, 5e-7 * N))
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--target", default="sm_120")
-    ap.add_argument("-T", "--time-length", type=int, default=64)
-    ap.add_argument("-S", "--num-stocks", type=int, default=2048)
+    # Defaults sized to comfortably trigger multi-chunk: T=128 with
+    # warmup=5 (N) gives `cap_warmup = 128/(4*5) = 6` chunks; S=1024
+    # gives `stock_tiles = 1024/(4*32) = 8`, so even on a small GPU
+    # the sm-fill target ≥ 2 — well inside the multi-chunk regime.
+    ap.add_argument("-T", "--time-length", type=int, default=128)
+    ap.add_argument("-S", "--num-stocks", type=int, default=1024)
     ap.add_argument("-N", "--window", type=int, default=5)
     args = ap.parse_args()
 
@@ -360,8 +468,27 @@ def main() -> int:
     print()
     rc |= run_backref(args.target, args.time_length, args.num_stocks, args.window)
     print()
+    # Mask smaller than the window, so the post-mask output still
+    # contains unreliable rows — exercises both warmup overlap (chunks
+    # ≥ 1 prime by reading back `unreliable_count` steps) AND the
+    # mask-skip-vs-warmup-skip distinction on chunk 0.  Two graphs:
+    # stateless BackRef and stateful WindowedSum / fast_windowed_sum.
+    rc |= run_backref_with_mask(args.target, args.time_length, args.num_stocks,
+                                  args.window, mask=3)
+    print()
+    rc |= run_windowed_with_mask(args.target, args.time_length, args.num_stocks,
+                                    args.window, mask=3)
+    print()
     rc |= run_fastwindowedsum(args.target, args.time_length, args.num_stocks,
                                 args.window)
+    print()
+    # Single-chunk fallback corner case: warmup so large relative to T
+    # that `cap_warmup = T/(K*N) = 64/(4*20) = 0` clamps num_chunks to 1.
+    # Exercises the multi-chunk kernel binary in its degenerate
+    # grid_y=1 launch configuration — guards against regressions in
+    # time_lb / time_ub / write-gating when `chunk_size = T`.
+    rc |= run_windowed_with_mask(args.target, T=64, S=args.num_stocks,
+                                    N=20, mask=1)
     print()
     rc |= run_multipartition(args.target, args.time_length, args.num_stocks)
     return rc

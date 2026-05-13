@@ -78,6 +78,12 @@ struct KernelMeta {
   KernelKind kind = KernelKind::Jit;         ///< picked by the MLIR pass; default is the regular path
   std::vector<std::string> inputNames;       ///< kungpu.input_names, in argv order
   std::vector<std::string> outputNames;      ///< kungpu.output_names, in argv order
+  /// Per-partition warmup depth (kungpu.unreliable_count on the gpu.func).
+  /// Drives the time-chunk grid: chunks ≥ 1 need this many extra time
+  /// steps before they can start writing reliable outputs, and the
+  /// chunk-size heuristic gates the minimum chunk size at K × warmup.
+  /// Always 0 for external (cs_rank) kernels — they don't multi-chunk.
+  int64_t unreliableCount = 0;
 };
 
 /// What the compiler hands the runtime: a cubin + the kernels it
@@ -172,10 +178,31 @@ public:
   ///
   /// Throws std::runtime_error on validation or driver errors.  This is
   /// a low-level entry point — most users go through `Executor::runGraph`.
+  /// Multi-chunk parameters (`mask`, `minChunkWarmupFactor`,
+  /// `smFillFactor`, `numSMs`) drive the time-axis chunk grid for JIT
+  /// kernels:
+  ///   - `mask` is the user-visible prefix-skip on graph outputs.  The
+  ///     output array's time dim is `timeLength - mask`; chunk 0 begins
+  ///     writes at `t == mask`.
+  ///   - `minChunkWarmupFactor` (≥ 1) gates the minimum chunk size at
+  ///     `factor * kernel.unreliableCount`, so the warmup-overlap
+  ///     region of a non-first chunk stays ≤ `1 / factor` of total
+  ///     compute.
+  ///   - `smFillFactor` (≥ 0) is the target `num_chunks * num_stock_tiles
+  ///     / numSMs`.  1.0 just fills the GPU; > 1 leaves slack for
+  ///     scheduler latency hiding.
+  ///   - `numSMs` is queried by `Executor` once at construction; pass 0
+  ///     to opt out of the smFillFactor heuristic (single-chunk mode).
+  /// External (cs_rank) kernels ignore these — they keep their original
+  /// `(time_length, num_stocks, ptrs...)` argv and time-major grid.
   void launchOnStream(int64_t timeLength, int64_t numStocks,
                        const std::vector<std::pair<std::string, uintptr_t>> &args,
                        CUstream stream,
-                       int devMaxSmemBytes);
+                       int devMaxSmemBytes,
+                       int64_t mask = 0,
+                       int minChunkWarmupFactor = 4,
+                       double smFillFactor = 1.5,
+                       int numSMs = 0);
 
 private:
   /// Allocate (or re-allocate, if shape changed) the intermediate slot
@@ -237,9 +264,19 @@ public:
   /// Queue all kernels in `exe` on this executor's stream.  Async — does
   /// not synchronize.  Throws std::runtime_error on validation / driver
   /// errors.
+  ///
+  /// `mask` skips the first `mask` time rows of every output (output
+  /// time dim = `timeLength - mask`).  `minChunkWarmupFactor` and
+  /// `smFillFactor` shape the multi-chunk grid heuristic — see
+  /// `Executable::launchOnStream` for the meaning.  Defaults are tuned
+  /// to "fill the GPU with mild scheduler slack" while keeping warmup
+  /// overhead ≤ ~25%.
   void runGraph(Executable &exe,
                 int64_t timeLength, int64_t numStocks,
-                const std::vector<std::pair<std::string, uintptr_t>> &args);
+                const std::vector<std::pair<std::string, uintptr_t>> &args,
+                int64_t mask = 0,
+                int minChunkWarmupFactor = 4,
+                double smFillFactor = 1.5);
 
   /// Block until all queued work on this stream completes.
   void synchronize();
@@ -251,10 +288,15 @@ public:
   /// Used to validate cs_rank dynamic-smem requests at launch time
   /// without a per-launch driver call.
   int devMaxSmemBytes() const noexcept { return devMaxSmemBytes_; }
+  /// Cached MULTIPROCESSOR_COUNT of the device this Executor's CUcontext
+  /// is bound to.  Used by `runGraph` for the chunk-grid heuristic
+  /// (target num_chunks × stock_tiles ≈ smFillFactor × numSMs).
+  int numSMs() const noexcept { return numSMs_; }
 
 private:
   CUstream stream_ = nullptr;
   int devMaxSmemBytes_ = 0;
+  int numSMs_ = 0;
 };
 
 } // namespace kun_cuda

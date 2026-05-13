@@ -26,13 +26,20 @@ import numpy as np
 
 
 def build_ir(N: int, warps_per_cta: int = 4, smem_size: int = 49152) -> str:
-    """A minimal kunir program that computes a rolling sum of (a + b)."""
+    """A minimal kunir program that computes a rolling sum of (a + b).
+
+    `unreliable_count = N` mirrors KunQuant's `infer_window` policy of
+    summing op windows along the chain: a single window-N reduction
+    contributes N.  The runtime uses this to back up `warmup` time
+    steps when launching chunks ≥ 1 so their rolling state is fully
+    primed before they start writing reliable outputs.
+    """
     return textwrap.dedent(f"""
 gpu.module @kungpu_kernels {{
   kunir.func @sum_window(%a: !kunir.ts<f32, inf>, %b: !kunir.ts<f32, inf>)
       inputs {{%a = "a", %b = "b"}}
       outputs {{"out"}}
-      target {{occupancy = 1, warps_per_cta = {warps_per_cta}, smem_size = {smem_size}, vector_size = 1}} unreliable_count = 0
+      target {{occupancy = 1, warps_per_cta = {warps_per_cta}, smem_size = {smem_size}, vector_size = 1}} unreliable_count = {N}
       -> !kunir.ts<f32, 1> {{
     %c = kunir.add %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
     %w = kunir.windowed_output %c [length = {N}] : !kunir.ts<f32, 1> -> !kunir.ts<f32, {N}>
