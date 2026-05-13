@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 from setuptools import setup, find_packages
 from setuptools.command.build_ext import build_ext
 from setuptools.extension import Extension
@@ -8,6 +9,17 @@ import platform
 import shutil
 import glob
 
+# Stable-ABI / abi3 baseline.  nanobind's STABLE_ABI mode (see
+# 3rdparty/nanobind/cmake/nanobind-config.cmake) enables itself only on
+# CPython >= 3.12 with `Development.SABIModule` available; below that
+# nanobind silently builds a per-Python-version `.cpython-3X-*.so`.
+# Mirror the same threshold here so the wheel filename matches:
+#   * py >= 3.12  →  KunRunner.abi3.so  →  tag wheel `cpYY-abi3-*`
+#                    (single wheel covers 3.12, 3.13, 3.14, ...)
+#   * py <  3.12  →  KunRunner.cpython-3X-*.so  →  per-version tag
+_STABLE_ABI_MIN = (3, 12)
+_HAS_STABLE_ABI = (sys.version_info >= _STABLE_ABI_MIN and
+                    platform.python_implementation() == "CPython")
 
 
 class CMakeBuildExtension(build_ext):
@@ -21,10 +33,14 @@ class CMakeBuildExtension(build_ext):
             build_temp = os.path.abspath(self.build_temp)
         os.makedirs(build_temp, exist_ok=True)
         release_or_debug = os.environ.get("KUN_BUILD_TYPE", "Release")
-        # Run CMake
+        # Run CMake.  Modern FindPython uses `Python_EXECUTABLE` (not the
+        # legacy `PYTHON_EXECUTABLE` from FindPythonInterp/Libs).  We pass
+        # both for backward compatibility with consumers that may still
+        # query the lowercase name; CMake's FindPython respects the new one.
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={ext_dir}",
-            f"-DPYTHON_EXECUTABLE={os.sys.executable}",
+            f"-DPython_EXECUTABLE={sys.executable}",
+            f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={release_or_debug}"
         ]
         if "KUN_SANITIZER" in os.environ and os.environ["KUN_SANITIZER"] != "0":
@@ -66,9 +82,31 @@ class CMakeBuildExtension(build_ext):
 
 class CMakeExtension(Extension):
     def __init__(self, name, path, sourcedir=""):
-        super().__init__(name, sources=[])
+        super().__init__(name, sources=[], py_limited_api=_HAS_STABLE_ABI)
         self.sourcedir = os.path.abspath(sourcedir)
         self.path = path
+
+
+# Tag the wheel `cp312-abi3-*` when we know nanobind will produce a
+# stable-ABI .so (Python >= 3.12 on CPython).  Without this override
+# setuptools defaults to `cp3XX-cp3XX-*` (per-version) — wrong for
+# abi3 builds because pip would then refuse to install our 3.12 wheel
+# on 3.13.  Below 3.12 we keep the default per-version tag.
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel
+except ImportError:                                 # setuptools < 70
+    from wheel.bdist_wheel import bdist_wheel       # type: ignore
+
+class BdistWheelABI3(bdist_wheel):
+    def finalize_options(self):
+        super().finalize_options()
+        if _HAS_STABLE_ABI:
+            # Tag as e.g. `cp312-abi3-manylinux_2_28_x86_64`.
+            self.py_limited_api = "cp{}{}".format(*_STABLE_ABI_MIN)
+            # The extension is platform-specific; don't let setuptools
+            # mark the wheel as pure-python.
+            self.root_is_pure = False
+
 
 if os.environ.get("KUN_USE_GIT_VERSION", "0") != '0':
     git_ver = "." + datetime.datetime.now().strftime("%Y%m%d")
@@ -92,8 +130,10 @@ setup(
         CMakeExtension("KunQuant.runner.KunRunner", "KunRunner", sourcedir="cpp"),
     ],
     cmdclass={
-        "build_ext": CMakeBuildExtension,
+        "build_ext":   CMakeBuildExtension,
+        "bdist_wheel": BdistWheelABI3,
     },
+    python_requires=">=3.9",
     install_requires=[
         # Add Python dependencies here
         "numpy",

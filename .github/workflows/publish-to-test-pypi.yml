@@ -6,6 +6,20 @@ on:
     tags:
     - '*'
   workflow_dispatch:
+
+# Build matrix policy:
+#   * Python 3.9 / 3.10 / 3.11 → per-version wheels (one .so per minor).
+#     nanobind's STABLE_ABI is silently disabled below 3.12 (it needs
+#     Limited-API heap-type slots that only landed in 3.12), so each
+#     wheel is tagged `cp3X-cp3X-*` and only loadable on that minor.
+#   * Python 3.12 → a single `cp312-abi3-*` wheel (setup.py's
+#     BdistWheelABI3 cmdclass).  pip auto-installs it on 3.12, 3.13,
+#     3.14, … so we don't need separate builds for newer Pythons.
+#
+# If nanobind raises its abi3 floor (or a Python minor introduces ABI
+# breakage that defeats abi3 — historically very rare on patch
+# releases), add a new entry for that minor and re-bump the floor here.
+
 jobs:
   build-windows-macos:
     name: Build distribution Windows and MacOS 📦
@@ -13,7 +27,7 @@ jobs:
     strategy:
       matrix:
         os: [windows-2022, macos-14]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
 
     steps:
     - uses: actions/checkout@v4
@@ -59,10 +73,8 @@ jobs:
             cp-tag: "cp311"
           - python-version: "3.12"
             cp-tag: "cp312"
-          - python-version: "3.13"
-            cp-tag: "cp313"
-          - python-version: "3.14"
-            cp-tag: "cp314"
+            # 3.12 build emits a cp312-abi3 wheel that also loads on
+            # 3.13/3.14+; no separate entries needed for those minors.
     steps:
     - uses: actions/checkout@v4
       with:
@@ -101,7 +113,7 @@ jobs:
     strategy:
       matrix:
         os: [windows-2022, macos-14, ubuntu-22.04]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
     environment:
       name: pypi
       url: https://pypi.org/p/KunQuant  # Replace <package-name> with your PyPI project name
@@ -124,7 +136,7 @@ jobs:
     strategy:
       matrix:
         os: [windows-2022, macos-14, ubuntu-22.04]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
     environment:
       name: testpypi
       url: https://test.pypi.org/p/KunQuant

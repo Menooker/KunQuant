@@ -1,3 +1,4 @@
+#include "Aligned.hpp"   // kunAlignedAlloc / kunAlignedFree
 #include "Context.hpp"
 #include "CorrWith.hpp"
 #include "Module.hpp"
@@ -9,14 +10,6 @@
 #include <string.h>
 #include <string>
 #include <unordered_map>
-#ifdef _WIN32
-#include <malloc.h>
-#define kunAlignedAlloc(x, y) _aligned_malloc(y, x)
-#define kunAlignedFree(x) _aligned_free(x)
-#else
-#define kunAlignedAlloc(x, y) aligned_alloc(x, y)
-#define kunAlignedFree(x) free(x)
-#endif
 
 #if CHECKED_PTR
 #include <assert.h>

@@ -1,8 +1,25 @@
 cmake_policy(SET CMP0048 NEW)
+# nanobind requires CMake ≥ 3.15 (we use ≥ 3.18 so FindPython's
+# `Development.SABIModule` component is reliably available, which is
+# what STABLE_ABI mode below needs to link against).
+cmake_minimum_required(VERSION 3.18)
 project(KunRunner VERSION 0.0.1)
-cmake_minimum_required(VERSION 3.5)
-add_subdirectory(3rdparty/pybind11)
-include_directories(${pybind11_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/cpp)
+
+# nanobind requires C++17.  Set this before any add_subdirectory so
+# subprojects (nanobind itself + our own targets) all pick it up.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Detect the matching Python with the SABIModule component so
+# nanobind_add_module(... STABLE_ABI) can produce a single .abi3.so
+# that works on every CPython ≥ 3.12.  Falls back to the regular
+# Development.Module ABI on older interpreters.
+find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module
+             OPTIONAL_COMPONENTS Development.SABIModule)
+
+add_subdirectory(3rdparty/nanobind)
+include_directories(${PROJECT_SOURCE_DIR}/cpp)
 
 if(APPLE)
     set(CMAKE_INSTALL_RPATH "@loader_path")
@@ -19,7 +36,9 @@ option(KUN_SANITIZER "Enable sanitizer" OFF)
 
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|AppleClang)")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fvisibility=hidden -fvisibility-inlines-hidden -pthread")
+    # NOTE: C++ standard is set via CMAKE_CXX_STANDARD above; don't
+    # re-add -std=c++NN here or it'll clobber subprojects' choice.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden -fvisibility-inlines-hidden -pthread")
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "(amd64|x86_64|AMD64)")
         message(STATUS "Building for x86_64 architecture")
         if (NOT KUN_NO_AVX2)
@@ -63,7 +82,11 @@ if (NOT WIN32)
 endif()
 
 file(GLOB_RECURSE KunPythonSrc ${PROJECT_SOURCE_DIR}/cpp/Python/*.cpp)
-pybind11_add_module(KunRunner SHARED ${KunPythonSrc})
+# STABLE_ABI: build a single Python-version-independent .abi3.so on
+# CPython ≥ 3.12; nanobind silently disables this and falls back to
+# regular ABI on older Pythons.  Saves us one rebuild per Python
+# minor we want to ship.
+nanobind_add_module(KunRunner STABLE_ABI ${KunPythonSrc})
 
 target_link_libraries(KunRunner PUBLIC KunRuntime)
 
