@@ -28,7 +28,7 @@
 kunir.func @test_all_smem(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
     inputs {%in = "in"}
     outputs {%out = "out"}
-    target {occupancy = 1, warps_per_cta = 1, smem_size = 49152, vector_size = 1} {
+    target {occupancy = 1, warps_per_cta = 1, smem_size = 49152, vector_size = 1} unreliable_count = 0 {
   // Declared in reverse order to verify sort-by-N behaviour.
   // CHECK-DAG: kungpu.windowed_temp : <f32, 10> {kungpu.smem = true}
   %c = kungpu.windowed_temp : !kunir.ts<f32, 10>
@@ -47,7 +47,7 @@ kunir.func @test_all_smem(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
 kunir.func @test_mixed(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
     inputs {%in = "in"}
     outputs {%out = "out"}
-    target {occupancy = 1, warps_per_cta = 1, smem_size = 49152, vector_size = 1} {
+    target {occupancy = 1, warps_per_cta = 1, smem_size = 49152, vector_size = 1} unreliable_count = 0 {
   // N=400 (51200 bytes) is declared first but sorted after N=5 (640 bytes).
   // N=5 takes 640 bytes; N=400 would need 51200 more, exceeding 48512 remaining.
   // CHECK-DAG: kungpu.windowed_temp : <f32, 400> {kungpu.smem = false}
@@ -65,7 +65,7 @@ kunir.func @test_mixed(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
 kunir.func @test_all_local(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
     inputs {%in = "in"}
     outputs {%out = "out"}
-    target {occupancy = 1, warps_per_cta = 1, smem_size = 49152, vector_size = 1} {
+    target {occupancy = 1, warps_per_cta = 1, smem_size = 49152, vector_size = 1} unreliable_count = 0 {
   // N=400 → 51200 bytes > 49152, smem=false.
   // CHECK-DAG: kungpu.windowed_temp : <f32, 400> {kungpu.smem = false}
   %a = kungpu.windowed_temp : !kunir.ts<f32, 400>

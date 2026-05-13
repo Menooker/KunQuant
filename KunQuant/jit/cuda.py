@@ -33,6 +33,7 @@ from KunQuant.jit import KunMLIR
 from KunQuant.Driver import optimize, post_optimize
 from KunQuant.Op import Input, Output
 from KunQuant.passes import do_partition
+from KunQuant.passes.InferWindow import infer_window
 from KunQuant.Stage import Function
 from KunQuant.passes.CodegenMLIR import TargetSpec, translate_function
 
@@ -205,7 +206,15 @@ def _translate_partitions(impl, cfg: CudaCompilerConfig):
     dtype = _to_dtype_token(cfg.dtype)
     externals = []
     for sub in impl:
-        ext = translate_function(sub, target, ir, dtype=dtype)
+        # Per-partition warmup: max windowed-chain depth from any input
+        # to any output of THIS partition.  Earlier partitions have already
+        # written their (post-warmup) values into the shared device buffers
+        # by the time this kernel runs, so we don't accumulate their
+        # unreliable counts here.  infer_window walks back to Input ops
+        # of the partition; cross-partition deps stop at those Inputs.
+        per_kernel_unreliable = max(infer_window(sub).values(), default=0)
+        ext = translate_function(sub, target, ir, dtype=dtype,
+                                   unreliable_count=per_kernel_unreliable)
         if ext is not None:
             externals.append(ext)
     return ir.finish(), externals

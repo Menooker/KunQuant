@@ -4,7 +4,7 @@
 // CHECK-LABEL: kunir.func @test_stock_id
 kunir.func @test_stock_id()
     inputs {} outputs {"id"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> index {
   // CHECK: kungpu.stock_id
   %id = kungpu.stock_id
@@ -14,7 +14,7 @@ kunir.func @test_stock_id()
 // CHECK-LABEL: kunir.func @test_block_stock_count
 kunir.func @test_block_stock_count()
     inputs {} outputs {"n"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> index {
   // CHECK: kungpu.block_stock_count
   %n = kungpu.block_stock_count
@@ -24,7 +24,7 @@ kunir.func @test_block_stock_count()
 // CHECK-LABEL: kunir.func @test_time_length
 kunir.func @test_time_length()
     inputs {} outputs {"len"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> index {
   // CHECK: kungpu.time_length
   %len = kungpu.time_length
@@ -35,7 +35,7 @@ kunir.func @test_time_length()
 kunir.func @test_ts_get_put(%ts_in: !kunir.ts<f32, inf>, %ts_out: !kunir.ts<f32, 1>)
     inputs {%ts_in = "ts_in"}
     outputs {%ts_out = "ts_out"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} {
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0 {
   %off = arith.constant 0 : i32
   // CHECK: kungpu.ts.get
   // CHECK-SAME: <f32, inf> -> f32
@@ -48,7 +48,7 @@ kunir.func @test_ts_get_put(%ts_in: !kunir.ts<f32, inf>, %ts_out: !kunir.ts<f32,
 // CHECK-LABEL: kunir.func @test_windowed_temp
 kunir.func @test_windowed_temp()
     inputs {} outputs {"v"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> f32 {
   %off = arith.constant 0 : i32
   // CHECK: %[[WT:.*]] = kungpu.windowed_temp : <f32, 5>

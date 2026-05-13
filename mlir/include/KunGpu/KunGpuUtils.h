@@ -22,6 +22,7 @@ namespace kungpu {
 constexpr llvm::StringLiteral kFuncTargetSpecAttr  = "kungpu.target_spec";
 constexpr llvm::StringLiteral kFuncInputNamesAttr  = "kungpu.input_names";
 constexpr llvm::StringLiteral kFuncOutputNamesAttr = "kungpu.output_names";
+constexpr llvm::StringLiteral kFuncUnreliableCountAttr = "kungpu.unreliable_count";
 
 inline ::kunir::TargetSpecAttr getFuncTargetSpec(::mlir::Operation *fn) {
   return fn->getAttrOfType<::kunir::TargetSpecAttr>(kFuncTargetSpecAttr);
@@ -45,6 +46,16 @@ inline ::mlir::ArrayAttr getFuncOutputNames(::mlir::Operation *fn) {
 inline void setFuncOutputNames(::mlir::Operation *fn,
                                  ::mlir::ArrayAttr names) {
   fn->setAttr(kFuncOutputNamesAttr, names);
+}
+
+inline int64_t getFuncUnreliableCount(::mlir::Operation *fn) {
+  auto attr = fn->getAttrOfType<::mlir::IntegerAttr>(kFuncUnreliableCountAttr);
+  return attr ? attr.getInt() : 0;
+}
+inline void setFuncUnreliableCount(::mlir::Operation *fn, int64_t v) {
+  fn->setAttr(kFuncUnreliableCountAttr,
+              ::mlir::IntegerAttr::get(
+                  ::mlir::IntegerType::get(fn->getContext(), 64), v));
 }
 
 } // namespace kungpu

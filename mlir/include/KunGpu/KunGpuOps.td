@@ -40,6 +40,48 @@ def KunGpu_TimeLengthOp : KunGpu_Op<"time_length", [Pure]> {
 }
 
 //===----------------------------------------------------------------------===//
+// Time-chunk loop bounds
+//
+// The outer time loop is split into multiple chunks across the y dimension
+// of the launch grid (one CTA per (stock_tile, time_chunk)).  These ops
+// encode the per-chunk loop bounds; lowering reads gpu.block_id y for
+// chunk_idx.  When num_chunks == 1 callers should set chunk_size =
+// time_length so only chunk 0 (the full range) runs.
+//===----------------------------------------------------------------------===//
+
+def KunGpu_TimeLbOp : KunGpu_Op<"time_lb", [Pure]> {
+  let summary = "Time-loop lower bound (inclusive) for the current chunk";
+  let description = [{
+    Returns:
+      chunk_idx == 0  →  0
+      otherwise       →  chunk_idx * chunk_size - warmup
+    The warmup overlap lets chunks ≥ 1 prime their windowed rolling state
+    over the trailing `warmup` steps of the previous chunk before they
+    start writing reliable outputs.  `chunk_idx` is `gpu.block_id y`.
+
+    No operands — chunk_size / warmup are runtime scalars that the
+    kungpu-to-llvm pass prepends to the gpu.func signature; lowering
+    reads them from fixed arg positions, mirroring `kungpu.time_length`.
+  }];
+  let results = (outs Index:$result);
+  let assemblyFormat = "attr-dict";
+}
+
+def KunGpu_TimeUbOp : KunGpu_Op<"time_ub", [Pure]> {
+  let summary = "Time-loop upper bound (exclusive) for the current chunk";
+  let description = [{
+    Returns `min((chunk_idx + 1) * chunk_size, time_length)`.  `chunk_idx`
+    is `gpu.block_id y`.  The last chunk gets clipped to `time_length` so
+    `time_length` need not be a multiple of `chunk_size`.
+
+    No operands — see TimeLbOp; both chunk_size and time_length are read
+    from gpu.func args at lowering time.
+  }];
+  let results = (outs Index:$result);
+  let assemblyFormat = "attr-dict";
+}
+
+//===----------------------------------------------------------------------===//
 // Time-series memory ops
 //
 // kungpu.windowed_temp allocates a per-thread circular (ring) buffer.

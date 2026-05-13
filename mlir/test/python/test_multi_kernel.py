@@ -27,7 +27,7 @@ gpu.module @kungpu_kernels {
   kunir.func @add_kernel(%a: !kunir.ts<f32, inf>, %b: !kunir.ts<f32, inf>)
       inputs {%a = "a", %b = "b"}
       outputs {"tmp"}
-      target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+      target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1} unreliable_count = 0
       -> !kunir.ts<f32, 1> {
     %s = kunir.add %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
     kunir.return %s : !kunir.ts<f32, 1>
@@ -36,7 +36,7 @@ gpu.module @kungpu_kernels {
   kunir.func @scale_kernel(%t: !kunir.ts<f32, inf>, %c: !kunir.ts<f32, inf>)
       inputs {%t = "tmp", %c = "c"}
       outputs {"out"}
-      target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+      target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1} unreliable_count = 0
       -> !kunir.ts<f32, 1> {
     %s = kunir.mul %t, %c : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
     kunir.return %s : !kunir.ts<f32, 1>

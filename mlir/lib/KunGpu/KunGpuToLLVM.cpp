@@ -85,6 +85,32 @@ struct WTDesc {
 };
 using WTDescMap = llvm::DenseMap<Value, WTDesc>;
 
+// Per-function cache for chunk-related values shared across multiple
+// output-store rewrites.  Each gpu.func builds (at most) one mask
+// index_cast and one write_start SSA value; subsequent ts.put rewrites
+// against an output arg reuse them, so we don't lean on a downstream
+// CSE pass.
+//
+// Both cached values are index-typed (not i32) because they're used as
+// scf.for / arith.cmpi operands against the loop induction variable
+// which is index-typed.  The runtime scalar args (mask, chunk_size,
+// warmup) are i32; the helpers below insert the i32 → index cast once
+// at function entry.
+//
+//   mask         : index, cast once from arg[2] (i32).  Used to shift
+//                  output indices: out[t - mask, sid].
+//   writeStart   : (block_id y == 0) ? mask : block_id y * chunk_size.
+//                  Output stores below this time-index are suppressed —
+//                  they fall in the warmup-overlap region.
+//
+// Both are emitted at the very top of the function entry block so they
+// dominate every store site, regardless of how deeply nested.
+struct ChunkContext {
+  Value mask;
+  Value writeStart;
+};
+using ChunkCtxMap = llvm::DenseMap<Operation *, ChunkContext>;
+
 //===----------------------------------------------------------------------===//
 // Helper: stock_id = blockIdx.x * blockDim.x + threadIdx.x  (index-typed)
 // Defined here so phase 1 (`convertFuncSignature` below) can reuse it
@@ -129,7 +155,13 @@ static LogicalResult convertFuncSignature(kunir::FuncOp fn) {
   }
 
   FunctionType oldFT = fn.getFunctionTypeTyped();
-  SmallVector<Type> newArgTypes = {i32Ty, i32Ty};
+  // Prepend (time_length, num_stocks, mask, chunk_size, warmup) — all
+  // i32.  time_length / num_stocks shape the linear gmem indexing;
+  // mask / chunk_size / warmup feed the multi-chunk time-axis path
+  // (kungpu.time_lb / time_ub / output-store gating).  64-bit math is
+  // slow on GPUs, so we keep them as i32 and cast to index only at the
+  // few places that need it.
+  SmallVector<Type> newArgTypes = {i32Ty, i32Ty, i32Ty, i32Ty, i32Ty};
   for (Type t : oldFT.getInputs())
     newArgTypes.push_back(t);
 
@@ -144,6 +176,7 @@ static LogicalResult convertFuncSignature(kunir::FuncOp fn) {
   setFuncTargetSpec (newFunc, fn.getTargetSpecAttr());
   setFuncInputNames (newFunc, fn.getInputNames());
   setFuncOutputNames(newFunc, fn.getOutputNames());
+  setFuncUnreliableCount(newFunc, fn.getUnreliableCount());
 
   // gpu.func's auto-created entry block is replaced with the kunir.func
   // body.  Block-arg types initially still match the kunir.func signature;
@@ -151,8 +184,11 @@ static LogicalResult convertFuncSignature(kunir::FuncOp fn) {
   // gpu.func type (ts → !llvm.ptr).
   newFunc.getBody().takeBody(fn.getBody());
   Block &entry = newFunc.getBody().front();
-  entry.insertArgument(0u, i32Ty, loc);
-  entry.insertArgument(1u, i32Ty, loc);
+  entry.insertArgument(0u, i32Ty, loc); // time_length
+  entry.insertArgument(1u, i32Ty, loc); // num_stocks
+  entry.insertArgument(2u, i32Ty, loc); // mask
+  entry.insertArgument(3u, i32Ty, loc); // chunk_size
+  entry.insertArgument(4u, i32Ty, loc); // warmup
 
   SmallVector<kunir::ReturnOp> returns;
   newFunc.walk([&](kunir::ReturnOp r) { returns.push_back(r); });
@@ -252,6 +288,121 @@ struct TimeLengthPattern : OpConversionPattern<TimeLengthOp> {
     return success();
   }
 };
+
+// time_lb = (block_id y == 0) ? 0 : block_id y * chunk_size - warmup
+// All arithmetic happens in i32 (64-bit ops are slow on GPU); a single
+// index_cast at the end produces the index-typed scf.for bound.
+// chunk_size / warmup come from gpu.func args[3] / args[4]; the op has
+// no operands at the kungpu level.
+struct TimeLbPattern : OpConversionPattern<TimeLbOp> {
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(TimeLbOp op, OpAdaptor /*adaptor*/,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    auto i32Ty = rewriter.getI32Type();
+    auto idxTy = rewriter.getIndexType();
+    auto fn = op->getParentOfType<gpu::GPUFuncOp>();
+    Value chunkSize = fn.getBody().front().getArgument(3);
+    Value warmup    = fn.getBody().front().getArgument(4);
+    Value cyIdx = rewriter.create<gpu::BlockIdOp>(loc, idxTy, gpu::Dimension::y);
+    Value cy = rewriter.create<arith::IndexCastOp>(loc, i32Ty, cyIdx);
+    Value c0 = rewriter.create<arith::ConstantOp>(
+        loc, i32Ty, rewriter.getI32IntegerAttr(0));
+    Value isFirst = rewriter.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::eq, cy, c0);
+    Value off = rewriter.create<arith::MulIOp>(loc, cy, chunkSize);
+    Value offMinusW = rewriter.create<arith::SubIOp>(loc, off, warmup);
+    Value lbI32 = rewriter.create<arith::SelectOp>(loc, isFirst, c0, offMinusW);
+    rewriter.replaceOpWithNewOp<arith::IndexCastOp>(op, idxTy, lbI32);
+    return success();
+  }
+};
+
+// time_ub = min((block_id y + 1) * chunk_size, time_length)
+// chunk_size / time_length come from gpu.func args[3] / args[0]; both
+// are i32 so the math stays in i32 with one final cast to index.
+struct TimeUbPattern : OpConversionPattern<TimeUbOp> {
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(TimeUbOp op, OpAdaptor /*adaptor*/,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    auto i32Ty = rewriter.getI32Type();
+    auto idxTy = rewriter.getIndexType();
+    auto fn = op->getParentOfType<gpu::GPUFuncOp>();
+    Value timeLen   = fn.getBody().front().getArgument(0);
+    Value chunkSize = fn.getBody().front().getArgument(3);
+    Value cyIdx = rewriter.create<gpu::BlockIdOp>(loc, idxTy, gpu::Dimension::y);
+    Value cy = rewriter.create<arith::IndexCastOp>(loc, i32Ty, cyIdx);
+    Value c1 = rewriter.create<arith::ConstantOp>(
+        loc, i32Ty, rewriter.getI32IntegerAttr(1));
+    Value next = rewriter.create<arith::AddIOp>(loc, cy, c1);
+    Value end = rewriter.create<arith::MulIOp>(loc, next, chunkSize);
+    Value ubI32 = rewriter.create<arith::MinUIOp>(loc, end, timeLen);
+    rewriter.replaceOpWithNewOp<arith::IndexCastOp>(op, idxTy, ubI32);
+    return success();
+  }
+};
+
+//===----------------------------------------------------------------------===//
+// Chunk-context lazy helpers.  See ChunkContext above.
+//
+// mask / chunk_size / warmup come in as i32 func args (positions 2 / 3 /
+// 4 after time_length / num_stocks).  We cast mask to index once per
+// function and cache the result, then build writeStart from it.  Both
+// emissions land at the very top of the function entry block so the
+// resulting SSA values dominate every store-site inside the kernel.
+//===----------------------------------------------------------------------===//
+
+static Value getOrCreateMask(Operation *op, ChunkCtxMap &map,
+                              ConversionPatternRewriter &rewriter) {
+  auto fn = op->getParentOfType<gpu::GPUFuncOp>();
+  ChunkContext &ctx = map[fn.getOperation()];
+  if (ctx.mask) return ctx.mask;
+  // arg layout: (i32 time_length, i32 num_stocks, i32 mask, i32 chunk_size,
+  //              i32 warmup, ts...)
+  Value maskI32 = fn.getBody().front().getArgument(2);
+  Location loc = fn.getLoc();
+
+  OpBuilder::InsertionGuard g(rewriter);
+  rewriter.setInsertionPointToStart(&fn.getBody().front());
+  ctx.mask = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(),
+                                                    maskI32);
+  return ctx.mask;
+}
+
+static Value getOrCreateWriteStart(Operation *op, ChunkCtxMap &map,
+                                     ConversionPatternRewriter &rewriter) {
+  auto fn = op->getParentOfType<gpu::GPUFuncOp>();
+  ChunkContext &ctx = map[fn.getOperation()];
+  if (ctx.writeStart) return ctx.writeStart;
+
+  // Compute in i32 (cheap on GPU) then cast once to index, since the
+  // result is compared against the scf.for IV (index-typed).  We read
+  // the i32 mask and chunk_size args directly — not the cached index
+  // mask — so the mask helper and this helper don't depend on each
+  // other and either order is fine.
+  Block &entry = fn.getBody().front();
+  Value maskI32      = entry.getArgument(2);
+  Value chunkSizeI32 = entry.getArgument(3);
+  Location loc = fn.getLoc();
+
+  OpBuilder::InsertionGuard g(rewriter);
+  rewriter.setInsertionPointToStart(&entry);
+  auto i32Ty = rewriter.getI32Type();
+  auto idxTy = rewriter.getIndexType();
+  Value cyIdx = rewriter.create<gpu::BlockIdOp>(loc, idxTy, gpu::Dimension::y);
+  Value cy = rewriter.create<arith::IndexCastOp>(loc, i32Ty, cyIdx);
+  Value c0 = rewriter.create<arith::ConstantOp>(
+      loc, i32Ty, rewriter.getI32IntegerAttr(0));
+  Value isFirst = rewriter.create<arith::CmpIOp>(
+      loc, arith::CmpIPredicate::eq, cy, c0);
+  Value off = rewriter.create<arith::MulIOp>(loc, cy, chunkSizeI32);
+  Value wsI32 = rewriter.create<arith::SelectOp>(loc, isFirst, maskI32, off);
+  ctx.writeStart = rewriter.create<arith::IndexCastOp>(loc, idxTy, wsI32);
+  return ctx.writeStart;
+}
 
 struct StockIdPattern : OpConversionPattern<StockIdOp> {
   using OpConversionPattern::OpConversionPattern;
@@ -439,9 +590,11 @@ struct TsGetPattern : OpConversionPattern<TsGetOp> {
 
 struct TsPutPattern : OpConversionPattern<TsPutOp> {
   WTDescMap &descMap;
+  ChunkCtxMap &chunkCtx;
 
-  TsPutPattern(TypeConverter &tc, MLIRContext *ctx, WTDescMap &m)
-      : OpConversionPattern(tc, ctx), descMap(m) {}
+  TsPutPattern(TypeConverter &tc, MLIRContext *ctx, WTDescMap &m,
+                ChunkCtxMap &c)
+      : OpConversionPattern(tc, ctx), descMap(m), chunkCtx(c) {}
 
   LogicalResult
   matchAndRewrite(TsPutOp op, OpAdaptor adaptor,
@@ -486,13 +639,33 @@ struct TsPutPattern : OpConversionPattern<TsPutOp> {
       rewriter.create<LLVM::StoreOp>(loc, newPos, desc.posPtr);
       rewriter.eraseOp(op);
     } else {
-      // ── global ts: write at current time ──────────────────────────
-      Value timeIdx = getCurrentTimeIdx(op);
-      Value gep = gmemGEPWithOffset(rewriter, loc, elemTy, ptrTy, tsPtr,
-                                     timeIdx, /*offsetIdx=*/Value(),
-                                     getNumStocksI64(rewriter, op, loc),
+      // ── global ts: write at current time, gated by per-chunk write_start,
+      //    output index shifted by `mask` so the output array's time dim is
+      //    `time_length - mask`.
+      //
+      //   if (t >= write_start)
+      //     out[t - mask, sid] = v
+      //
+      // The `t >= write_start` comparison is uniform across the CTA (all
+      // threads share the same scf.for IV), so the lowered branch is a
+      // single uniform predicate — no warp divergence at chunk boundaries.
+      Value timeIdx    = getCurrentTimeIdx(op);
+      Value writeStart = getOrCreateWriteStart(op, chunkCtx, rewriter);
+      Value mask       = getOrCreateMask(op, chunkCtx, rewriter);
+
+      Value doWrite = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::sge, timeIdx, writeStart);
+      auto ifOp = rewriter.create<scf::IfOp>(
+          loc, /*resultTypes=*/TypeRange{}, doWrite,
+          /*withElseRegion=*/false);
+
+      OpBuilder ib = OpBuilder::atBlockBegin(&ifOp.getThenRegion().front());
+      Value tOut = ib.create<arith::SubIOp>(loc, timeIdx, mask);
+      Value gep = gmemGEPWithOffset(ib, loc, elemTy, ptrTy, tsPtr,
+                                     tOut, /*offsetIdx=*/Value(),
+                                     getNumStocksI64(ib, op, loc),
                                      idxTy, i64Ty);
-      rewriter.create<LLVM::StoreOp>(loc, v, gep);
+      ib.create<LLVM::StoreOp>(loc, v, gep);
       rewriter.eraseOp(op);
     }
     return success();
@@ -722,7 +895,8 @@ struct ConvertKunGpuToLLVMPass
                            LLVM::LLVMDialect, gpu::GPUDialect>();
     target.addLegalOp<ModuleOp, UnrealizedConversionCastOp>();
     target.addIllegalOp<WindowedTempOp, TsGetOp, TsPutOp,
-                        TimeLengthOp, StockIdOp, BlockStockCountOp>();
+                        TimeLengthOp, TimeLbOp, TimeUbOp,
+                        StockIdOp, BlockStockCountOp>();
     target.addIllegalOp<kunir::FastWindowedSumOp>();
     // gpu.func is legal only after its signature has been converted from
     // (...kunir.ts) to (...!llvm.ptr) by the FunctionOpInterface pattern
@@ -734,15 +908,17 @@ struct ConvertKunGpuToLLVMPass
     // gpu.return is void in our IR — always legal.
 
     WTDescMap descMap;
+    ChunkCtxMap chunkCtx;
     int smemCounter = 0;
 
     RewritePatternSet patterns(ctx);
     populateFunctionOpInterfaceTypeConversionPattern<gpu::GPUFuncOp>(
         patterns, typeConv);
-    patterns.add<TimeLengthPattern, StockIdPattern, BlockStockCountPattern>(
-        typeConv, ctx);
+    patterns.add<TimeLengthPattern, TimeLbPattern, TimeUbPattern,
+                  StockIdPattern, BlockStockCountPattern>(typeConv, ctx);
     patterns.add<WindowedTempPattern>(typeConv, ctx, descMap, smemCounter);
-    patterns.add<TsGetPattern, TsPutPattern>(typeConv, ctx, descMap);
+    patterns.add<TsGetPattern>(typeConv, ctx, descMap);
+    patterns.add<TsPutPattern>(typeConv, ctx, descMap, chunkCtx);
     patterns.add<FastWindowedSumPattern>(typeConv, ctx);
 
     if (failed(applyPartialConversion(module, target, std::move(patterns))))

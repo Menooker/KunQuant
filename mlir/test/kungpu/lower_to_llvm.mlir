@@ -16,12 +16,86 @@ gpu.module @kungpu_kernels {
 
 
 // =====================================================================
+// Case 0 — time_lb / time_ub lowering in isolation.
+//
+// Both ops do their arithmetic in i32 (64-bit ops are slow on GPU);
+// only the final scf.for bound is cast back to index.
+//
+//   time_lb = (cy_i32 == 0) ? 0 : cy_i32 * chunk_size - warmup
+//   time_ub = min((cy_i32 + 1) * chunk_size, time_length)
+//
+// where cy = gpu.block_id y.  This function lowers to nothing but the
+// signature, the two bound computations, and an empty scf.for (no body
+// ops survive the conversion — kungpu.time_length / time_lb / time_ub
+// are illegal in the output IR).
+// =====================================================================
+//
+// CHECK-LABEL: gpu.func @test_time_bounds(
+// CHECK-SAME:    %[[TL_I32:[^:]+]]: i32,
+// CHECK-SAME:    %[[NS:[^:]+]]: i32,
+// CHECK-SAME:    %[[MASK_I32:[^:]+]]: i32,
+// CHECK-SAME:    %[[CSZ_I32:[^:]+]]: i32,
+// CHECK-SAME:    %[[WUP_I32:[^:]+]]: i32,
+// CHECK-SAME:    %[[IN:[^:]+]]: !llvm.ptr,
+// CHECK-SAME:    %[[OUT:[^:]+]]: !llvm.ptr
+// CHECK-SAME:    kernel
+//
+// ── time_lb lowering ───────────────────────────────────────────────────
+// chunk_size / warmup are read from gpu.func args directly (op is
+// operandless at this level).
+//   lb_i32 = select(cy_i32 == 0, 0, cy_i32 * chunk_size - warmup)
+//   lb     = index_cast lb_i32
+// CHECK:         %[[CY_LB_IDX:.*]] = gpu.block_id y
+// CHECK:         %[[CY_LB:.*]] = arith.index_cast %[[CY_LB_IDX]] : index to i32
+// CHECK:         %[[LBC0:.*]] = arith.constant 0 : i32
+// CHECK:         %[[ISFST_LB:.*]] = arith.cmpi eq, %[[CY_LB]], %[[LBC0]] : i32
+// CHECK:         %[[OFF_LB:.*]] = arith.muli %[[CY_LB]], %[[CSZ_I32]] : i32
+// CHECK:         %[[OFFMW:.*]] = arith.subi %[[OFF_LB]], %[[WUP_I32]] : i32
+// CHECK:         %[[LB_I32:.*]] = arith.select %[[ISFST_LB]], %[[LBC0]], %[[OFFMW]] : i32
+// CHECK:         %[[LB:.*]] = arith.index_cast %[[LB_I32]] : i32 to index
+//
+// ── time_ub lowering ───────────────────────────────────────────────────
+// chunk_size / time_length are read from gpu.func args directly.
+//   ub_i32 = min((cy_i32 + 1) * chunk_size, time_length)
+//   ub     = index_cast ub_i32
+// CHECK:         %[[CY_UB_IDX:.*]] = gpu.block_id y
+// CHECK:         %[[CY_UB:.*]] = arith.index_cast %[[CY_UB_IDX]] : index to i32
+// CHECK:         %[[UBC1:.*]] = arith.constant 1 : i32
+// CHECK:         %[[CYP1:.*]] = arith.addi %[[CY_UB]], %[[UBC1]] : i32
+// CHECK:         %[[END:.*]] = arith.muli %[[CYP1]], %[[CSZ_I32]] : i32
+// CHECK:         %[[UB_I32:.*]] = arith.minui %[[END]], %[[TL_I32]] : i32
+// CHECK:         %[[UB:.*]] = arith.index_cast %[[UB_I32]] : i32 to index
+//
+// Resulting scf.for picks up the two bounds.
+// CHECK:         scf.for %{{.*}} = %[[LB]] to %[[UB]] step %{{.*}}
+// CHECK:         gpu.return
+//
+// The kungpu ops are illegal in the final IR.
+// CHECK-NOT:     kungpu.time_lb
+// CHECK-NOT:     kungpu.time_ub
+kunir.func @test_time_bounds(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
+    inputs {%in = "in"}
+    outputs {%out = "out"}
+    target {occupancy = 1, warps_per_cta = 1, smem_size = 0, vector_size = 1} unreliable_count = 0 {
+  %lb = kungpu.time_lb
+  %ub = kungpu.time_ub
+  %c1 = arith.constant 1 : index
+  scf.for %t = %lb to %ub step %c1 {
+  }
+  kunir.return
+}
+
+
+// =====================================================================
 // Case 1 — gmem-only: signature change, time_length lowering, TxS GEPs.
 // =====================================================================
 //
 // CHECK-LABEL: gpu.func @test_copy(
 // CHECK-SAME:    %[[TL:[^:]+]]: i32,
 // CHECK-SAME:    %[[NS:[^:]+]]: i32,
+// CHECK-SAME:    %[[MASK_I32:[^:]+]]: i32,
+// CHECK-SAME:    %[[CSZ_I32:[^:]+]]: i32,
+// CHECK-SAME:    %[[WUP_I32:[^:]+]]: i32,
 // CHECK-SAME:    %[[IN:[^:]+]]: !llvm.ptr,
 // CHECK-SAME:    %[[OUT:[^:]+]]: !llvm.ptr
 // kernel attribute is set, kunir-func metadata preserved as discardables:
@@ -29,6 +103,20 @@ gpu.module @kungpu_kernels {
 // CHECK-SAME:    kungpu.input_names = ["in"]
 // CHECK-SAME:    kungpu.output_names = ["out"]
 // CHECK-SAME:    kungpu.target_spec = #kunir<target_spec{
+//
+// ── Per-function chunk write_start cache, lazily inserted at entry ────
+// All chunk arithmetic stays in i32 (64-bit ops are slow on GPU); only
+// the final write_start gets an index_cast for comparing against the
+// index-typed scf.for IV.  Mask cast (separate, used for t-mask subi
+// inside the loop) hoists to entry too.
+// CHECK:       %[[MASK:.*]] = arith.index_cast %[[MASK_I32]] : i32 to index
+// CHECK:       %[[CY_IDX:.*]] = gpu.block_id y
+// CHECK:       %[[CY:.*]] = arith.index_cast %[[CY_IDX]] : index to i32
+// CHECK:       %[[CYC0:.*]] = arith.constant 0 : i32
+// CHECK:       %[[ISFIRST:.*]] = arith.cmpi eq, %[[CY]], %[[CYC0]] : i32
+// CHECK:       %[[CYMUL:.*]] = arith.muli %[[CY]], %[[CSZ_I32]] : i32
+// CHECK:       %[[WSTART_I32:.*]] = arith.select %[[ISFIRST]], %[[MASK_I32]], %[[CYMUL]] : i32
+// CHECK:       %[[WSTART:.*]] = arith.index_cast %[[WSTART_I32]] : i32 to index
 //
 // ── Active-thread guard prologue ──────────────────────────────────────
 // Computes stock_id = bid*bdim + tid, compares with %num_stocks, then
@@ -43,11 +131,15 @@ gpu.module @kungpu_kernels {
 // CHECK:       %[[ACTIVE:.*]] = arith.cmpi slt, %[[SIDI]], %[[NS]] : i32
 // CHECK:       scf.if %[[ACTIVE]] {
 //
-// time_length → arith.index_cast of arg0 (i32 → index)
-// CHECK:         %[[TLIDX:.*]] = arith.index_cast %[[TL]] : i32 to index
+// time_lb / time_ub lowering is verified in detail by @test_time_bounds
+// above.  Here we only assert that the scf.for picks up index-typed
+// bounds (which can only be the index_cast results of time_lb / time_ub
+// since chunk_size / warmup are i32).
+// CHECK:         %[[LB:.*]] = arith.index_cast %{{.*}} : i32 to index
+// CHECK:         %[[UB:.*]] = arith.index_cast %{{.*}} : i32 to index
 // CHECK:         %[[OFFCST:.*]] = arith.constant 0 : i32
 //
-// CHECK:         scf.for %[[T:.*]] = %{{.*}} to %[[TLIDX]] step %{{.*}}
+// CHECK:         scf.for %[[T:.*]] = %[[LB]] to %[[UB]] step %{{.*}}
 //
 // ── ts.get on global %in at offset 0 ───────────────────────────────────
 // effective time = t − 0; stock_id = bid*bdim + tid; lin = effT*ns + sid.
@@ -67,25 +159,28 @@ gpu.module @kungpu_kernels {
 // CHECK:         %[[GEP:.*]] = llvm.getelementptr %[[IN]][%[[LIN]]] {{.*}} -> !llvm.ptr, f32
 // CHECK:         %[[V:.*]] = llvm.load %[[GEP]] : !llvm.ptr -> f32
 //
-// ── ts.put on global %out (no offset; writes at current iv) ───────────
-// CHECK:         %[[NS64B:.*]] = arith.extsi %[[NS]] : i32 to i64
-// CHECK:         %[[T64:.*]] = arith.index_cast %[[T]] : index to i64
-// CHECK:         %[[ROW2:.*]] = arith.muli %[[T64]], %[[NS64B]] : i64
-// CHECK:         %[[LIN2:.*]] = arith.addi %[[ROW2]],
-// CHECK:         %[[GEP2:.*]] = llvm.getelementptr %[[OUT]][%[[LIN2]]]
-// CHECK:         llvm.store %[[V]], %[[GEP2]]
+// ── ts.put on global %out: gated by t ≥ write_start, output index t-mask ──
+// CHECK:         %[[DOW:.*]] = arith.cmpi sge, %[[T]], %[[WSTART]] : index
+// CHECK:         scf.if %[[DOW]] {
+// CHECK:           %[[TOUT:.*]] = arith.subi %[[T]], %[[MASK]] : index
+// CHECK:           %[[NS64B:.*]] = arith.extsi %[[NS]] : i32 to i64
+// CHECK:           %[[T64:.*]] = arith.index_cast %[[TOUT]] : index to i64
+// CHECK:           %[[ROW2:.*]] = arith.muli %[[T64]], %[[NS64B]] : i64
+// CHECK:           %[[LIN2:.*]] = arith.addi %[[ROW2]],
+// CHECK:           %[[GEP2:.*]] = llvm.getelementptr %[[OUT]][%[[LIN2]]]
+// CHECK:           llvm.store %[[V]], %[[GEP2]]
 // scf.if + gpu.return: inactive threads (sid ≥ ns) skip the body and
 // arrive at gpu.return directly.
 // CHECK:       gpu.return
 kunir.func @test_copy(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
     inputs {%in = "in"}
     outputs {%out = "out"}
-    target {occupancy = 1, warps_per_cta = 1, smem_size = 0, vector_size = 1} {
-  %tl = kungpu.time_length
-  %c0 = arith.constant 0 : index
+    target {occupancy = 1, warps_per_cta = 1, smem_size = 0, vector_size = 1} unreliable_count = 0 {
+  %lb = kungpu.time_lb
+  %ub = kungpu.time_ub
   %c1 = arith.constant 1 : index
   %off = arith.constant 0 : i32
-  scf.for %t = %c0 to %tl step %c1 {
+  scf.for %t = %lb to %ub step %c1 {
     %v = kungpu.ts.get %in[%off] : !kunir.ts<f32, inf> -> f32
     kungpu.ts.put %out, %v : !kunir.ts<f32, 1>, f32
   }
@@ -145,13 +240,14 @@ kunir.func @test_copy(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
 kunir.func @test_windowed_local(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
     inputs {%in = "in"}
     outputs {%out = "out"}
-    target {occupancy = 1, warps_per_cta = 1, smem_size = 0, vector_size = 1} {
+    target {occupancy = 1, warps_per_cta = 1, smem_size = 0, vector_size = 1} unreliable_count = 0 {
   %wt = kungpu.windowed_temp : !kunir.ts<f32, 5> {kungpu.smem = false}
-  %tl = kungpu.time_length
+  %lb = kungpu.time_lb
+  %ub = kungpu.time_ub
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %off0 = arith.constant 0 : i32
-  scf.for %t = %c0 to %tl step %c1 {
+  scf.for %t = %lb to %ub step %c1 {
     %v  = kungpu.ts.get %in[%off0] : !kunir.ts<f32, inf> -> f32
     kungpu.ts.put %wt, %v : !kunir.ts<f32, 5>, f32
     %off_idx = arith.subi %t, %c0 : index
@@ -199,13 +295,13 @@ kunir.func @test_windowed_local(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1
 kunir.func @test_windowed_smem(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
     inputs {%in = "in"}
     outputs {%out = "out"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1} {
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1} unreliable_count = 0 {
   %wt = kungpu.windowed_temp : !kunir.ts<f32, 5> {kungpu.smem = true}
-  %tl = kungpu.time_length
-  %c0 = arith.constant 0 : index
+  %lb = kungpu.time_lb
+  %ub = kungpu.time_ub
   %c1 = arith.constant 1 : index
   %off0 = arith.constant 0 : i32
-  scf.for %t = %c0 to %tl step %c1 {
+  scf.for %t = %lb to %ub step %c1 {
     %v  = kungpu.ts.get %in[%off0] : !kunir.ts<f32, inf> -> f32
     kungpu.ts.put %wt, %v : !kunir.ts<f32, 5>, f32
     %w  = kungpu.ts.get %wt[%off0] : !kunir.ts<f32, 5> -> f32
@@ -229,7 +325,7 @@ kunir.func @test_windowed_smem(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>
 kunir.func @test_indexing(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
     inputs {%in = "in"}
     outputs {%out = "out"}
-    target {occupancy = 1, warps_per_cta = 1, smem_size = 0, vector_size = 1} {
+    target {occupancy = 1, warps_per_cta = 1, smem_size = 0, vector_size = 1} unreliable_count = 0 {
   %sid = kungpu.stock_id
   %bsc = kungpu.block_stock_count
   %sum = arith.addi %sid, %bsc : index

@@ -149,6 +149,9 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
 
   // ------------------------------------------------------------------
   // 1. Extend function signature: ts return types → extra output params.
+  //    Runtime-scalar args (time_length, num_stocks, mask, chunk_size,
+  //    warmup) are added later by convert-kungpu-to-llvm's
+  //    convertFuncSignature, not here.
   // ------------------------------------------------------------------
   FunctionType oldFT = funcOp.getFunctionTypeTyped();
   SmallVector<Type> newArgTys(oldFT.getInputs());
@@ -191,7 +194,13 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
   OpBuilder b(ctx);
   b.setInsertionPoint(origOps.front());
 
-  Value timeLen = b.create<TimeLengthOp>(loc, b.getIndexType());
+  // Per-chunk bounds.  Both ops are operandless — chunk_size / warmup /
+  // time_length all live as kernel scalar args added by
+  // convert-kungpu-to-llvm and are read at lowering time.  When the
+  // caller's launcher uses num_chunks = 1 it sets chunk_size =
+  // time_length so chunk 0 covers the full range.
+  Value lb = b.create<TimeLbOp>(loc, b.getIndexType());
+  Value ub = b.create<TimeUbOp>(loc, b.getIndexType());
   Value c0 = b.create<arith::ConstantIndexOp>(loc, 0);
   Value c1 = b.create<arith::ConstantIndexOp>(loc, 1);
   // Outer-loop ts.get/put always reference the current time step, i.e.
@@ -199,7 +208,7 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
   // every use inside the loop body.
   Value zeroOffsetI32 = b.create<arith::ConstantOp>(
       loc, b.getI32Type(), b.getI32IntegerAttr(0));
-  auto outerFor = b.create<scf::ForOp>(loc, c0, timeLen, c1);
+  auto outerFor = b.create<scf::ForOp>(loc, lb, ub, c1);
 
   // Erase the implicit empty scf.yield (no iter_args → zero-operand yield).
   outerFor.getBody()->back().erase();

@@ -17,9 +17,12 @@
 
 // CHECK:       gpu.module @kungpu_kernels
 
-// llvm.func with the (i32 time_len, i32 num_stocks, ptr...) signature,
-// tagged as a kernel by convert-gpu-to-nvvm.
+// llvm.func with the (i32 time_len, i32 num_stocks, i32 mask, i32 chunk_size,
+// i32 warmup, ptr...) signature, tagged as a kernel by convert-gpu-to-nvvm.
 // CHECK-LABEL: llvm.func @test_addsum
+// CHECK-SAME:    i32
+// CHECK-SAME:    i32
+// CHECK-SAME:    i32
 // CHECK-SAME:    i32
 // CHECK-SAME:    i32
 // CHECK-SAME:    !llvm.ptr
@@ -52,7 +55,7 @@ gpu.module @kungpu_kernels {
   kunir.func @test_addsum(%a: !kunir.ts<f32, inf>, %b: !kunir.ts<f32, inf>)
       inputs {%a = "a", %b = "b"}
       outputs {"sum"}
-      target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+      target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1} unreliable_count = 0
       -> !kunir.ts<f32, 1> {
     %s = kunir.add %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
     kunir.return %s : !kunir.ts<f32, 1>

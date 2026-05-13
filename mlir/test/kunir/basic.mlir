@@ -13,7 +13,7 @@ kunir.func @test_ts_lookback_type(
     %c: !kunir.ts<f64, 10>)
     inputs {%a = "a", %b = "b", %c = "c"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f32, 1> {
   kunir.return %b : !kunir.ts<f32, 1>
 }
@@ -22,7 +22,7 @@ kunir.func @test_ts_lookback_type(
 kunir.func @test_binary_mismatched_lookbacks(%a: !kunir.ts<f32, 5>, %b: !kunir.ts<f32, 10>)
     inputs {%a = "a", %b = "b"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f32, 1> {
   // CHECK: kunir.add
   // CHECK-SAME: <f32, 5>, <f32, 10>
@@ -38,7 +38,7 @@ kunir.func @test_binary_mismatched_lookbacks(%a: !kunir.ts<f32, 5>, %b: !kunir.t
 kunir.func @test_unary(%x: !kunir.ts<f32, inf>)
     inputs {%x = "x"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f32, 1> {
   // CHECK: kunir.abs
   %a = kunir.abs %x : !kunir.ts<f32, inf>
@@ -51,7 +51,7 @@ kunir.func @test_unary(%x: !kunir.ts<f32, inf>)
 kunir.func @test_windowed_output(%input: !kunir.ts<f32, inf>)
     inputs {%input = "input"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f32, 10> {
   // CHECK: kunir.windowed_output
   // CHECK-SAME: length = 10
@@ -63,7 +63,7 @@ kunir.func @test_windowed_output(%input: !kunir.ts<f32, inf>)
 kunir.func @test_for_each_back_window_single(%close: !kunir.ts<f32, 10>)
     inputs {%close = "close"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f32, 1> {
   // CHECK: kunir.for_each_back_window
   // CHECK-SAME: [window = 5]
@@ -84,7 +84,7 @@ kunir.func @test_for_each_back_window_multi_input(
     %vol:   !kunir.ts<f32, 20>)
     inputs {%close = "close", %vol = "vol"}
     outputs {"sum_close", "sum_vol"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> (!kunir.ts<f32, 1>, !kunir.ts<f32, 1>) {
   // CHECK: kunir.for_each_back_window
   %sum_c, %sum_v = kunir.for_each_back_window
@@ -104,7 +104,7 @@ kunir.func @test_for_each_back_window_multi_input(
 kunir.func @test_for_each_back_window_multi_reduce(%input: !kunir.ts<f32, 20>)
     inputs {%input = "input"}
     outputs {"sum", "max"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> (!kunir.ts<f32, 1>, !kunir.ts<f32, 1>) {
   %sum_ts, %max_ts = kunir.for_each_back_window
       (%input : !kunir.ts<f32, 20>) [window = 10]
@@ -123,7 +123,7 @@ kunir.func @test_for_each_back_window_multi_reduce(%input: !kunir.ts<f32, 20>)
 kunir.func @test_for_each_back_window_inf(%input: !kunir.ts<f64, inf>)
     inputs {%input = "input"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f64, 1> {
   %result = kunir.for_each_back_window
       (%input : !kunir.ts<f64, inf>) [window = 100]
@@ -139,7 +139,7 @@ kunir.func @test_for_each_back_window_inf(%input: !kunir.ts<f64, inf>)
 kunir.func @test_f64_binary(%a: !kunir.ts<f64, inf>, %b: !kunir.ts<f64, inf>)
     inputs {%a = "a", %b = "b"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f64, 1> {
   // CHECK: !kunir.ts<f64
   %result = kunir.max %a, %b : !kunir.ts<f64, inf>, !kunir.ts<f64, inf>

@@ -1,6 +1,8 @@
 // RUN: %kun-opt --kunir-to-kungpu %s | %FileCheck %s
 
 // CHECK-LABEL: kunir.func @test_binary_lower
+// Pure ts args at this stage; the runtime scalars (time_length / num_stocks /
+// mask / chunk_size / warmup) are prepended later by convert-kungpu-to-llvm.
 // CHECK-SAME: !kunir.ts<f32, inf>
 // CHECK-SAME: !kunir.ts<f32, inf>
 // CHECK-SAME: !kunir.ts<f32, 1>
@@ -8,19 +10,24 @@
 kunir.func @test_binary_lower(%a: !kunir.ts<f32, inf>, %b: !kunir.ts<f32, inf>)
     inputs {%a = "a", %b = "b"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f32, 1> {
-  // CHECK:      %[[TL:.*]] = kungpu.time_length
+  // Outer for bounds come from the per-chunk lb/ub ops, not [0, T).
+  // Both are operandless — they pull chunk_size / warmup / time_length
+  // from gpu.func args at the kungpu-to-llvm stage.
+  // CHECK:      %[[LB:.*]] = kungpu.time_lb
+  // CHECK:      %[[UB:.*]] = kungpu.time_ub
   // CHECK:      %[[C0:.*]] = arith.constant 0 : index
   // CHECK:      %[[C1:.*]] = arith.constant 1 : index
   // outer-loop offset = 0 (i32) used by every gmem ts.get/put
   // CHECK:      %[[OFF:.*]] = arith.constant 0 : i32
-  // CHECK:      scf.for %{{.*}} = %[[C0]] to %[[TL]] step %[[C1]]
+  // CHECK:      scf.for %{{.*}} = %[[LB]] to %[[UB]] step %[[C1]]
   // CHECK:        kungpu.ts.get %{{.*}}[%[[OFF]]]
   // CHECK:        kungpu.ts.get %{{.*}}[%[[OFF]]]
   // CHECK:        arith.addf
   // CHECK:        kungpu.ts.put
   // CHECK-NOT:    kungpu.ts.put %{{.*}}[
+  // CHECK-NOT:    kungpu.time_length
   %sum = kunir.add %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
   kunir.return %sum : !kunir.ts<f32, 1>
 }
@@ -29,7 +36,7 @@ kunir.func @test_binary_lower(%a: !kunir.ts<f32, inf>, %b: !kunir.ts<f32, inf>)
 kunir.func @test_unary_lower(%x: !kunir.ts<f32, inf>)
     inputs {%x = "x"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f32, 1> {
   // CHECK: math.absf
   %a = kunir.abs %x : !kunir.ts<f32, inf>
@@ -40,7 +47,7 @@ kunir.func @test_unary_lower(%x: !kunir.ts<f32, inf>)
 kunir.func @test_windowed_sum(%close: !kunir.ts<f32, inf>)
     inputs {%close = "close"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f32, 1> {
   // CHECK:      %[[C0:.*]] = arith.constant 0 : index
   // CHECK:      %[[C1:.*]] = arith.constant 1 : index
@@ -73,7 +80,7 @@ kunir.func @test_windowed_sum(%close: !kunir.ts<f32, inf>)
 kunir.func @test_computed_reduce(%x: !kunir.ts<f32, inf>, %y: !kunir.ts<f32, inf>)
     inputs {%x = "x", %y = "y"}
     outputs {"result"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1} unreliable_count = 0
     -> !kunir.ts<f32, 1> {
   // CHECK:      %[[WX:.*]] = kungpu.windowed_temp : <f32, 3>
   // CHECK:      %[[WY:.*]] = kungpu.windowed_temp : <f32, 3>
@@ -101,7 +108,7 @@ kunir.func @test_computed_reduce(%x: !kunir.ts<f32, inf>, %y: !kunir.ts<f32, inf
 kunir.func @test_multi_reduce(%input: !kunir.ts<f64, inf>)
     inputs {%input = "input"}
     outputs {"sum", "maxval"}
-    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 49152, vector_size = 1} unreliable_count = 0
     -> (!kunir.ts<f64, 1>, !kunir.ts<f64, 1>) {
   // CHECK:      %[[WT:.*]] = kungpu.windowed_temp : <f64, 10>
   // CHECK:      scf.for %[[T:.*]] =

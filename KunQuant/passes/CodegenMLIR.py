@@ -182,7 +182,7 @@ def _maybe_external_partition(f: Function, dtype: str):
 
 
 def translate_function(f: Function, target: TargetSpec, ir,
-                        dtype: str = "f32"):
+                        dtype: str = "f32", unreliable_count: int = 0):
     """Emit `f` as a single kunir.func into the open `ir` (KunMLIR.IRBuilder).
 
     If `f` is an externally-dispatched partition (e.g. a single cs_rank
@@ -190,6 +190,10 @@ def translate_function(f: Function, target: TargetSpec, ir,
     the IRBuilder and return its descriptor dict so the caller can pass
     it to KunMLIR.compile()'s `external_kernels=` list.  Otherwise
     return `None` after emitting a kunir.func.
+
+    `unreliable_count` is the partition-local warmup depth — the caller
+    (`KunQuant.jit.cuda`) computes it via `infer_window(f)` on this
+    post-partition Function and feeds it in.
     """
     ext = _maybe_external_partition(f, dtype)
     if ext is not None:
@@ -223,6 +227,7 @@ def translate_function(f: Function, target: TargetSpec, ir,
         output_names=out_names,
         occupancy=target.occupancy, warps_per_cta=target.warps_per_cta,
         smem_size=target.smem_size, vector_size=target.vector_size,
+        unreliable_count=unreliable_count,
         result_types=[ts_1] * len(outputs),
     )
 

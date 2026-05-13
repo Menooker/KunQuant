@@ -72,6 +72,7 @@ public:
               std::vector<std::string> outputNames,
               int64_t occupancy, int64_t warpsPerCta,
               int64_t smemSize, int64_t vectorSize,
+              int64_t unreliableCount,
               std::vector<Type> resultTypes) {
     if (curFunc_)
       throw std::runtime_error(
@@ -85,6 +86,10 @@ public:
       throw std::runtime_error(
           "IRBuilder.begin_func: result_types and output_names must have "
           "the same length (non-void form: outputs become result types)");
+    if (unreliableCount < 0)
+      throw std::runtime_error(
+          "IRBuilder.begin_func: unreliable_count must be non-negative, got "
+          + std::to_string(unreliableCount));
 
     // Restore insertion point to the gpu.module body before starting a
     // new function (in case end_func left us at module scope already).
@@ -104,7 +109,8 @@ public:
                                                 smemSize, vectorSize);
 
     curFunc_ = b_.create<kunir::FuncOp>(loc, name, funcType, inNamesAttr,
-                                          outNamesAttr, target);
+                                          outNamesAttr, target,
+                                          unreliableCount);
     Block &entry = curFunc_.getBodyBlock();
     b_.setInsertionPointToStart(&entry);
 
@@ -298,8 +304,11 @@ void registerIRBuilder(nb::module_ &m) {
             nb::arg("output_names"),
             nb::arg("occupancy"), nb::arg("warps_per_cta"),
             nb::arg("smem_size"), nb::arg("vector_size"),
+            nb::arg("unreliable_count"),
             nb::arg("result_types"),
-            "Open a new kunir.func.  Returns its argument Values.")
+            "Open a new kunir.func.  Returns its argument Values.  "
+            "`unreliable_count` is the partition-local warmup depth "
+            "(max windowed-chain depth from any input to any output).")
       .def("end_func", &IRBuilder::endFunc, nb::arg("return_values"),
             "Close the current kunir.func with a kunir.return.")
 

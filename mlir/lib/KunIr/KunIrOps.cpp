@@ -429,12 +429,14 @@ Value ReduceMinOp::buildAccumOp(OpBuilder &b, Location loc, Value acc, Value ele
 void FuncOp::build(OpBuilder &b, OperationState &result,
                    StringRef name, FunctionType type,
                    ArrayAttr inputNames, ArrayAttr outputNames,
-                   TargetSpecAttr targetSpec) {
+                   TargetSpecAttr targetSpec, int64_t unreliableCount) {
   result.addAttribute(getSymNameAttrName(result.name), b.getStringAttr(name));
   result.addAttribute(getFunctionTypeAttrName(result.name), TypeAttr::get(type));
   result.addAttribute(getInputNamesAttrName(result.name), inputNames);
   result.addAttribute(getOutputNamesAttrName(result.name), outputNames);
   result.addAttribute(getTargetSpecAttrName(result.name), targetSpec);
+  result.addAttribute(getUnreliableCountAttrName(result.name),
+                        b.getI64IntegerAttr(unreliableCount));
   Region *body = result.addRegion();
   Block *block = new Block;
   for (Type inputType : type.getInputs())
@@ -497,6 +499,11 @@ LogicalResult FuncOp::verify() {
     return emitOpError("target smem_size must be non-negative, got ")
            << ts.getSmemSize();
 
+  // Validate unreliable_count
+  if (getUnreliableCount() < 0)
+    return emitOpError("unreliable_count must be non-negative, got ")
+           << getUnreliableCount();
+
   return success();
 }
 
@@ -555,6 +562,14 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
   auto targetSpec = TargetSpecAttr::parse(parser, Type{});
   if (!targetSpec) return failure();
   result.addAttribute(getTargetSpecAttrName(result.name), targetSpec);
+
+  // unreliable_count = N
+  if (parser.parseKeyword("unreliable_count") || parser.parseEqual())
+    return failure();
+  int64_t unrelVal = 0;
+  if (parser.parseInteger(unrelVal)) return failure();
+  result.addAttribute(getUnreliableCountAttrName(result.name),
+                       b.getI64IntegerAttr(unrelVal));
 
   // -> (result_type, ...) or -> result_type  [optional]
   SmallVector<Type> resultTypes;
@@ -634,6 +649,9 @@ void FuncOp::print(OpAsmPrinter &p) {
   // target {occupancy = ..., ...}
   p << " target ";
   getTargetSpec().print(p);
+
+  // unreliable_count = N
+  p << " unreliable_count = " << getUnreliableCount();
 
   // -> result types (non-void)
   auto resultTypes = ft.getResults();
