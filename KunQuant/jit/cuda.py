@@ -31,11 +31,18 @@ from typing import Optional
 from KunQuant.jit import KunMLIR
 
 from KunQuant.Driver import optimize, post_optimize
-from KunQuant.Op import Input, Output
+from KunQuant.Op import Input, Output, MayRequireWholeTime
 from KunQuant.passes import do_partition
 from KunQuant.passes.InferWindow import infer_window
 from KunQuant.Stage import Function
 from KunQuant.passes.CodegenMLIR import TargetSpec, translate_function
+
+
+# Sentinel passed via kunir.func's `unreliable_count` attribute to mean
+# "this partition needs the full time history; the runtime must launch
+# it as a single chunk".  Kept in sync with the kunir verifier (which
+# only allows -1 or non-negative) and the CUDA runtime's `computeChunkPlan`.
+_WHOLE_TIME_UNRELIABLE = -1
 
 
 # Standard locations searched when CudaCompilerConfig.toolkit_path is left
@@ -212,7 +219,15 @@ def _translate_partitions(impl, cfg: CudaCompilerConfig):
         # by the time this kernel runs, so we don't accumulate their
         # unreliable counts here.  infer_window walks back to Input ops
         # of the partition; cross-partition deps stop at those Inputs.
-        per_kernel_unreliable = max(infer_window(sub).values(), default=0)
+        # If any op in this partition requires the whole time history,
+        # override the inferred warmup with the sentinel so the runtime
+        # collapses this kernel to a single chunk.
+        if any(isinstance(op, MayRequireWholeTime)
+                and op.is_whole_time_required()
+                for op in sub.ops):
+            per_kernel_unreliable = _WHOLE_TIME_UNRELIABLE
+        else:
+            per_kernel_unreliable = max(infer_window(sub).values(), default=0)
         ext = translate_function(sub, target, ir, dtype=dtype,
                                    unreliable_count=per_kernel_unreliable)
         if ext is not None:

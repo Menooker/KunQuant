@@ -88,9 +88,11 @@ public:
       throw std::runtime_error(
           "IRBuilder.begin_func: result_types and output_names must have "
           "the same length (non-void form: outputs become result types)");
-    if (unreliableCount < 0)
+    // `-1` is the whole-time sentinel.  Anything more negative is bogus.
+    if (unreliableCount < -1)
       throw std::runtime_error(
-          "IRBuilder.begin_func: unreliable_count must be non-negative, got "
+          "IRBuilder.begin_func: unreliable_count must be -1 (whole-time) "
+          "or non-negative, got "
           + std::to_string(unreliableCount));
 
     // Restore insertion point to the gpu.module body before starting a

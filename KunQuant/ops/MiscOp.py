@@ -1,5 +1,5 @@
 import KunQuant
-from KunQuant.Op import AcceptSingleValueInputTrait, Input, OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GlobalStatefulProducerTrait, GloablStatefulOpTrait, StateConsumerTrait, UnaryElementwiseOp, BinaryElementwiseOp
+from KunQuant.Op import AcceptSingleValueInputTrait, Input, OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GlobalStatefulProducerTrait, GloablStatefulOpTrait, StateConsumerTrait, MayRequireWholeTime, UnaryElementwiseOp, BinaryElementwiseOp
 from typing import List, Tuple, Union
 
 class BackRef(OpBase, WindowedTrait):
@@ -29,12 +29,17 @@ class FastWindowedSum(OpBase, WindowedTrait, GloablStatefulOpTrait):
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str], buf_name: str) -> str:
         return f"auto v{idx} = sum_{idx}.step({buf_name}, {inputs[0]}, {time_idx});"
 
-class Accumulator(OpBase, GlobalStatefulProducerTrait):
+class Accumulator(OpBase, GlobalStatefulProducerTrait, MayRequireWholeTime):
     '''
     Accumulator is a stateful op that accumulates the input value over time.
     It can be used to compute running totals, moving averages, etc.'''
-    def __init__(self, v: OpBase, name: str) -> None:
-        super().__init__([v], [("name", name)])
+    def __init__(self, v: OpBase, name: str,
+                  is_whole_time_required: bool = False) -> None:
+        super().__init__([v],
+                          [("name", name),
+                           ("whole_time", is_whole_time_required)])
+    def is_whole_time_required(self) -> bool:
+        return self.attrs["whole_time"]
     def get_state_variable_name_prefix(self) -> str:
         return "accu_"
     
@@ -84,7 +89,8 @@ class ReturnFirstValue(OpBase):
         super().__init__(v, [])
     
 
-class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait):
+class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait,
+                    MayRequireWholeTime):
     '''
     Exponential Moving Average (EMA)
     Similar to pd.DataFrame.ewm(span=window, adjust=False, ignore_na=True).mean()
@@ -120,6 +126,9 @@ class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait):
     
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:
         return f"auto v{idx} = ema_{idx}.step({inputs[0]}, {time_idx});"
+
+    def is_whole_time_required(self) -> bool:
+        return True
 
 class WindowedLinearRegression(OpBase, WindowedTrait, GlobalStatefulProducerTrait):
     '''

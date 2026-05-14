@@ -123,22 +123,14 @@ def build_func_accumulator() -> Function:
 
        cnt[t] = cnt[t-1] + (a[t] > 0 ? 1 : 0)            (cnt[-1] = 0)
 
-    Built directly with Accumulator + SetAccumulator + ReturnFirstValue:
-       cnt    = Accumulator(a, "cnt")             # reads slot (init 0)
-       mask   = a > 0
-       new    = Select(mask, cnt + 1, cnt)
-       sa     = SetAccumulator(cnt, mask, new)
-       Output(ReturnFirstValue([new, sa]), "cnt_out")
-
-    Exercises the Accumulator end-to-end: kunir.accumulator (CSE'd to one
-    slot), kunir.set_accumulator (non-Pure, scf.if-wrapped store at
-    offset 0) and ReturnFirstValue's keep-alive role for the side-effect
-    op when lowered to MLIR.
+    Built directly with Accumulator + SetAccumulator + ReturnFirstValue.
+    `is_whole_time_required=True` propagates `unreliable_count = -1` into
+    kunir.func; the runtime treats that as a hard "single chunk" signal.
     """
     builder = Builder()
     with builder:
         a = Input("a")
-        cnt = Accumulator(a, "cnt")
+        cnt = Accumulator(a, "cnt", is_whole_time_required=True)
         mask = GreaterThan(a, ConstantOp(0))
         new_cnt = Select(mask, Add(cnt, ConstantOp(1)), cnt)
         sa = SetAccumulator(cnt, mask, new_cnt)
@@ -387,12 +379,14 @@ def run_accumulator(target: str, T: int, S: int) -> int:
     """End-to-end correctness of Accumulator + SetAccumulator +
     ReturnFirstValue: cnt[t] = cnt[t-1] + (a[t] > 0 ? 1 : 0).
 
-    Forced single-chunk (sm_fill_factor=0.0): a general-purpose
-    Accumulator has no warmup-replay mechanism, so its per-CTA alloca
-    cannot be re-primed at chunk boundaries.  unreliable_count=0 leaves
-    the runtime free to split the time axis into many chunks; we disable
-    that here to keep the slot's value continuous across t."""
-    print(f"=== accumulator: cnt[t] = cnt[t-1] + (a[t] > 0) ===")
+    With default `sm_fill_factor` the runtime would normally split this
+    T-sized job into many chunks; the `is_whole_time_required=True` flag
+    on the Accumulator propagates `unreliable_count = -1` through the
+    kunir.func attr, and computeChunkPlan collapses to a single chunk.
+    A failure here means the sentinel path is broken — multi-chunk
+    accumulators silently reset across chunk boundaries."""
+    print(f"=== accumulator: cnt[t] = cnt[t-1] + (a[t] > 0)  "
+           f"(whole-time sentinel) ===")
     f = build_func_accumulator()
     cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
     exe = compileit(f, cfg)
@@ -405,8 +399,7 @@ def run_accumulator(target: str, T: int, S: int) -> int:
     out = cp.zeros((T, S), dtype=cp.float32)
 
     executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": cp.asarray(a_h), "cnt_out": out},
-                       sm_fill_factor=0.0)
+    executor.runGraph(exe, {"a": cp.asarray(a_h), "cnt_out": out})
     out_h = cp.asnumpy(out)
 
     expected = np.cumsum((a_h > 0).astype(np.float32), axis=0)

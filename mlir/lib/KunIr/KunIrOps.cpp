@@ -582,7 +582,8 @@ void FuncOp::build(OpBuilder &b, OperationState &result,
   result.addAttribute(getOutputNamesAttrName(result.name), outputNames);
   result.addAttribute(getTargetSpecAttrName(result.name), targetSpec);
   result.addAttribute(getUnreliableCountAttrName(result.name),
-                        b.getI64IntegerAttr(unreliableCount));
+                        b.getIntegerAttr(b.getIntegerType(64, /*isSigned=*/true),
+                                          unreliableCount));
   Region *body = result.addRegion();
   Block *block = new Block;
   for (Type inputType : type.getInputs())
@@ -645,9 +646,12 @@ LogicalResult FuncOp::verify() {
     return emitOpError("target smem_size must be non-negative, got ")
            << ts.getSmemSize();
 
-  // Validate unreliable_count
-  if (getUnreliableCount() < 0)
-    return emitOpError("unreliable_count must be non-negative, got ")
+  // Validate unreliable_count.  `-1` is a sentinel meaning "whole time
+  // history required" — the runtime collapses such functions to a
+  // single chunk.  Any other negative value is rejected.
+  if (getUnreliableCount() < -1)
+    return emitOpError("unreliable_count must be -1 (whole-time) or "
+                       "non-negative, got ")
            << getUnreliableCount();
 
   return success();
@@ -715,7 +719,8 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
   int64_t unrelVal = 0;
   if (parser.parseInteger(unrelVal)) return failure();
   result.addAttribute(getUnreliableCountAttrName(result.name),
-                       b.getI64IntegerAttr(unrelVal));
+                       b.getIntegerAttr(b.getIntegerType(64, /*isSigned=*/true),
+                                         unrelVal));
 
   // -> (result_type, ...) or -> result_type  [optional]
   SmallVector<Type> resultTypes;

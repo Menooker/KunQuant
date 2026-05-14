@@ -443,7 +443,7 @@ def KunIr_FuncOp : KunIr_Op<"func", [
     ArrayAttr:$input_names,
     ArrayAttr:$output_names,
     KunIr_TargetSpecAttr:$target_spec,
-    I64Attr:$unreliable_count
+    SI64Attr:$unreliable_count
   );
   let regions = (region SizedRegion<1>:$body);
   let hasCustomAssemblyFormat = 1;

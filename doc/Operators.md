@@ -424,13 +424,14 @@ class WindowedQuantile(OpBase, WindowedTrait):
     def __init__(self, v: OpBase, window: int, q: float) -> None:
         pass
 
-class ExpMovingAvg(OpBase, GloablStatefulOpTrait):
+class ExpMovingAvg(OpBase, GloablStatefulOpTrait, MayRequireWholeTime):
     '''
     Exponential Moving Average (EMA)
     Similar to pd.DataFrame.ewm(span=window, adjust=False, ignore_na=True).mean()
     optional parameter: init_val, the initial values for EMA. It must be an Input op with attr
     {"single_value":True}. The name of the Input op should starts with "__init".
     It should be an input of shape (num_stocks,)
+    Always requires the whole time history.
     '''
     def __init__(self, v: OpBase, window: int, init_val: Union[Input, None] = None) -> None:
         pass
@@ -451,11 +452,15 @@ class ReturnFirstValue(OpBase):
     def __init__(self, v: List[OpBase]) -> None:
         pass
 
-class Accumulator(OpBase, GloablStatefulOpTrait):
+class Accumulator(OpBase, GlobalStatefulProducerTrait, MayRequireWholeTime):
     '''
     Accumulator is a stateful op that accumulates the input value over time.
-    It can be used to compute running totals, moving averages, etc.'''
-    def __init__(self, v: OpBase, name: str) -> None:
+    It can be used to compute running totals, moving averages, etc.
+    Set `is_whole_time_required=True` if the accumulator's state can only
+    be reconstructed from the full time history.
+    '''
+    def __init__(self, v: OpBase, name: str,
+                  is_whole_time_required: bool = False) -> None:
         pass
 
 class SetAccumulator(OpBase):
@@ -511,6 +516,15 @@ class StatefulOpTrait:
     The ops that have an internal state
     '''
     pass
+
+
+class MayRequireWholeTime:
+    '''
+    Ops whose state may depend on the full time history (cannot be rebuilt
+    from a bounded warmup window).  Override to declare otherwise.
+    '''
+    def is_whole_time_required(self) -> bool:
+        return False
 
 
 class CrossSectionalOp(OpBase):

@@ -467,6 +467,11 @@ static ChunkPlan computeChunkPlan(int64_t timeLength, int64_t numStocks,
     return {timeLength, 1u};
   if (numSMs <= 0 || smFillFactor <= 0.0)
     return {timeLength, 1u};
+  // unreliableCount = -1 sentinel → whole time history required, single
+  // chunk only.  Any other negative value is rejected by the IR verifier;
+  // we don't try to interpret it.
+  if (unreliableCount < 0)
+    return {timeLength, 1u};
 
   int64_t blockX = warpsPerCta * 32;
   int64_t stocksPerBlock = blockX * vectorSize;
@@ -889,7 +894,12 @@ void Executable::launchOnStream(
           meta.unreliableCount, mask, minChunkWarmupFactor,
           smFillFactor, numSMs);
       int32_t chunkSizeI32 = static_cast<int32_t>(plan.chunkSize);
-      int32_t warmupI32    = static_cast<int32_t>(meta.unreliableCount);
+      // -1 sentinel (whole-time) means single chunk; the kernel's
+      // chunk-0 branch never reads the warmup arg in that case, but we
+      // still clamp to 0 so a stray load never observes a negative
+      // value in any future path.
+      int32_t warmupI32    = static_cast<int32_t>(
+          std::max<int64_t>(meta.unreliableCount, 0));
 
       std::vector<void *> argPtrs;
       argPtrs.reserve(5 + ptrs.size());
