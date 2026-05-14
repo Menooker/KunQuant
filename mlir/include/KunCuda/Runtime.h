@@ -53,6 +53,10 @@ namespace kun_cuda {
 /// producer maps, etc.  Fully defined in Runtime.cpp.
 struct GraphPlan;
 
+/// Forward-declared so `Executable::launchOnStream` can take an
+/// `Executor *` argument; the full definition lives below.
+class Executor;
+
 //===----------------------------------------------------------------------===//
 // Compile-time output (all names — runtime resolves them to indices)
 //===----------------------------------------------------------------------===//
@@ -93,7 +97,12 @@ struct KernelMeta {
 /// as an intermediate.
 struct ExecutableData {
   std::vector<char> cubin;
-  int64_t warpsPerCta = 1;          ///< from kungpu.target_spec (graph-wide)
+  int64_t warpsPerCta = 1;          ///< from kungpu.target_spec (graph-wide).
+                                     ///<   Drives JIT kernels' block_x.
+                                     ///<   External cs_rank kernels IGNORE
+                                     ///<   this — they auto-tune block_x
+                                     ///<   from numStocks (see
+                                     ///<   launchExtCsRankKernel).
   int64_t vectorSize  = 1;          ///< from kungpu.target_spec (graph-wide)
   std::vector<KernelMeta> kernels;  ///< unordered set; runtime topo-sorts
   std::vector<std::string> graphInputs;
@@ -179,8 +188,7 @@ public:
   /// Throws std::runtime_error on validation or driver errors.  This is
   /// a low-level entry point — most users go through `Executor::runGraph`.
   /// Multi-chunk parameters (`mask`, `minChunkWarmupFactor`,
-  /// `smFillFactor`, `numSMs`) drive the time-axis chunk grid for JIT
-  /// kernels:
+  /// `smFillFactor`) drive the time-axis chunk grid for JIT kernels:
   ///   - `mask` is the user-visible prefix-skip on graph outputs.  The
   ///     output array's time dim is `timeLength - mask`; chunk 0 begins
   ///     writes at `t == mask`.
@@ -188,21 +196,21 @@ public:
   ///     `factor * kernel.unreliableCount`, so the warmup-overlap
   ///     region of a non-first chunk stays ≤ `1 / factor` of total
   ///     compute.
-  ///   - `smFillFactor` (≥ 0) is the target `num_chunks * num_stock_tiles
-  ///     / numSMs`.  1.0 just fills the GPU; > 1 leaves slack for
-  ///     scheduler latency hiding.
-  ///   - `numSMs` is queried by `Executor` once at construction; pass 0
-  ///     to opt out of the smFillFactor heuristic (single-chunk mode).
-  /// External (cs_rank) kernels ignore these — they keep their original
-  /// `(time_length, num_stocks, ptrs...)` argv and time-major grid.
-  void launchOnStream(int64_t timeLength, int64_t numStocks,
+  ///   - `smFillFactor` (≥ 0) is the target chunks-on-GPU multiplier:
+  ///     JIT uses `num_chunks * stock_tiles ≥ smFillFactor * numSMs`;
+  ///     cs_rank uses `num_time_chunks ≥ smFillFactor * numSMs`.  1.0
+  ///     just fills the GPU; > 1 leaves slack for scheduler latency
+  ///     hiding.
+  /// `exec` owns the CUDA stream + the cached device attributes
+  /// (`devMaxSmemBytes()`, `numSMs()`).  External (cs_rank) kernels
+  /// ignore the multi-chunk params — they keep their own auto-tune
+  /// path using the same Executor accessors.
+  void launchOnStream(Executor *exec,
+                       int64_t timeLength, int64_t numStocks,
                        const std::vector<std::pair<std::string, uintptr_t>> &args,
-                       CUstream stream,
-                       int devMaxSmemBytes,
                        int64_t mask = 0,
                        int minChunkWarmupFactor = 4,
-                       double smFillFactor = 1.5,
-                       int numSMs = 0);
+                       double smFillFactor = 1.5);
 
 private:
   /// Allocate (or re-allocate, if shape changed) the intermediate slot

@@ -507,16 +507,34 @@ static ChunkPlan computeChunkPlan(int64_t timeLength, int64_t numStocks,
   return {chunkSize, static_cast<unsigned>(numChunks)};
 }
 
-/// External cs_rank launch: block_x = warps_per_cta*32, grid_x =
-/// time_length (one CTA per timestep), sharedMemBytes = numStocks *
-/// sizeof(T).  Checks the request against the cached device cap so
-/// we fail with a clear, GPU-aware message instead of letting
-/// cuLaunchKernel emit its generic error.
+/// External cs_rank launch.
+///
+/// Block / grid both auto-tuned — cs_rank is cross-sectional, so the
+/// graph-wide `warps_per_cta` hint doesn't apply.
+///
+///   blockX = clamp(round_up(numStocks, 32), 32, 1024)
+///       Each thread owns roughly one stock; when numStocks > 1024 the
+///       kernel falls back to its built-in `for (i = tid; i < S; i +=
+///       blockDim.x)` stride loop.
+///
+///   gridX  = min(timeLength, ceil(smFillFactor * numSMs))
+///       The kernel does a contiguous time-axis slice per CTA via a
+///       grid-stride loop (see kernels/cs_rank.cu).  For small T the
+///       min clamps to 1 CTA per timestep (matches the pre-tuning
+///       launch shape); for large T fewer CTAs each do more time
+///       steps, reducing launch / scheduling overhead.
+///
+///   smem   = numStocks * sizeof(T)  (one cross-section, reused across
+///                                     the CTA's time slice)
+///
+/// Falls back to (gridX = timeLength, blockX = 32) when the executor
+/// couldn't query `numSMs` from the device — degenerate "one CTA per
+/// timestep, one warp per CTA" still works correctly.
 static void launchExtCsRankKernel(CUfunction fn, KernelKind kind,
                                     const std::string &kernelName,
                                     int64_t timeLength, int64_t numStocks,
-                                    int64_t warpsPerCta,
                                     int devMaxSmemBytes,
+                                    double smFillFactor, int numSMs,
                                     void **args, CUstream stream) {
   size_t elemSize = (kind == KernelKind::ExtCsRankF64) ? 8u : 4u;
   uint64_t smemBytes64 =
@@ -541,8 +559,27 @@ static void launchExtCsRankKernel(CUfunction fn, KernelKind kind,
   if (timeLength <= 0)
     return; // empty time chunk — nothing to launch
 
-  unsigned blockX    = static_cast<unsigned>(warpsPerCta * 32);
-  unsigned gridX     = static_cast<unsigned>(timeLength);
+  constexpr int kWarp = 32;
+  constexpr int kMaxBlock = 1024;
+  int64_t blockX64 =
+      ((std::max<int64_t>(numStocks, 1) + kWarp - 1) / kWarp) * kWarp;
+  if (blockX64 > kMaxBlock) blockX64 = kMaxBlock;
+  unsigned blockX = static_cast<unsigned>(blockX64);
+
+  // Target gridX = sm_fill_factor * numSMs (capped at timeLength so we
+  // never launch idle CTAs).  numSMs == 0 (device query failed) →
+  // gridX = timeLength, one CTA per timestep.
+  unsigned gridX;
+  if (numSMs > 0 && smFillFactor > 0.0) {
+    int64_t target = static_cast<int64_t>(
+        std::ceil(smFillFactor * static_cast<double>(numSMs)));
+    if (target < 1) target = 1;
+    if (target > timeLength) target = timeLength;
+    gridX = static_cast<unsigned>(target);
+  } else {
+    gridX = static_cast<unsigned>(timeLength);
+  }
+
   unsigned smemBytes = static_cast<unsigned>(smemBytes64);
   checkCu(cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1,
                            smemBytes, stream, args, nullptr),
@@ -790,14 +827,18 @@ int Executable::peakIntermediateSlots() const noexcept {
 }
 
 void Executable::launchOnStream(
+    Executor *exec,
     int64_t timeLength, int64_t numStocks,
     const std::vector<std::pair<std::string, uintptr_t>> &args,
-    CUstream stream,
-    int devMaxSmemBytes,
     int64_t mask,
     int minChunkWarmupFactor,
-    double smFillFactor,
-    int numSMs) {
+    double smFillFactor) {
+  if (!exec)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: Executor pointer is null");
+  CUstream stream      = exec->stream();
+  int devMaxSmemBytes  = exec->devMaxSmemBytes();
+  int numSMs           = exec->numSMs();
   // ── Shape sanity (kernel signature is i32 across the board) ─────
   if (timeLength > std::numeric_limits<int32_t>::max() ||
       numStocks  > std::numeric_limits<int32_t>::max() ||
@@ -872,8 +913,9 @@ void Executable::launchOnStream(
       argPtrs.push_back(&numStocksI32);
       for (auto &p : ptrs) argPtrs.push_back(&p);
       launchExtCsRankKernel(cuFuncs_[kIdx], meta.kind, meta.kernelName,
-                              timeLength, numStocks, data_.warpsPerCta,
-                              devMaxSmemBytes, argPtrs.data(), stream);
+                              timeLength, numStocks,
+                              devMaxSmemBytes, smFillFactor, numSMs,
+                              argPtrs.data(), stream);
     }
   }
 }
@@ -912,8 +954,8 @@ void Executor::runGraph(
     Executable &exe, int64_t timeLength, int64_t numStocks,
     const std::vector<std::pair<std::string, uintptr_t>> &args,
     int64_t mask, int minChunkWarmupFactor, double smFillFactor) {
-  exe.launchOnStream(timeLength, numStocks, args, stream_, devMaxSmemBytes_,
-                      mask, minChunkWarmupFactor, smFillFactor, numSMs_);
+  exe.launchOnStream(this, timeLength, numStocks, args,
+                      mask, minChunkWarmupFactor, smFillFactor);
 }
 
 void Executor::synchronize() {
