@@ -38,6 +38,12 @@ void buildKunIrToLLVMPipeline(OpPassManager &pm) {
   {
     OpPassManager &gpuModPM = pm.nest<gpu::GPUModuleOp>();
     gpuModPM.addNestedPass<::kunir::FuncOp>(::kunir::createKunIrToKunGpuPass());
+    // CSE here — kungpu.ts.get is Pure, so any duplicates emitted by the
+    // lowering above (e.g. two back_refs reading the same input at the same
+    // offset, or any other path where distinct kunir SSA values produce
+    // identical ts.get) collapse to a single load before
+    // windowed-temp-memory-planning + convert-kungpu-to-llvm see them.
+    gpuModPM.addNestedPass<::kunir::FuncOp>(createCSEPass());
     gpuModPM.addNestedPass<::kunir::FuncOp>(
         ::kungpu::createWindowedTempMemoryPlanningPass());
   }

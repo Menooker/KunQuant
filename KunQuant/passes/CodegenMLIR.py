@@ -26,6 +26,8 @@ from KunQuant.Op import (
 )
 from KunQuant.ops.ElewiseOp import (
     Add, Sub, Mul, Div, Max, Min, Abs, Log, Sign,
+    GreaterThan, GreaterEqual, LessThan, LessEqual, Equals,
+    And, Or, Not, Select,
 )
 from KunQuant.ops.ReduceOp import (
     ReduceAdd, ReduceMul, ReduceMax, ReduceMin,
@@ -39,9 +41,14 @@ from KunQuant.Stage import Function
 _BINARY = {
     Add: "add", Sub: "sub", Mul: "mul", Div: "div",
     Max: "max", Min: "min",
+    GreaterThan:  "gt", GreaterEqual: "ge",
+    LessThan:     "lt", LessEqual:    "le",
+    Equals:       "eq",
+    And:          "and_", Or:         "or_",
 }
 _UNARY = {
     Abs: "abs", Log: "log", Sign: "sign",
+    Not: "not_",
     # NOTE: `Rank` is intentionally absent.  Cross-sectional rank
     # partitions are routed to a pre-compiled CUmodule by
     # `_maybe_external_partition` below; they never become kunir ops.
@@ -119,6 +126,10 @@ def _emit_simple(op: OpBase, ir, val_map: Dict[OpBase, object]):
     if isinstance(op, FastWindowedSum):
         return ir.fast_windowed_sum(val_map[op.inputs[0]],
                                       int(op.attrs["window"]))
+    if isinstance(op, Select):
+        return ir.select(val_map[op.inputs[0]],
+                          val_map[op.inputs[1]],
+                          val_map[op.inputs[2]])
     raise NotImplementedError(
         f"CodegenMLIR: op type {cls.__name__} is not supported by the "
         f"GPU backend yet (op = {op})")

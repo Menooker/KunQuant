@@ -62,6 +62,24 @@ LogicalResult MulOp::verify() { return verifyBinaryElemwise(*this, getLhs(), get
 LogicalResult DivOp::verify() { return verifyBinaryElemwise(*this, getLhs(), getRhs()); }
 LogicalResult MaxOp::verify() { return verifyBinaryElemwise(*this, getLhs(), getRhs()); }
 LogicalResult MinOp::verify() { return verifyBinaryElemwise(*this, getLhs(), getRhs()); }
+LogicalResult EqualOp::verify()        { return verifyBinaryElemwise(*this, getLhs(), getRhs()); }
+LogicalResult GreaterOp::verify()      { return verifyBinaryElemwise(*this, getLhs(), getRhs()); }
+LogicalResult GreaterEqualOp::verify() { return verifyBinaryElemwise(*this, getLhs(), getRhs()); }
+LogicalResult LessOp::verify()         { return verifyBinaryElemwise(*this, getLhs(), getRhs()); }
+LogicalResult LessEqualOp::verify()    { return verifyBinaryElemwise(*this, getLhs(), getRhs()); }
+
+// Logical ops also require both operands to be i1 ts.
+static LogicalResult verifyLogicalBinary(Operation *op, Value lhs, Value rhs) {
+  if (failed(verifyBinaryElemwise(op, lhs, rhs)))
+    return failure();
+  auto elemTy = llvm::cast<TsType>(lhs.getType()).getElementType();
+  if (!elemTy.isInteger(1))
+    return op->emitOpError("operand element type must be i1, got '")
+           << elemTy << "'";
+  return success();
+}
+LogicalResult AndOp::verify() { return verifyLogicalBinary(*this, getLhs(), getRhs()); }
+LogicalResult OrOp::verify()  { return verifyLogicalBinary(*this, getLhs(), getRhs()); }
 
 //===----------------------------------------------------------------------===//
 // Unary elemwise ops — verify only
@@ -70,6 +88,43 @@ LogicalResult MinOp::verify() { return verifyBinaryElemwise(*this, getLhs(), get
 LogicalResult AbsOp::verify()  { return success(); }
 LogicalResult LogOp::verify()  { return success(); }
 LogicalResult SignOp::verify() { return success(); }
+
+LogicalResult NotOp::verify() {
+  auto elemTy = llvm::cast<TsType>(getInput().getType()).getElementType();
+  if (!elemTy.isInteger(1))
+    return emitOpError("operand element type must be i1, got '")
+           << elemTy << "'";
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// SelectOp — cond must be ts<i1, *>; true/false must share elem type.
+//===----------------------------------------------------------------------===//
+
+LogicalResult SelectOp::verify() {
+  auto condTy  = llvm::cast<TsType>(getCond().getType());
+  auto trueTy  = llvm::cast<TsType>(getTrueValue().getType());
+  auto falseTy = llvm::cast<TsType>(getFalseValue().getType());
+  if (!condTy.getElementType().isInteger(1))
+    return emitOpError("cond element type must be i1, got '")
+           << condTy.getElementType() << "'";
+  if (trueTy.getElementType() != falseTy.getElementType())
+    return emitOpError("true_value element type '")
+           << trueTy.getElementType()
+           << "' must match false_value element type '"
+           << falseTy.getElementType() << "'";
+  return success();
+}
+
+// Result type: ts<true_value.elem, 1>.
+LogicalResult SelectOp::inferReturnTypes(
+    MLIRContext *ctx, std::optional<Location>, ValueRange operands,
+    DictionaryAttr, PropertyRef, RegionRange,
+    SmallVectorImpl<Type> &inferred) {
+  auto trueTy = llvm::cast<TsType>(operands[1].getType());
+  inferred.push_back(TsType::get(ctx, trueTy.getElementType(), 1));
+  return success();
+}
 
 //===----------------------------------------------------------------------===//
 // WindowedOutputOp
@@ -373,6 +428,44 @@ Value MinOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
   return b.create<arith::MinimumFOp>(loc, lhs, rhs);
 }
 
+// Comparison ops: dispatch arith.cmpf for FloatType operands and
+// arith.cmpi for IntegerType operands.  Verifier guarantees lhs.type == rhs.type.
+static Value buildCmpScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs,
+                              arith::CmpFPredicate fp,
+                              arith::CmpIPredicate ip) {
+  if (llvm::isa<FloatType>(lhs.getType()))
+    return b.create<arith::CmpFOp>(loc, fp, lhs, rhs);
+  return b.create<arith::CmpIOp>(loc, ip, lhs, rhs);
+}
+Value GreaterOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return buildCmpScalarOp(b, loc, lhs, rhs,
+                          arith::CmpFPredicate::OGT, arith::CmpIPredicate::sgt);
+}
+Value GreaterEqualOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return buildCmpScalarOp(b, loc, lhs, rhs,
+                          arith::CmpFPredicate::OGE, arith::CmpIPredicate::sge);
+}
+Value LessOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return buildCmpScalarOp(b, loc, lhs, rhs,
+                          arith::CmpFPredicate::OLT, arith::CmpIPredicate::slt);
+}
+Value LessEqualOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return buildCmpScalarOp(b, loc, lhs, rhs,
+                          arith::CmpFPredicate::OLE, arith::CmpIPredicate::sle);
+}
+Value EqualOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return buildCmpScalarOp(b, loc, lhs, rhs,
+                          arith::CmpFPredicate::OEQ, arith::CmpIPredicate::eq);
+}
+
+// Logical binary ops on i1.
+Value AndOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return b.create<arith::AndIOp>(loc, lhs, rhs);
+}
+Value OrOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
+  return b.create<arith::OrIOp>(loc, lhs, rhs);
+}
+
 //===----------------------------------------------------------------------===//
 // UnaryArithInterface implementations
 //===----------------------------------------------------------------------===//
@@ -388,6 +481,12 @@ Value SignOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
   Value one = b.create<arith::ConstantOp>(
       loc, operand.getType(), b.getFloatAttr(operand.getType(), 1.0));
   return b.create<math::CopySignOp>(loc, one, operand);
+}
+Value NotOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
+  // not(x) = x ^ 1 on i1
+  Value one = b.create<arith::ConstantOp>(loc, b.getI1Type(),
+                                            b.getIntegerAttr(b.getI1Type(), 1));
+  return b.create<arith::XOrIOp>(loc, operand, one);
 }
 
 //===----------------------------------------------------------------------===//

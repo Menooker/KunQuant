@@ -56,9 +56,11 @@ public:
       elem = b_.getF32Type();
     else if (elemDtype == "f64" || elemDtype == "double")
       elem = b_.getF64Type();
+    else if (elemDtype == "i1" || elemDtype == "bool")
+      elem = b_.getI1Type();
     else
       throw std::runtime_error("IRBuilder.ts_type: unsupported elem dtype '" +
-                                 elemDtype + "' (expected f32/f64)");
+                                 elemDtype + "' (expected f32/f64/i1)");
     uint64_t lb = lookback == 0 ? std::numeric_limits<uint64_t>::max()
                                   : static_cast<uint64_t>(lookback);
     return kunir::TsType::get(pm_->ctx.get(), elem, lb);
@@ -147,6 +149,21 @@ public:
   Value absOp(Value x)  { return makeUn<kunir::AbsOp>(x); }
   Value logOp(Value x)  { return makeUn<kunir::LogOp>(x); }
   Value signOp(Value x) { return makeUn<kunir::SignOp>(x); }
+
+  // ── Comparison + logical (binary, return ts<i1, 1>) ─────────────
+  Value gtOp(Value a, Value b) { return makeBin<kunir::GreaterOp>(a, b); }
+  Value geOp(Value a, Value b) { return makeBin<kunir::GreaterEqualOp>(a, b); }
+  Value ltOp(Value a, Value b) { return makeBin<kunir::LessOp>(a, b); }
+  Value leOp(Value a, Value b) { return makeBin<kunir::LessEqualOp>(a, b); }
+  Value eqOp(Value a, Value b) { return makeBin<kunir::EqualOp>(a, b); }
+  Value andOp(Value a, Value b) { return makeBin<kunir::AndOp>(a, b); }
+  Value orOp(Value a, Value b)  { return makeBin<kunir::OrOp>(a, b); }
+  Value notOp(Value x) { return makeUn<kunir::NotOp>(x); }
+
+  // ── Select (cond, true_value, false_value) ──────────────────────
+  Value selectOp(Value cond, Value tv, Value fv) {
+    return b_.create<kunir::SelectOp>(b_.getUnknownLoc(), cond, tv, fv);
+  }
 
   // ── Windowed buffer materialization ───────────────────────────────
   Value windowedOutputOp(Value x, int64_t length) {
@@ -322,6 +339,21 @@ void registerIRBuilder(nb::module_ &m) {
       .def("abs",    &IRBuilder::absOp,    nb::arg("x"))
       .def("log",    &IRBuilder::logOp,    nb::arg("x"))
       .def("sign",   &IRBuilder::signOp,   nb::arg("x"))
+
+      // Comparison + logical (binary). Cmp ops return ts<i1, 1>;
+      // and/or expect ts<i1, *> operands and also return ts<i1, 1>.
+      .def("gt",     &IRBuilder::gtOp,     nb::arg("lhs"), nb::arg("rhs"))
+      .def("ge",     &IRBuilder::geOp,     nb::arg("lhs"), nb::arg("rhs"))
+      .def("lt",     &IRBuilder::ltOp,     nb::arg("lhs"), nb::arg("rhs"))
+      .def("le",     &IRBuilder::leOp,     nb::arg("lhs"), nb::arg("rhs"))
+      .def("eq",     &IRBuilder::eqOp,     nb::arg("lhs"), nb::arg("rhs"))
+      .def("and_",   &IRBuilder::andOp,    nb::arg("lhs"), nb::arg("rhs"))
+      .def("or_",    &IRBuilder::orOp,     nb::arg("lhs"), nb::arg("rhs"))
+      .def("not_",   &IRBuilder::notOp,    nb::arg("x"))
+
+      // Select: cond ? true_value : false_value
+      .def("select", &IRBuilder::selectOp,
+            nb::arg("cond"), nb::arg("true_value"), nb::arg("false_value"))
 
       // Windowed materialization
       .def("windowed_output", &IRBuilder::windowedOutputOp,

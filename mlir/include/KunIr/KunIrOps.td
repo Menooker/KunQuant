@@ -84,6 +84,85 @@ def KunIr_SignOp : KunIr_UnaryElemwiseOp<"sign"> {
 }
 
 //===----------------------------------------------------------------------===//
+// Logical ops on i1 ts
+//
+// And/Or are binary, Not is unary.  Operand element types must be i1 and the
+// result is always ts<i1, 1>.  Verifier enforces the i1 constraint; the
+// elemwise traits above already give us the right result-type inference
+// (result = ts<input.elem, 1> = ts<i1, 1> when input is i1).
+//===----------------------------------------------------------------------===//
+
+def KunIr_AndOp : KunIr_BinaryElemwiseOp<"and"> {
+  let summary = "Element-wise logical AND on ts<i1>";
+}
+def KunIr_OrOp  : KunIr_BinaryElemwiseOp<"or"> {
+  let summary = "Element-wise logical OR on ts<i1>";
+}
+def KunIr_NotOp : KunIr_UnaryElemwiseOp<"not"> {
+  let summary = "Element-wise logical NOT on ts<i1>";
+}
+
+//===----------------------------------------------------------------------===//
+// Comparison ops
+//
+// Operands are two ts values with matching element types; result is always
+// !kunir.ts<i1, 1>.  Lowering dispatches arith.cmpf for float operands and
+// arith.cmpi for integer operands.
+//===----------------------------------------------------------------------===//
+
+class KunIr_BinaryCmpOp<string mnemonic, list<Trait> traits = []>
+    : KunIr_Op<mnemonic, !listconcat(traits, [
+        Pure,
+        InferTypeOpInterface,
+        NativeOpTrait<"KunIrCmpTsResultType">,
+        DeclareOpInterfaceMethods<KunIr_BinaryArithInterface>
+    ])> {
+  let arguments = (ins KunIr_AnyTs:$lhs, KunIr_AnyTs:$rhs);
+  let results = (outs KunIr_AnyTs:$result);
+  let hasVerifier = 1;
+  let assemblyFormat =
+    "$lhs `,` $rhs `:` type($lhs) `,` type($rhs) attr-dict";
+}
+
+def KunIr_GreaterOp      : KunIr_BinaryCmpOp<"gt"> {
+  let summary = "Element-wise greater-than (lhs > rhs)";
+}
+def KunIr_GreaterEqualOp : KunIr_BinaryCmpOp<"ge"> {
+  let summary = "Element-wise greater-or-equal (lhs >= rhs)";
+}
+def KunIr_LessOp         : KunIr_BinaryCmpOp<"lt"> {
+  let summary = "Element-wise less-than (lhs < rhs)";
+}
+def KunIr_LessEqualOp    : KunIr_BinaryCmpOp<"le"> {
+  let summary = "Element-wise less-or-equal (lhs <= rhs)";
+}
+def KunIr_EqualOp        : KunIr_BinaryCmpOp<"eq"> {
+  let summary = "Element-wise equality (lhs == rhs)";
+}
+
+//===----------------------------------------------------------------------===//
+// Select op — cond ? true_value : false_value
+//
+// cond is ts<i1, *>; true_value / false_value share the same element type T.
+// Result is ts<T, 1>.
+//===----------------------------------------------------------------------===//
+
+def KunIr_SelectOp : KunIr_Op<"select", [
+    Pure,
+    DeclareOpInterfaceMethods<InferTypeOpInterface>
+]> {
+  let summary = "Element-wise select on three ts values";
+  let arguments = (ins KunIr_AnyTs:$cond,
+                       KunIr_AnyTs:$true_value,
+                       KunIr_AnyTs:$false_value);
+  let results = (outs KunIr_AnyTs:$result);
+  let hasVerifier = 1;
+  let assemblyFormat =
+    "$cond `,` $true_value `,` $false_value `:` type($cond) `,` "
+    "type($true_value) `,` type($false_value) attr-dict";
+}
+
+//===----------------------------------------------------------------------===//
 // Cross-sectional ops
 //
 // kunir has no first-class cross-sectional op.  Cross-sectional kernels

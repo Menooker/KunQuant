@@ -28,6 +28,10 @@ import numpy as np
 
 from KunQuant.Op import Builder, Input, Output
 from KunQuant.ops import Add, Sub, Mul, Abs, Log, Sign, WindowedSum
+from KunQuant.ops.ElewiseOp import (
+    GreaterThan, GreaterEqual, LessThan, LessEqual, Equals,
+    And, Or, Not, Select,
+)
 from KunQuant.ops.MiscOp import BackRef, FastWindowedSum
 from KunQuant.Stage import Function
 from KunQuant.jit import KunMLIR
@@ -88,6 +92,41 @@ def build_func_fastwindowedsum(N: int) -> Function:
         bin_ = Input("b")
         Output(FastWindowedSum(Add(a, bin_), N), "ws")
     return Function(builder.ops, name="fastwindowedsum_kernel")
+
+
+def build_func_cmp_logical() -> Function:
+    """Single-graph multi-output factor that exercises every kunir cmp,
+    logical, and select op in one shot:
+
+      gt_out  = a > b  ? a : b              # element-wise max
+      lt_out  = a < b  ? a : b              # element-wise min
+      ge_out  = a >= b ? a : b              # max (tiebreaks to a)
+      le_out  = a <= b ? a : b              # min (tiebreaks to a)
+      eq_out  = a == b ? a : b              # always a where they match
+      and_out = (a > 0)  & (b > 0)  ? a : b # gt + and
+      or_out  = (a > 0)  | (b > 0)  ? a : b # gt + or
+      not_out = !(a > b) ? a : b            # = (a <= b) ? a : b
+
+    Constants 0 are produced via `Sub(a, a)`-style identities to stay
+    inside the ops supported by CodegenMLIR (no ConstantOp on the GPU
+    path yet — and we don't need one for this test).
+    """
+    builder = Builder()
+    with builder:
+        a = Input("a")
+        bin_ = Input("b")
+        zero = Sub(a, a)  # = 0 elementwise (avoids ConstantOp dependency)
+        Output(Select(GreaterThan(a, bin_), a, bin_), "gt_out")
+        Output(Select(LessThan(a, bin_),    a, bin_), "lt_out")
+        Output(Select(GreaterEqual(a, bin_), a, bin_), "ge_out")
+        Output(Select(LessEqual(a, bin_),    a, bin_), "le_out")
+        Output(Select(Equals(a, bin_),       a, bin_), "eq_out")
+        Output(Select(And(GreaterThan(a, zero), GreaterThan(bin_, zero)),
+                       a, bin_), "and_out")
+        Output(Select(Or(GreaterThan(a, zero), GreaterThan(bin_, zero)),
+                       a, bin_), "or_out")
+        Output(Select(Not(GreaterThan(a, bin_)), a, bin_), "not_out")
+    return Function(builder.ops, name="cmp_logical_kernel")
 
 
 def build_func_multipartition() -> Function:
@@ -312,6 +351,65 @@ def run_multipartition(target: str, T: int, S: int) -> int:
     return 0
 
 
+def run_cmp_logical(target: str, T: int, S: int) -> int:
+    """End-to-end test for kunir.gt/ge/lt/le/eq + and/or/not + select.
+
+    Verifies a single graph with eight outputs against the obvious numpy
+    reference.  Exercises both bool-producing ops (cmp) and bool-consuming
+    ops (and/or/not/select) plus the i1 ts type round-tripping through the
+    kunir → kungpu lowering.
+    """
+    print("=== cmp/logical/select: 8 outputs exercising kunir bool ops ===")
+    f = build_func_cmp_logical()
+    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+
+    exe = compileit(f, cfg)
+    print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
+           f"peak_intermediate_slots={exe.peak_intermediate_slots}")
+
+    import cupy as cp
+    rng = np.random.default_rng(11)
+    a_h = rng.standard_normal((T, S), dtype=np.float32)
+    b_h = rng.standard_normal((T, S), dtype=np.float32)
+
+    out_names = ["gt_out", "lt_out", "ge_out", "le_out",
+                  "eq_out", "and_out", "or_out", "not_out"]
+    outs = {n: cp.zeros((T, S), dtype=cp.float32) for n in out_names}
+
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe, {"a": cp.asarray(a_h), "b": cp.asarray(b_h), **outs})
+
+    def ref(cond: np.ndarray) -> np.ndarray:
+        return np.where(cond, a_h, b_h)
+
+    zero = np.zeros_like(a_h)
+    expected = {
+        "gt_out":  ref(a_h >  b_h),
+        "lt_out":  ref(a_h <  b_h),
+        "ge_out":  ref(a_h >= b_h),
+        "le_out":  ref(a_h <= b_h),
+        "eq_out":  ref(a_h == b_h),
+        "and_out": ref((a_h > zero) & (b_h > zero)),
+        "or_out":  ref((a_h > zero) | (b_h > zero)),
+        "not_out": ref(~(a_h > b_h)),
+    }
+
+    rc = 0
+    for n in out_names:
+        out_h = cp.asnumpy(outs[n])
+        if not np.allclose(out_h, expected[n], atol=1e-5):
+            diff = np.abs(out_h - expected[n])
+            idx  = np.unravel_index(int(np.nanargmax(diff)), diff.shape)
+            print(f"  FAIL {n} — max |Δ|={float(diff.max()):.3e} at {idx}",
+                    file=sys.stderr)
+            rc = 1
+        else:
+            print(f"  ok {n}")
+    if rc == 0:
+        print(f"  ok — all 8 outputs match across {T*S} cells")
+    return rc
+
+
 def run_windowed(target: str, T: int, S: int, N: int) -> int:
     print(f"=== windowed: ws = WindowedSum(a + b, N={N}) ===")
     f = build_func_windowed(N)
@@ -491,6 +589,8 @@ def main() -> int:
                                     N=20, mask=1)
     print()
     rc |= run_multipartition(args.target, args.time_length, args.num_stocks)
+    print()
+    rc |= run_cmp_logical(args.target, args.time_length, args.num_stocks)
     return rc
 
 

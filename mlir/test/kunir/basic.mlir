@@ -145,3 +145,38 @@ kunir.func @test_f64_binary(%a: !kunir.ts<f64, inf>, %b: !kunir.ts<f64, inf>)
   %result = kunir.max %a, %b : !kunir.ts<f64, inf>, !kunir.ts<f64, inf>
   kunir.return %result : !kunir.ts<f64, 1>
 }
+
+// CHECK-LABEL: kunir.func @test_cmp_logical_select
+kunir.func @test_cmp_logical_select(%a: !kunir.ts<f32, inf>, %b: !kunir.ts<f32, inf>)
+    inputs {%a = "a", %b = "b"}
+    outputs {"gt_out", "lt_out", "eq_out", "and_out", "or_out", "not_out"}
+    target {occupancy = 1, warps_per_cta = 4, smem_size = 0, vector_size = 1} unreliable_count = 0
+    -> (!kunir.ts<f32, 1>, !kunir.ts<f32, 1>, !kunir.ts<f32, 1>,
+        !kunir.ts<f32, 1>, !kunir.ts<f32, 1>, !kunir.ts<f32, 1>) {
+  // CHECK: kunir.gt
+  %gt = kunir.gt %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  // CHECK: kunir.lt
+  %lt = kunir.lt %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  // CHECK: kunir.ge
+  %ge = kunir.ge %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  // CHECK: kunir.le
+  %le = kunir.le %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  // CHECK: kunir.eq
+  %eq = kunir.eq %a, %b : !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  // CHECK: kunir.and
+  %and = kunir.and %gt, %lt : !kunir.ts<i1, 1>, !kunir.ts<i1, 1>
+  // CHECK: kunir.or
+  %or  = kunir.or  %ge, %le : !kunir.ts<i1, 1>, !kunir.ts<i1, 1>
+  // CHECK: kunir.not
+  %nt  = kunir.not %lt : !kunir.ts<i1, 1>
+  // CHECK: kunir.select
+  %s_gt  = kunir.select %gt,  %a, %b : !kunir.ts<i1, 1>, !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  %s_lt  = kunir.select %lt,  %a, %b : !kunir.ts<i1, 1>, !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  %s_eq  = kunir.select %eq,  %a, %b : !kunir.ts<i1, 1>, !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  %s_and = kunir.select %and, %a, %b : !kunir.ts<i1, 1>, !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  %s_or  = kunir.select %or,  %a, %b : !kunir.ts<i1, 1>, !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  %s_nt  = kunir.select %nt,  %a, %b : !kunir.ts<i1, 1>, !kunir.ts<f32, inf>, !kunir.ts<f32, inf>
+  kunir.return %s_gt, %s_lt, %s_eq, %s_and, %s_or, %s_nt
+    : !kunir.ts<f32, 1>, !kunir.ts<f32, 1>, !kunir.ts<f32, 1>,
+      !kunir.ts<f32, 1>, !kunir.ts<f32, 1>, !kunir.ts<f32, 1>
+}

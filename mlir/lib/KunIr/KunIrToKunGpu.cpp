@@ -101,6 +101,12 @@ static LogicalResult lowerBlock(
              && "reduce result must be pre-seeded in tsMap with current acc");
       it->second = {TsKind::Scalar,
           ri.buildAccumOp(b, ol, it->second.value, elem)};
+    } else if (auto sel = dyn_cast<SelectOp>(op)) {
+      Value cond  = getScalar(sel.getCond(),       tsMap, offsetI32, b, ol);
+      Value tv    = getScalar(sel.getTrueValue(),  tsMap, offsetI32, b, ol);
+      Value fv    = getScalar(sel.getFalseValue(), tsMap, offsetI32, b, ol);
+      tsMap[sel.getResult()] = {TsKind::Scalar,
+          b.create<arith::SelectOp>(ol, cond, tv, fv).getResult()};
     } else if (handleUnknown) {
       if (failed(handleUnknown(*op))) return failure();
     } else {

@@ -40,15 +40,36 @@ public:
   }
 };
 
+/// Trait for comparison kunir ts ops (gt/ge/lt/le/eq).
+///
+/// Result is always !kunir.ts<i1, 1> regardless of operand element type.
+template <typename ConcreteType>
+class KunIrCmpTsResultType
+    : public TraitBase<ConcreteType, KunIrCmpTsResultType> {
+public:
+  static mlir::LogicalResult inferReturnTypes(
+      mlir::MLIRContext *ctx, std::optional<mlir::Location>,
+      mlir::ValueRange, mlir::DictionaryAttr,
+      mlir::PropertyRef, mlir::RegionRange,
+      llvm::SmallVectorImpl<mlir::Type> &inferred) {
+    inferred.push_back(
+        ::kunir::TsType::get(ctx, mlir::IntegerType::get(ctx, 1), 1));
+    return mlir::success();
+  }
+};
+
 } // namespace OpTrait
 } // namespace mlir
 
-// Convenient alias in the kunir namespace.
+// Convenient aliases in the kunir namespace.
 namespace kunir {
 namespace OpTrait {
 template <typename ConcreteType>
 using ElemwiseTsResultType =
     ::mlir::OpTrait::KunIrElemwiseTsResultType<ConcreteType>;
+template <typename ConcreteType>
+using CmpTsResultType =
+    ::mlir::OpTrait::KunIrCmpTsResultType<ConcreteType>;
 } // namespace OpTrait
 } // namespace kunir
 
