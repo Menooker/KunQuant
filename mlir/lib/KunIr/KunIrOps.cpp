@@ -233,6 +233,40 @@ LogicalResult ConstantOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
+// AccumulatorOp / SetAccumulatorOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult AccumulatorOp::verify() {
+  auto resultTy = llvm::cast<TsType>(getResult().getType());
+  if (resultTy.getMaxLookback() != 1)
+    return emitOpError("accumulator result maxLookback must be 1, got ")
+           << resultTy.getMaxLookback();
+  if (getName().empty())
+    return emitOpError("accumulator name must be non-empty");
+  return success();
+}
+
+LogicalResult SetAccumulatorOp::verify() {
+  auto *accOp = getAcc().getDefiningOp();
+  if (!accOp || !llvm::isa<AccumulatorOp>(accOp))
+    return emitOpError(
+        "first operand must be the result of a 'kunir.accumulator'");
+  auto accTy   = llvm::cast<TsType>(getAcc().getType());
+  auto maskTy  = llvm::cast<TsType>(getMask().getType());
+  auto valueTy = llvm::cast<TsType>(getValue().getType());
+  if (accTy.getElementType() != valueTy.getElementType())
+    return emitOpError("value element type '")
+           << valueTy.getElementType()
+           << "' must match accumulator element type '"
+           << accTy.getElementType() << "'";
+  if (!llvm::isa<IntegerType>(maskTy.getElementType()) ||
+      llvm::cast<IntegerType>(maskTy.getElementType()).getWidth() != 1)
+    return emitOpError("mask element type must be i1, got '")
+           << maskTy.getElementType() << "'";
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // ForEachBackWindowOp — verifier + custom assembly format
 //
 // Format:

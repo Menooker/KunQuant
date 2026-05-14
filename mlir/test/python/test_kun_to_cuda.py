@@ -35,7 +35,10 @@ from KunQuant.ops.ElewiseOp import (
     GreaterThan, GreaterEqual, LessThan, LessEqual, Equals,
     And, Or, Not, Select,
 )
-from KunQuant.ops.MiscOp import BackRef, FastWindowedSum
+from KunQuant.ops.MiscOp import (
+    BackRef, FastWindowedSum,
+    Accumulator, SetAccumulator, ReturnFirstValue,
+)
 from KunQuant.Stage import Function
 from KunQuant.jit import KunMLIR
 from KunQuant.jit.cuda import compileit, CudaCompilerConfig
@@ -113,6 +116,34 @@ def build_func_fastwindowedsum(N: int) -> Function:
         bin_ = Input("b")
         Output(FastWindowedSum(Add(a, bin_), N), "ws")
     return Function(builder.ops, name="fastwindowedsum_kernel")
+
+
+def build_func_accumulator() -> Function:
+    """Running count of timesteps where a > 0:
+
+       cnt[t] = cnt[t-1] + (a[t] > 0 ? 1 : 0)            (cnt[-1] = 0)
+
+    Built directly with Accumulator + SetAccumulator + ReturnFirstValue:
+       cnt    = Accumulator(a, "cnt")             # reads slot (init 0)
+       mask   = a > 0
+       new    = Select(mask, cnt + 1, cnt)
+       sa     = SetAccumulator(cnt, mask, new)
+       Output(ReturnFirstValue([new, sa]), "cnt_out")
+
+    Exercises the Accumulator end-to-end: kunir.accumulator (CSE'd to one
+    slot), kunir.set_accumulator (non-Pure, scf.if-wrapped store at
+    offset 0) and ReturnFirstValue's keep-alive role for the side-effect
+    op when lowered to MLIR.
+    """
+    builder = Builder()
+    with builder:
+        a = Input("a")
+        cnt = Accumulator(a, "cnt")
+        mask = GreaterThan(a, ConstantOp(0))
+        new_cnt = Select(mask, Add(cnt, ConstantOp(1)), cnt)
+        sa = SetAccumulator(cnt, mask, new_cnt)
+        Output(ReturnFirstValue([new_cnt, sa]), "cnt_out")
+    return Function(builder.ops, name="accumulator_kernel")
 
 
 def build_func_cmp_logical() -> Function:
@@ -350,6 +381,36 @@ def run_multipartition(target: str, T: int, S: int) -> int:
         return 1
     print(f"  ok — all 3 outputs match across {exe.num_kernels} kernels")
     return 0
+
+
+def run_accumulator(target: str, T: int, S: int) -> int:
+    """End-to-end correctness of Accumulator + SetAccumulator +
+    ReturnFirstValue: cnt[t] = cnt[t-1] + (a[t] > 0 ? 1 : 0).
+
+    Forced single-chunk (sm_fill_factor=0.0): a general-purpose
+    Accumulator has no warmup-replay mechanism, so its per-CTA alloca
+    cannot be re-primed at chunk boundaries.  unreliable_count=0 leaves
+    the runtime free to split the time axis into many chunks; we disable
+    that here to keep the slot's value continuous across t."""
+    print(f"=== accumulator: cnt[t] = cnt[t-1] + (a[t] > 0) ===")
+    f = build_func_accumulator()
+    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    exe = compileit(f, cfg)
+    print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
+           f"peak_intermediate_slots={exe.peak_intermediate_slots}")
+
+    import cupy as cp
+    rng = np.random.default_rng(13)
+    a_h = rng.standard_normal((T, S), dtype=np.float32)
+    out = cp.zeros((T, S), dtype=cp.float32)
+
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe, {"a": cp.asarray(a_h), "cnt_out": out},
+                       sm_fill_factor=0.0)
+    out_h = cp.asnumpy(out)
+
+    expected = np.cumsum((a_h > 0).astype(np.float32), axis=0)
+    return _compare_post_warmup(out_h, expected, valid_start=0, atol=1e-5)
 
 
 def run_cmp_logical(target: str, T: int, S: int) -> int:
@@ -595,6 +656,8 @@ def main() -> int:
                           N=20, mask=1)
     print()
     rc |= run_multipartition(args.target, args.time_length, args.num_stocks)
+    print()
+    rc |= run_accumulator(args.target, args.time_length, args.num_stocks)
     print()
     rc |= run_cmp_logical(args.target, args.time_length, args.num_stocks)
     return rc

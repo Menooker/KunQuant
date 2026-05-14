@@ -73,10 +73,18 @@ using HandleMap = llvm::DenseMap<Value, Value>;
 // One LowerHelper per scope (outer function body / for_each_back_window body).
 // `zeroOffsetI32` is the function-scope i32 zero constant created once before
 // the outer scf.for; all LowerHelper instances share it.
+//
+// `outerTimeIdx` / `outerLoopLb` are the outer scf.for time loop's induction
+// variable and lower bound (index type).  BackRef's warmup guard
+// (`t - loop_lb < window` → NaN) needs both; threading them through
+// LowerHelper keeps the guard available inside for_each_back_window bodies
+// as well, since `t` there is still the OUTER time index.
 struct LowerHelper {
   HandleMap tsMap;
   HandleMap scalarMap;
   Value zeroOffsetI32;
+  Value outerTimeIdx;   // outer scf.for induction var (index)
+  Value outerLoopLb;    // outer scf.for lower bound (index)
 
   // Shared util: look up `v` (a ts SSA value) in tsMap, emit
   // ts.get(handle, offsetI32), return the loaded scalar.  Does NOT touch
@@ -141,11 +149,57 @@ struct LowerHelper {
         scalarMap[sel.getResult()] =
             b.create<arith::SelectOp>(ol, cond, tv, fv).getResult();
       } else if (auto br = dyn_cast<BackRefOp>(op)) {
-        Value offset = b.create<arith::ConstantOp>(
-            ol, b.getI32Type(), b.getI32IntegerAttr(br.getWindow()));
-        KUN_ASSIGN_OR_FAIL(Value scalar,
-            getScalarUncached(br.getInput(), offset, b, ol));
-        scalarMap[br.getResult()] = scalar;
+        // Warmup guard:  if   t - outer_loop_lb < window  →  NaN
+        //                else                            →  ts.get(window)
+        //
+        // Chunk 0 has loop_lb = 0 so the guard collapses to CPU's
+        // "first window-1 outputs are NaN".  Chunk k>=1's per-CTA state
+        // (e.g. fast-stat accumulators) is zero-initialised at function
+        // entry, so each chunk needs `window` add-only steps to rebuild
+        // the trailing-window state — gating the "remove" value with
+        // NaN here propagates through NaN-aware remove patterns
+        // (Equals(oldx, oldx) === false on NaN) and auto-suppresses the
+        // subtract step during warmup.
+        //
+        // The scf.if uses the manual-OpBuilder (not body-builder-lambda)
+        // form, so the enclosing function context is still `lowerBlock`
+        // — KUN_ASSIGN_OR_FAIL can return failure from here without
+        // tripping any lambda return-type mismatch.
+        int64_t window = br.getWindow();
+        auto inputTs = llvm::cast<TsType>(br.getInput().getType());
+        auto floatTy = llvm::dyn_cast<FloatType>(inputTs.getElementType());
+        if (!floatTy)
+          return br.emitError("kunir-to-kungpu: back_ref input must have a "
+                              "float element type (NaN required for the "
+                              "warmup guard)");
+
+        Value delta =
+            b.create<arith::SubIOp>(ol, outerTimeIdx, outerLoopLb);
+        Value windowIdx =
+            b.create<arith::ConstantIndexOp>(ol, window);
+        Value inSteady = b.create<arith::CmpIOp>(
+            ol, arith::CmpIPredicate::sge, delta, windowIdx);
+        auto ifOp = b.create<scf::IfOp>(ol, TypeRange{floatTy}, inSteady,
+                                          /*withElseRegion=*/true);
+        {
+          OpBuilder ib =
+              OpBuilder::atBlockBegin(&ifOp.getThenRegion().front());
+          Value offset = ib.create<arith::ConstantOp>(
+              ol, ib.getI32Type(), ib.getI32IntegerAttr(window));
+          KUN_ASSIGN_OR_FAIL(Value loaded,
+              getScalarUncached(br.getInput(), offset, ib, ol));
+          ib.create<scf::YieldOp>(ol, loaded);
+        }
+        {
+          OpBuilder ib =
+              OpBuilder::atBlockBegin(&ifOp.getElseRegion().front());
+          llvm::APFloat qnan =
+              llvm::APFloat::getQNaN(floatTy.getFloatSemantics());
+          Value nanV = ib.create<arith::ConstantOp>(
+              ol, floatTy, FloatAttr::get(floatTy, qnan));
+          ib.create<scf::YieldOp>(ol, nanV);
+        }
+        scalarMap[br.getResult()] = ifOp.getResult(0);
       } else if (auto co = dyn_cast<ConstantOp>(op)) {
         auto resTs = llvm::cast<TsType>(co.getResult().getType());
         Type elemTy = resTs.getElementType();
@@ -279,6 +333,8 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
   // ------------------------------------------------------------------
   LowerHelper outer;
   outer.zeroOffsetI32 = zeroOffsetI32;
+  outer.outerTimeIdx  = outerFor.getInductionVar();
+  outer.outerLoopLb   = outerFor.getLowerBound();
   unsigned numOrigArgs = oldFT.getNumInputs();
   for (unsigned i = 0; i < numOrigArgs; ++i) {
     Value arg = entry.getArgument(i);
@@ -370,7 +426,9 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
             //
             // After this setup the body has no non-zero-offset reads left;
             // lowerBlock just uses offset 0 + scalarMap for everything.
-            LowerHelper inner{outer.tsMap, outer.scalarMap, outer.zeroOffsetI32};
+            LowerHelper inner{outer.tsMap, outer.scalarMap,
+                                outer.zeroOffsetI32,
+                                outer.outerTimeIdx, outer.outerLoopLb};
             for (auto [i, arg] : llvm::enumerate(body.getArguments())) {
               auto r = inner.getScalarUncached(fwOp.getInputs()[i],
                                                 windowedOffset, ib, il);
@@ -401,6 +459,35 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
       // for's results.
       for (auto [i, res] : llvm::enumerate(fwOp.getResults()))
         outer.scalarMap[res] = innerFor.getResult(i);
+      return success();
+    }
+
+    // kunir.accumulator → kungpu.accumulator (allocated outside the time
+    // loop, like windowed_temp).  Stored in tsMap so that downstream reads
+    // (via getScalar → kungpu.ts.get @ offset 0) resolve to the slot.
+    if (auto acc = dyn_cast<kunir::AccumulatorOp>(op)) {
+      auto ka = b.create<kungpu::AccumulatorOp>(
+          ol, acc.getResult().getType(), acc.getNameAttr());
+      outer.tsMap[acc.getResult()] = ka.getResult();
+      return success();
+    }
+
+    // kunir.set_accumulator → scf.if (mask) { kungpu.ts.put %acc, %value }
+    // inside the outer time loop.  mask and value are loaded at offset 0
+    // (current time step) via the standard scalarMap-cached getScalar.
+    if (auto sa = dyn_cast<kunir::SetAccumulatorOp>(op)) {
+      auto accIt = outer.tsMap.find(sa.getAcc());
+      if (accIt == outer.tsMap.end())
+        return op.emitError("kunir-to-kungpu: set_accumulator acc must come "
+                            "from a kunir.accumulator");
+      KUN_ASSIGN_OR_FAIL(Value maskScalar,
+                         outer.getScalar(sa.getMask(),  fb, ol));
+      KUN_ASSIGN_OR_FAIL(Value valueScalar,
+                         outer.getScalar(sa.getValue(), fb, ol));
+      auto ifOp = fb.create<scf::IfOp>(ol, /*resultTypes=*/TypeRange{},
+                                         maskScalar, /*withElseRegion=*/false);
+      OpBuilder ib = OpBuilder::atBlockBegin(&ifOp.getThenRegion().front());
+      ib.create<TsPutOp>(ol, accIt->second, valueScalar);
       return success();
     }
 

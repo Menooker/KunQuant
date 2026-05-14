@@ -38,7 +38,10 @@ from KunQuant.ops.ElewiseOp import (
 from KunQuant.ops.ReduceOp import (
     ReduceAdd, ReduceMul, ReduceMax, ReduceMin,
 )
-from KunQuant.ops.MiscOp import BackRef, FastWindowedSum
+from KunQuant.ops.MiscOp import (
+    BackRef, FastWindowedSum,
+    Accumulator, SetAccumulator, ReturnFirstValue,
+)
 from KunQuant.Stage import Function
 
 
@@ -145,6 +148,27 @@ def _emit_simple(op: OpBase,
         v = op.attrs["value"]
         fv = float("nan") if v == "nan" else float(v)
         return ir.constant(fv, ts_1)
+    if isinstance(op, Accumulator):
+        # The Python op's `inputs[0]` is a keep-alive in the graph IR;
+        # it does NOT feed the slot.  Only the `name` attr matters at
+        # the MLIR level — same-name accumulators CSE to one slot.
+        return ir.accumulator(op.attrs["name"], ts_1)
+    if isinstance(op, SetAccumulator):
+        # Side-effect: returns no SSA value.  ReturnFirstValue is what
+        # keeps this op alive in the Python graph (see MiscOp.py).
+        ir.set_accumulator(val_map[op.inputs[0]],
+                            val_map[op.inputs[1]],
+                            val_map[op.inputs[2]])
+        return None
+    if isinstance(op, ReturnFirstValue):
+        # In the Python graph IR, ReturnFirstValue's only job is to keep
+        # side-effecting siblings (SetAccumulator etc.) reachable from a
+        # graph output so the GC does not drop them.  In SSA-MLIR the
+        # side-effect ops are preserved by their own MemWrite semantics;
+        # ReturnFirstValue carries no new MLIR-level meaning, so we just
+        # forward the first input's Value.  Other inputs were already
+        # emitted in topo order before we got here.
+        return val_map[op.inputs[0]]
     raise NotImplementedError(
         f"CodegenMLIR: op type {cls.__name__} is not supported by the "
         f"GPU backend yet (op = {op})")

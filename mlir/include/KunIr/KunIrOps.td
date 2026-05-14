@@ -180,6 +180,47 @@ def KunIr_ConstantOp : KunIr_Op<"constant", [Pure]> {
 }
 
 //===----------------------------------------------------------------------===//
+// Accumulator / SetAccumulator
+//
+// A scalar "register" that survives across time steps within one kernel
+// invocation.  Modeled as a ts<T, 1> handle so existing ts.get / ts.put
+// load and store its current value.  The handle storage is owned by a
+// single LLVM alloca after kungpu-to-llvm lowering.
+//
+// `kunir.accumulator` is Pure with a `name` StrAttr — two accumulators
+// sharing the same name CSE to a single handle (single backing slot).
+//
+// `kunir.set_accumulator` is NOT Pure: writing to the slot is a side
+// effect and must not be CSE'd or hoisted past dependent reads.  When the
+// scalar `mask` is true at the current time step the accumulator is
+// overwritten with `value`; otherwise it retains the previous value.
+//===----------------------------------------------------------------------===//
+
+def KunIr_AccumulatorOp : KunIr_Op<"accumulator", [Pure]> {
+  let summary = "Stateful single-slot scalar register (read via ts.get @0)";
+  let arguments = (ins StrAttr:$name);
+  let results = (outs KunIr_AnyTs:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = "$name `:` type($result) attr-dict";
+}
+
+def KunIr_SetAccumulatorOp : KunIr_Op<"set_accumulator"> {
+  let summary = "Conditionally overwrite an accumulator slot";
+  let description = [{
+    `acc` must be the result of a `kunir.accumulator`.  When the scalar
+    `mask` is true at the current time step, stores `value` into the
+    accumulator slot; otherwise the slot is unchanged.  Side-effecting
+    (NOT Pure): never CSE / dedup.
+  }];
+  let arguments = (ins KunIr_AnyTs:$acc,
+                       KunIr_AnyTs:$mask,
+                       KunIr_AnyTs:$value);
+  let hasVerifier = 1;
+  let assemblyFormat =
+    "$acc `,` $mask `,` $value `:` type($acc) `,` type($mask) `,` type($value) attr-dict";
+}
+
+//===----------------------------------------------------------------------===//
 // Cross-sectional ops
 //
 // kunir has no first-class cross-sectional op.  Cross-sectional kernels

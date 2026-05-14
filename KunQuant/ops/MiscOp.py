@@ -72,7 +72,13 @@ class SetAccumulator(OpBase, StateConsumerTrait):
     
 class ReturnFirstValue(OpBase):
     '''
-    Return the first value of the input. It is used keep the dependency of the input op, like SetAccumulator.
+    Return inputs[0] as this op's value; the remaining inputs are kept
+    only as dependencies (graph-level keep-alives).
+
+    KunQuant's Python IR is a graph IR — an op with no users is dropped
+    during topo sort / GC.  SetAccumulator is side-effecting but produces
+    no consumer-visible value, so attaching it as inputs[1:] of
+    ReturnFirstValue is how we keep it reachable from a graph output.
     '''
     def __init__(self, v: List[OpBase]) -> None:
         super().__init__(v, [])

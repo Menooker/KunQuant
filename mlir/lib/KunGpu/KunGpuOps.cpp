@@ -12,12 +12,13 @@ using namespace kungpu;
 #include "KunGpu/KunGpuOps.cpp.inc"
 
 // The `ts` operand of ts.get and ts.put must be a function argument (block
-// argument of an entry block) or the result of a windowed_temp op.
+// argument of an entry block), the result of a windowed_temp op, or the
+// result of an accumulator op.
 static bool isValidTsSource(Value v) {
   if (isa<BlockArgument>(v))
     return true;
   if (auto *def = v.getDefiningOp())
-    return isa<WindowedTempOp>(def);
+    return isa<WindowedTempOp, AccumulatorOp>(def);
   return false;
 }
 
@@ -33,7 +34,8 @@ LogicalResult TsGetOp::verify() {
            << "' must match ts element type '" << tsTy.getElementType() << "'";
   if (!isValidTsSource(getTs()))
     return emitOpError("ts operand must be a function argument or "
-                       "the result of 'kungpu.windowed_temp'");
+                       "the result of 'kungpu.windowed_temp' / "
+                       "'kungpu.accumulator'");
   return success();
 }
 
@@ -49,6 +51,7 @@ LogicalResult TsPutOp::verify() {
            << "' must match ts element type '" << tsTy.getElementType() << "'";
   if (!isValidTsSource(getTs()))
     return emitOpError("ts operand must be a function argument or "
-                       "the result of 'kungpu.windowed_temp'");
+                       "the result of 'kungpu.windowed_temp' / "
+                       "'kungpu.accumulator'");
   return success();
 }

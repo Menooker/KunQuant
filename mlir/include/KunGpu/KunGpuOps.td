@@ -92,7 +92,22 @@ def KunGpu_TimeUbOp : KunGpu_Op<"time_ub", [Pure]> {
 // (or `value` for put) must match the ts element type.
 //===----------------------------------------------------------------------===//
 
-def KunGpu_WindowedTempOp : KunGpu_Op<"windowed_temp", [Pure]> {
+def KunGpu_AccumulatorOp : KunGpu_Op<"accumulator", [Pure]> {
+  let summary = "Allocate a single-slot per-thread accumulator (alloca)";
+  let description = [{
+    Allocates a per-thread single-slot register backing a `kunir.accumulator`.
+    The result is a `ts<T, 1>` handle that ts.put / ts.get treat at offset 0
+    only — there is no time dimension and no circular indexing.  The slot is
+    zero-initialised at allocation time.
+
+    Pure with a `name` StrAttr — same-name accumulators CSE to one slot.
+  }];
+  let arguments = (ins StrAttr:$name);
+  let results = (outs KunIr_AnyTs:$result);
+  let assemblyFormat = "$name `:` type($result) attr-dict";
+}
+
+def KunGpu_WindowedTempOp : KunGpu_Op<"windowed_temp", []> {
   let summary = "Allocate a per-thread windowed (circular) temporary buffer";
   let description = [{
     Allocates a thread-local circular buffer whose element type and window

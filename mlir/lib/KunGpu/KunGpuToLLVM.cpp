@@ -73,15 +73,17 @@ namespace {
 
 // Per-windowed_temp side state.
 //   posPtr — i32 alloca holding the next-writable circular position.
+//            NULL means the entry is an accumulator (single slot, no
+//            circular wrap; ts.get / ts.put always touch slot 0).
 //   stride — slot stride in bytes-of-T units:
 //              1 for local (alloca buffer is per-thread)
 //              K for shared (slot-major across the K threads in a block);
 //                K = warps_per_cta * 32, captured as an i32 SSA value.
-// Keyed on the original windowed_temp result Value so the ts.get / ts.put
-// patterns can find it.
+// Keyed on the original windowed_temp / accumulator result Value so the
+// ts.get / ts.put patterns can find it.
 struct WTDesc {
-  Value posPtr;
-  int64_t stride; // 1 → no multiply at access time
+  Value posPtr;     // null → accumulator (no position counter)
+  int64_t stride;   // 1 → no multiply at access time
 };
 using WTDescMap = llvm::DenseMap<Value, WTDesc>;
 
@@ -513,6 +515,54 @@ struct WindowedTempPattern : OpConversionPattern<WindowedTempOp> {
   }
 };
 
+// kungpu.accumulator → single-slot alloca, zero-initialised.  Modeled in
+// descMap with a null posPtr so the ts.get / ts.put dispatch can recognise
+// it and emit a plain load/store at slot 0 (no circular wrap, no position
+// counter).  The op MUST be lowered for offset = 0 only — verified at the
+// ts.get / ts.put pattern level.
+struct AccumulatorPattern : OpConversionPattern<kungpu::AccumulatorOp> {
+  WTDescMap &descMap;
+  AccumulatorPattern(TypeConverter &tc, MLIRContext *ctx, WTDescMap &m)
+      : OpConversionPattern(tc, ctx), descMap(m) {}
+
+  LogicalResult
+  matchAndRewrite(kungpu::AccumulatorOp op, OpAdaptor /*a*/,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto *ctx    = op.getContext();
+    Location loc = op.getLoc();
+    auto i32Ty   = rewriter.getI32Type();
+    auto ptrTy   = LLVM::LLVMPointerType::get(ctx);
+
+    auto tsTy   = llvm::cast<TsType>(op.getType());
+    Type elemTy = tsTy.getElementType();
+
+    auto fn = op->getParentOfType<gpu::GPUFuncOp>();
+    if (!fn)
+      return rewriter.notifyMatchFailure(
+          op, "kungpu.accumulator must be inside a gpu.func");
+
+    // Alloca + zero-init at function entry so the slot is well-defined
+    // before the time loop begins.
+    Value bufPtr;
+    {
+      OpBuilder::InsertionGuard g(rewriter);
+      Block &entry = fn.getBody().front();
+      rewriter.setInsertionPointToStart(&entry);
+      Value c1_i32 = rewriter.create<LLVM::ConstantOp>(
+          loc, i32Ty, rewriter.getI32IntegerAttr(1));
+      bufPtr = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, elemTy, c1_i32);
+      Value zero = rewriter.create<LLVM::ConstantOp>(
+          loc, elemTy, rewriter.getZeroAttr(elemTy));
+      rewriter.create<LLVM::StoreOp>(loc, zero, bufPtr);
+    }
+
+    // posPtr = null → ts.get / ts.put treat as accumulator (slot 0 only).
+    descMap[op.getResult()] = {Value(), 1};
+    rewriter.replaceOp(op, bufPtr);
+    return success();
+  }
+};
+
 // Multiply an i32 index by a compile-time stride.  stride==1 is a no-op.
 static Value applyStride(OpBuilder &b, Location loc, Value idx, int64_t stride,
                           Type i32Ty) {
@@ -545,11 +595,24 @@ struct TsGetPattern : OpConversionPattern<TsGetOp> {
 
     auto it = descMap.find(op.getTs());
     if (it != descMap.end()) {
+      const WTDesc &desc = it->second;
+      // ── accumulator: single-slot load.  offset must be 0. ─────────
+      if (!desc.posPtr) {
+        int64_t offsetVal = -1;
+        if (auto a = offsetI32.getDefiningOp<arith::ConstantOp>())
+          offsetVal = llvm::cast<IntegerAttr>(a.getValue()).getInt();
+        else if (auto l = offsetI32.getDefiningOp<LLVM::ConstantOp>())
+          offsetVal = llvm::cast<IntegerAttr>(l.getValue()).getInt();
+        if (offsetVal != 0)
+          return rewriter.notifyMatchFailure(
+              op, "ts.get on accumulator must use offset = 0");
+        rewriter.replaceOpWithNewOp<LLVM::LoadOp>(op, elemTy, tsPtr);
+        return success();
+      }
       // ── windowed_temp: circular get without modulo ────────────────
       //   adj = offset + 1                  (offset=0 → most-recent put)
       //   idx = pos >= adj ? pos - adj : pos + N - adj
       //   return buf[idx * stride]
-      const WTDesc &desc = it->second;
       int64_t N = static_cast<int64_t>(
           llvm::cast<TsType>(op.getTs().getType()).getMaxLookback());
       Value pos    = rewriter.create<LLVM::LoadOp>(loc, i32Ty, desc.posPtr);
@@ -612,10 +675,16 @@ struct TsPutPattern : OpConversionPattern<TsPutOp> {
 
     auto it = descMap.find(op.getTs());
     if (it != descMap.end()) {
+      const WTDesc &desc = it->second;
+      // ── accumulator: single-slot store, no pos counter to advance. ─
+      if (!desc.posPtr) {
+        rewriter.create<LLVM::StoreOp>(loc, v, tsPtr);
+        rewriter.eraseOp(op);
+        return success();
+      }
       // ── windowed_temp: store at buf[pos*stride], then advance pos ─
       //   buf[pos * stride] = v
       //   pos = (pos + 1 >= N) ? 0 : pos + 1
-      const WTDesc &desc = it->second;
       int64_t N = static_cast<int64_t>(
           llvm::cast<TsType>(op.getTs().getType()).getMaxLookback());
       Value pos = rewriter.create<LLVM::LoadOp>(loc, i32Ty, desc.posPtr);
@@ -897,7 +966,8 @@ struct ConvertKunGpuToLLVMPass
     target.addLegalDialect<arith::ArithDialect, scf::SCFDialect,
                            LLVM::LLVMDialect, gpu::GPUDialect>();
     target.addLegalOp<ModuleOp, UnrealizedConversionCastOp>();
-    target.addIllegalOp<WindowedTempOp, TsGetOp, TsPutOp,
+    target.addIllegalOp<WindowedTempOp, kungpu::AccumulatorOp,
+                        TsGetOp, TsPutOp,
                         TimeLengthOp, TimeLbOp, TimeUbOp,
                         StockIdOp, BlockStockCountOp>();
     target.addIllegalOp<kunir::FastWindowedSumOp>();
@@ -920,6 +990,7 @@ struct ConvertKunGpuToLLVMPass
     patterns.add<TimeLengthPattern, TimeLbPattern, TimeUbPattern,
                   StockIdPattern, BlockStockCountPattern>(typeConv, ctx);
     patterns.add<WindowedTempPattern>(typeConv, ctx, descMap, smemCounter);
+    patterns.add<AccumulatorPattern>(typeConv, ctx, descMap);
     patterns.add<TsGetPattern>(typeConv, ctx, descMap);
     patterns.add<TsPutPattern>(typeConv, ctx, descMap, chunkCtx);
     patterns.add<FastWindowedSumPattern>(typeConv, ctx);

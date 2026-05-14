@@ -171,6 +171,15 @@ public:
     return b_.create<kunir::ConstantOp>(b_.getUnknownLoc(), tsTy, attr);
   }
 
+  // ── Accumulator / SetAccumulator ───────────────────────────────
+  Value accumulatorOp(std::string name, Type tsTy) {
+    return b_.create<kunir::AccumulatorOp>(b_.getUnknownLoc(), tsTy,
+                                            b_.getStringAttr(name));
+  }
+  void setAccumulatorOp(Value acc, Value mask, Value value) {
+    b_.create<kunir::SetAccumulatorOp>(b_.getUnknownLoc(), acc, mask, value);
+  }
+
   // ── Windowed buffer materialization ───────────────────────────────
   Value windowedOutputOp(Value x, int64_t length) {
     auto inTs = llvm::cast<kunir::TsType>(x.getType());
@@ -362,6 +371,15 @@ void registerIRBuilder(nb::module_ &m) {
             nb::arg("value"), nb::arg("type"),
             "Build a kunir.constant of element-type matching `type` (a "
             "ts<T, 1>).  Pass float('nan') for NaN.")
+
+      .def("accumulator", &IRBuilder::accumulatorOp,
+            nb::arg("name"), nb::arg("type"),
+            "Build a kunir.accumulator with the given name and ts<T, 1> "
+            "result type.  Same-name accumulators CSE to a single slot.")
+      .def("set_accumulator", &IRBuilder::setAccumulatorOp,
+            nb::arg("acc"), nb::arg("mask"), nb::arg("value"),
+            "Conditionally store `value` into `acc` when `mask` is true. "
+            "Side-effecting; returns no SSA value.")
 
       .def("select", &IRBuilder::selectOp,
             nb::arg("cond"), nb::arg("true_value"), nb::arg("false_value"))
