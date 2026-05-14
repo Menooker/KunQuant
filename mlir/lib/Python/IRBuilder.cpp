@@ -165,6 +165,12 @@ public:
     return b_.create<kunir::SelectOp>(b_.getUnknownLoc(), cond, tv, fv);
   }
 
+  // ── Scalar constant lifted to ts<T, 1> ─────────────────────────
+  Value constantOp(double value, Type tsTy) {
+    auto attr = b_.getF64FloatAttr(value);
+    return b_.create<kunir::ConstantOp>(b_.getUnknownLoc(), tsTy, attr);
+  }
+
   // ── Windowed buffer materialization ───────────────────────────────
   Value windowedOutputOp(Value x, int64_t length) {
     auto inTs = llvm::cast<kunir::TsType>(x.getType());
@@ -352,6 +358,11 @@ void registerIRBuilder(nb::module_ &m) {
       .def("not_",   &IRBuilder::notOp,    nb::arg("x"))
 
       // Select: cond ? true_value : false_value
+      .def("constant", &IRBuilder::constantOp,
+            nb::arg("value"), nb::arg("type"),
+            "Build a kunir.constant of element-type matching `type` (a "
+            "ts<T, 1>).  Pass float('nan') for NaN.")
+
       .def("select", &IRBuilder::selectOp,
             nb::arg("cond"), nb::arg("true_value"), nb::arg("false_value"))
 

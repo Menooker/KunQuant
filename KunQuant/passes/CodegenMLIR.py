@@ -18,11 +18,17 @@ Anything else raises NotImplementedError with the offending op printed.
 """
 
 from __future__ import annotations
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # KunMLIR is a compiled extension built alongside the MLIR support,
+    # only imported here for type checking — no runtime dependency added
+    # to the codegen path itself.
+    from KunQuant.jit import KunMLIR
 
 from KunQuant.Op import (
     OpBase, Input, Output, ForeachBackWindow, IterValue, WindowedTempOutput,
-    ReductionOp, SimpleCrossSectionalOp,
+    ReductionOp, SimpleCrossSectionalOp, ConstantOp,
 )
 from KunQuant.ops.ElewiseOp import (
     Add, Sub, Mul, Div, Max, Min, Abs, Log, Sign,
@@ -109,8 +115,13 @@ def _index_loop_members(f: Function) -> Tuple[
     return body_ops, reductions
 
 
-def _emit_simple(op: OpBase, ir, val_map: Dict[OpBase, object]):
-    """Emit a non-control-flow op via IRBuilder dispatch."""
+def _emit_simple(op: OpBase,
+                  ir: KunMLIR.IRBuilder,
+                  val_map: Dict[OpBase, KunMLIR.Value],
+                  ts_1: KunMLIR.Type) -> KunMLIR.Value:
+    """Emit a non-control-flow op via IRBuilder dispatch.  `ts_1` is the
+    kunir ts type with maxLookback=1, used by ops whose result has no
+    input to infer the element type from (currently only ConstantOp)."""
     cls = type(op)
     if cls in _BINARY:
         getattr(ir, _BINARY[cls])
@@ -130,12 +141,18 @@ def _emit_simple(op: OpBase, ir, val_map: Dict[OpBase, object]):
         return ir.select(val_map[op.inputs[0]],
                           val_map[op.inputs[1]],
                           val_map[op.inputs[2]])
+    if isinstance(op, ConstantOp):
+        v = op.attrs["value"]
+        fv = float("nan") if v == "nan" else float(v)
+        return ir.constant(fv, ts_1)
     raise NotImplementedError(
         f"CodegenMLIR: op type {cls.__name__} is not supported by the "
         f"GPU backend yet (op = {op})")
 
 
-def _emit_reduction(op: ReductionOp, ir, val_map: Dict[OpBase, object]):
+def _emit_reduction(op: ReductionOp,
+                     ir: KunMLIR.IRBuilder,
+                     val_map: Dict[OpBase, KunMLIR.Value]) -> KunMLIR.Value:
     cls = type(op)
     if cls not in _REDUCE:
         raise NotImplementedError(
@@ -150,7 +167,7 @@ def _emit_reduction(op: ReductionOp, ir, val_map: Dict[OpBase, object]):
 
 # ── Main entry point ────────────────────────────────────────────────
 
-def _maybe_external_partition(f: Function, dtype: str):
+def _maybe_external_partition(f: Function, dtype: str) -> Optional[dict]:
     """If `f` is a partition the GPU runtime handles as a pre-compiled
     external kernel (bundled PTX loaded as a separate CUmodule), return
     a descriptor dict that KunMLIR.compile() should append to the
@@ -192,8 +209,10 @@ def _maybe_external_partition(f: Function, dtype: str):
     }
 
 
-def translate_function(f: Function, target: TargetSpec, ir,
-                        dtype: str = "f32", unreliable_count: int = 0):
+def translate_function(f: Function, target: TargetSpec,
+                        ir: KunMLIR.IRBuilder,
+                        dtype: str = "f32",
+                        unreliable_count: int = 0) -> Optional[dict]:
     """Emit `f` as a single kunir.func into the open `ir` (KunMLIR.IRBuilder).
 
     If `f` is an externally-dispatched partition (e.g. a single cs_rank
@@ -242,7 +261,7 @@ def translate_function(f: Function, target: TargetSpec, ir,
         result_types=[ts_1] * len(outputs),
     )
 
-    val_map: Dict[OpBase, object] = {}
+    val_map: Dict[OpBase, KunMLIR.Value] = {}
     emitted = set()
     for inp, val in zip(inputs, func_args):
         val_map[inp] = val
@@ -270,7 +289,7 @@ def translate_function(f: Function, target: TargetSpec, ir,
             raise RuntimeError(
                 f"CodegenMLIR: reduction/body op visited before its "
                 f"enclosing loop ({op})")
-        val_map[op] = _emit_simple(op, ir, val_map)
+        val_map[op] = _emit_simple(op, ir, val_map, ts_1)
         emitted.add(op)
 
     # 5.  Close the function with Outputs in declared order.
@@ -279,9 +298,13 @@ def translate_function(f: Function, target: TargetSpec, ir,
     return None
 
 
-def _emit_loop(loop: ForeachBackWindow, ir, val_map, ts_1,
-                body_ops: List[OpBase], reductions: List[ReductionOp],
-                emitted: set):
+def _emit_loop(loop: ForeachBackWindow,
+                ir: KunMLIR.IRBuilder,
+                val_map: Dict[OpBase, KunMLIR.Value],
+                ts_1: KunMLIR.Type,
+                body_ops: List[OpBase],
+                reductions: List[ReductionOp],
+                emitted: set) -> None:
     loop_input_vals = [val_map[i] for i in loop.inputs]
     n_results = len(reductions)
     if n_results == 0:
@@ -304,7 +327,7 @@ def _emit_loop(loop: ForeachBackWindow, ir, val_map, ts_1,
         if isinstance(body_op, IterValue):
             val_map[body_op] = block_arg_by_src[body_op.inputs[1]]
         else:
-            val_map[body_op] = _emit_simple(body_op, ir, val_map)
+            val_map[body_op] = _emit_simple(body_op, ir, val_map, ts_1)
         emitted.add(body_op)
 
     # Reductions accumulate yield values, in topo order.

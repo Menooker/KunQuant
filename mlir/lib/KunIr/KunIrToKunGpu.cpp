@@ -146,6 +146,19 @@ struct LowerHelper {
         KUN_ASSIGN_OR_FAIL(Value scalar,
             getScalarUncached(br.getInput(), offset, b, ol));
         scalarMap[br.getResult()] = scalar;
+      } else if (auto co = dyn_cast<ConstantOp>(op)) {
+        auto resTs = llvm::cast<TsType>(co.getResult().getType());
+        Type elemTy = resTs.getElementType();
+        // The op carries an f64 attribute; convert to the element type
+        // (f32 / f64) so arith.constant gets a type-matching attribute.
+        llvm::APFloat apv(co.getValue());
+        if (auto ft = llvm::dyn_cast<FloatType>(elemTy)) {
+          bool losesInfo = false;
+          apv.convert(ft.getFloatSemantics(),
+                      llvm::APFloat::rmNearestTiesToEven, &losesInfo);
+        }
+        scalarMap[co.getResult()] = b.create<arith::ConstantOp>(
+            ol, elemTy, b.getFloatAttr(elemTy, apv));
       } else if (handleUnknown) {
         if (failed(handleUnknown(*op))) return failure();
       } else {

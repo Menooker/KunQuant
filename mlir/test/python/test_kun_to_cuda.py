@@ -27,7 +27,7 @@ import sys
 import numpy as np
 
 from KunQuant.Op import (
-    Builder, Input, Output,
+    Builder, Input, Output, ConstantOp,
     WindowedTempOutput, ForeachBackWindow, IterValue,
 )
 from KunQuant.ops import Add, Sub, Mul, Abs, Log, Sign, WindowedSum, ReduceMax
@@ -127,16 +127,12 @@ def build_func_cmp_logical() -> Function:
       and_out = (a > 0)  & (b > 0)  ? a : b # gt + and
       or_out  = (a > 0)  | (b > 0)  ? a : b # gt + or
       not_out = !(a > b) ? a : b            # = (a <= b) ? a : b
-
-    Constants 0 are produced via `Sub(a, a)`-style identities to stay
-    inside the ops supported by CodegenMLIR (no ConstantOp on the GPU
-    path yet — and we don't need one for this test).
     """
     builder = Builder()
     with builder:
         a = Input("a")
         bin_ = Input("b")
-        zero = Sub(a, a)  # = 0 elementwise (avoids ConstantOp dependency)
+        zero = ConstantOp(0)
         Output(Select(GreaterThan(a, bin_), a, bin_), "gt_out")
         Output(Select(LessThan(a, bin_),    a, bin_), "lt_out")
         Output(Select(GreaterEqual(a, bin_), a, bin_), "ge_out")

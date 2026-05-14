@@ -163,6 +163,23 @@ def KunIr_SelectOp : KunIr_Op<"select", [
 }
 
 //===----------------------------------------------------------------------===//
+// Constant op
+//
+// A scalar value lifted into a ts<T, 1> at every time step.  The value
+// attribute is f64; kunir-to-kungpu converts it to an arith.constant of
+// the result's element type (f32, f64, i1, ...).  Pass NaN by storing
+// `0x7FF8000000000000` (the quiet-NaN bit pattern) into the f64 attr.
+//===----------------------------------------------------------------------===//
+
+def KunIr_ConstantOp : KunIr_Op<"constant", [Pure]> {
+  let summary = "Scalar constant broadcast to every time step";
+  let arguments = (ins F64Attr:$value);
+  let results = (outs KunIr_AnyTs:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = "$value `:` type($result) attr-dict";
+}
+
+//===----------------------------------------------------------------------===//
 // Cross-sectional ops
 //
 // kunir has no first-class cross-sectional op.  Cross-sectional kernels

@@ -220,6 +220,19 @@ LogicalResult FastWindowedSumOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
+// ConstantOp — result must be ts<T, 1>.  The value attr is f64; we don't
+// pre-check finiteness so that quiet-NaN (0x7FF8...) can flow through.
+//===----------------------------------------------------------------------===//
+
+LogicalResult ConstantOp::verify() {
+  auto resultTy = llvm::cast<TsType>(getResult().getType());
+  if (resultTy.getMaxLookback() != 1)
+    return emitOpError("result maxLookback must be 1, got ")
+           << resultTy.getMaxLookback();
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // ForEachBackWindowOp — verifier + custom assembly format
 //
 // Format:
