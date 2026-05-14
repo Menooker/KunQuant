@@ -26,8 +26,11 @@ import sys
 
 import numpy as np
 
-from KunQuant.Op import Builder, Input, Output
-from KunQuant.ops import Add, Sub, Mul, Abs, Log, Sign, WindowedSum
+from KunQuant.Op import (
+    Builder, Input, Output,
+    WindowedTempOutput, ForeachBackWindow, IterValue,
+)
+from KunQuant.ops import Add, Sub, Mul, Abs, Log, Sign, WindowedSum, ReduceMax
 from KunQuant.ops.ElewiseOp import (
     GreaterThan, GreaterEqual, LessThan, LessEqual, Equals,
     And, Or, Not, Select,
@@ -35,7 +38,7 @@ from KunQuant.ops.ElewiseOp import (
 from KunQuant.ops.MiscOp import BackRef, FastWindowedSum
 from KunQuant.Stage import Function
 from KunQuant.jit import KunMLIR
-from KunQuant.jit.cuda import compileit, CudaCompilerConfig, to_mlir
+from KunQuant.jit.cuda import compileit, CudaCompilerConfig
 
 
 def build_func_elemwise() -> Function:
@@ -62,13 +65,31 @@ def build_func_libdevice() -> Function:
 
 
 def build_func_windowed(N: int) -> Function:
-    """ws = WindowedSum(a + b, N)"""
+    """Two outputs over c = a + b:
+       ws        = WindowedSum(c, N)
+       ws_maxabs = max_{k in [0..N-1]} |c[t-k] - c[t]|
+
+    `ws_maxabs` is a hand-built ForeachBackWindow whose body reads BOTH:
+      - the block-arg  (= c[t-k], the iter value)
+      - the outer ts c (= c[t], current time step)
+    and reduces |·| via ReduceMax.  This exercises the kunir-to-kungpu
+    inner-scope inheritance of the outer scalarMap/tsMap: `c` is computed
+    outside the loop but used inside.
+    """
     builder = Builder()
     with builder:
         a = Input("a")
         bin_ = Input("b")
-        s = WindowedSum(Add(a, bin_), N)
-        Output(s, "ws")
+        c = Add(a, bin_)
+        Output(WindowedSum(c, N), "ws")
+
+        wtemp = WindowedTempOutput(c, N)
+        loop  = ForeachBackWindow(wtemp, N)
+        builder.set_loop(loop)
+        diff = Sub(IterValue(loop, wtemp), c)
+        a_diff = Abs(diff)
+        builder.set_loop(None)
+        Output(ReduceMax(a_diff), "ws_maxabs")
     return Function(builder.ops, name="windowed_kernel")
 
 
@@ -176,10 +197,6 @@ def _run_one(label: str, build_fn, expected_fn, target: str, T: int, S: int,
     f = build_fn()
     cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
 
-    mod = to_mlir(build_fn(), cfg)
-    print("--- mlir ---")
-    print(mod.to_string())
-
     exe = compileit(f, cfg)
     print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
            f"peak_intermediate_slots={exe.peak_intermediate_slots}")
@@ -226,10 +243,6 @@ def run_backref(target: str, T: int, S: int, N: int) -> int:
     f = build_func_backref(N)
     cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
 
-    mod = to_mlir(build_func_backref(N), cfg)
-    print("--- mlir ---")
-    print(mod.to_string())
-
     exe = compileit(f, cfg)
     print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
            f"peak_intermediate_slots={exe.peak_intermediate_slots}")
@@ -261,10 +274,6 @@ def run_fastwindowedsum(target: str, T: int, S: int, N: int) -> int:
     print(f"=== fast_windowed_sum: ws = FastWindowedSum(a + b, N={N}) ===")
     f = build_func_fastwindowedsum(N)
     cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
-
-    mod = to_mlir(build_func_fastwindowedsum(N), cfg)
-    print("--- mlir ---")
-    print(mod.to_string())
 
     exe = compileit(f, cfg)
     print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
@@ -304,10 +313,6 @@ def run_multipartition(target: str, T: int, S: int) -> int:
     f = build_func_multipartition()
     cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4,
                               partition_factor=1)
-
-    mod = to_mlir(build_func_multipartition(), cfg)
-    print("--- mlir ---")
-    print(mod.to_string())
 
     exe = compileit(f, cfg)
     print(f"  kernel_names           = {exe.kernel_names}")
@@ -410,40 +415,86 @@ def run_cmp_logical(target: str, T: int, S: int) -> int:
     return rc
 
 
-def run_windowed(target: str, T: int, S: int, N: int) -> int:
-    print(f"=== windowed: ws = WindowedSum(a + b, N={N}) ===")
+def build_windowed(target: str, N: int):
+    """Compile `build_func_windowed(N)` once.  The returned executable
+    can be reused across multiple `test_windowed` invocations with
+    different T / S / mask (anything that doesn't change the graph
+    topology or window size N)."""
     f = build_func_windowed(N)
     cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
-
-    mod = to_mlir(build_func_windowed(N), cfg)
-    print("--- mlir ---")
-    print(mod.to_string())
-
     exe = compileit(f, cfg)
-    print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
+    print(f"  [build windowed N={N}] kernels={exe.kernel_names}  "
+           f"num_buffers={exe.num_buffers}  "
            f"peak_intermediate_slots={exe.peak_intermediate_slots}")
+    return exe
+
+
+def test_windowed(exe, T: int, S: int, N: int, mask: int = 0) -> int:
+    """Correctness check against numpy for the two outputs of
+    `build_func_windowed`:
+       ws        = WindowedSum(c, N)             — stateful fast_windowed_sum
+       ws_maxabs = max_k |c[t-k] - c[t]|         — hand-built ForeachBackWindow
+                                                    body that reads BOTH the
+                                                    block-arg (c[t-k]) AND the
+                                                    outer ts c (c[t]).
+       (c = a + b, k in [0..N-1])
+
+    With `mask > 0` the output time dim shrinks by `mask` and the kernel
+    runs with that mask — exercises the multi-chunk + mask path
+    (chunk-local `t - loop_lb >= window` guard) for both outputs.
+
+    `exe` must have been compiled with the matching `N`.
+    """
+    assert 0 <= mask < T
+    mask_tag = f", mask={mask}" if mask else ""
+    print(f"=== windowed: ws = WindowedSum(a + b, N={N}){mask_tag}; "
+           f"ws_maxabs = max_k |c[t-k] - c[t]|  (c = a+b) ===")
 
     import cupy as cp
     rng = np.random.default_rng(1)
     a_h = rng.standard_normal((T, S), dtype=np.float32)
     b_h = rng.standard_normal((T, S), dtype=np.float32)
-    out = cp.zeros((T, S), dtype=cp.float32)
+    out_T      = T - mask
+    ws_out     = cp.zeros((out_T, S), dtype=cp.float32)
+    maxabs_out = cp.zeros((out_T, S), dtype=cp.float32)
 
     executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": cp.asarray(a_h),
-                              "b": cp.asarray(b_h), "ws": out})
-    out_h = cp.asnumpy(out)
+    inputs = {"a": cp.asarray(a_h), "b": cp.asarray(b_h),
+              "ws": ws_out, "ws_maxabs": maxabs_out}
+    if mask:
+        executor.runGraph(exe, inputs, mask=mask)
+    else:
+        executor.runGraph(exe, inputs)
+    ws_h     = cp.asnumpy(ws_out)
+    maxabs_h = cp.asnumpy(maxabs_out)
 
+    # Build full-T references, then slice from `mask` onward (no-op when
+    # mask == 0).  Output row i ↔ input time i+mask; reliable when
+    # i + mask >= N - 1.
     c = a_h + b_h
     cumsum = np.cumsum(c, axis=0, dtype=np.float64)
-    expected = np.empty((T, S), dtype=np.float32)
-    expected[:N - 1] = np.nan
-    expected[N - 1] = cumsum[N - 1]
+    ws_full = np.empty((T, S), dtype=np.float32)
+    ws_full[:N - 1] = np.nan
+    ws_full[N - 1] = cumsum[N - 1]
     if T > N:
-        expected[N:] = (cumsum[N:] - cumsum[:-N]).astype(np.float32)
+        ws_full[N:] = (cumsum[N:] - cumsum[:-N]).astype(np.float32)
+    ws_expected = ws_full[mask:]
 
-    return _compare_post_warmup(out_h, expected, valid_start=N - 1,
+    maxabs_full = np.empty((T, S), dtype=np.float32)
+    maxabs_full[:N - 1] = np.nan
+    for t in range(N - 1, T):
+        window = c[t - N + 1 : t + 1]                     # (N, S)
+        maxabs_full[t] = np.max(np.abs(window - c[t]), axis=0)
+    maxabs_expected = maxabs_full[mask:]
+
+    valid_start = max(0, N - 1 - mask)
+    rc = 0
+    rc |= _compare_post_warmup(ws_h, ws_expected,
+                                  valid_start=valid_start,
                                   atol=max(1e-3, 5e-7 * N))
+    rc |= _compare_post_warmup(maxabs_h, maxabs_expected,
+                                  valid_start=valid_start, atol=1e-5)
+    return rc
 
 
 def run_backref_with_mask(target: str, T: int, S: int, N: int,
@@ -493,54 +544,6 @@ def run_backref_with_mask(target: str, T: int, S: int, N: int,
                                   valid_start=valid_start, atol=1e-5)
 
 
-def run_windowed_with_mask(target: str, T: int, S: int, N: int,
-                              mask: int) -> int:
-    """`WindowedSum(a + b, N)` driven with mask — same graph as
-    `run_windowed`, but exercises the stateful `fast_windowed_sum`
-    lowering across multi-chunk + mask.  After the chunk-local guard
-    fix (`t - loop_lb ≥ window`), each chunk's per-CTA state primes
-    correctly through its warmup overlap and the post-warmup tail
-    matches the CPU reference at float-precision noise.
-    """
-    print(f"=== windowed + mask: ws = WindowedSum(a + b, N={N}), "
-           f"mask={mask} ===")
-    assert 0 < mask < T, "test requires 0 < mask < T"
-    f = build_func_windowed(N)
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
-
-    exe = compileit(f, cfg)
-    print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
-           f"peak_intermediate_slots={exe.peak_intermediate_slots}")
-
-    import cupy as cp
-    rng = np.random.default_rng(5)
-    a_h = rng.standard_normal((T, S), dtype=np.float32)
-    b_h = rng.standard_normal((T, S), dtype=np.float32)
-    out = cp.zeros((T - mask, S), dtype=cp.float32)
-
-    executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": cp.asarray(a_h),
-                              "b": cp.asarray(b_h), "ws": out},
-                       mask=mask)
-    out_h = cp.asnumpy(out)
-
-    # Full-T reference, then slice from `mask` onward to align with
-    # the output's input-time origin.  Output row i = input time i+mask;
-    # reliable when i + mask ≥ N - 1.
-    c = a_h + b_h
-    cumsum = np.cumsum(c, axis=0, dtype=np.float64)
-    expected_full = np.empty((T, S), dtype=np.float32)
-    expected_full[:N - 1] = np.nan
-    expected_full[N - 1] = cumsum[N - 1]
-    if T > N:
-        expected_full[N:] = (cumsum[N:] - cumsum[:-N]).astype(np.float32)
-    expected = expected_full[mask:]
-    valid_start = max(0, N - 1 - mask)
-    return _compare_post_warmup(out_h, expected,
-                                  valid_start=valid_start,
-                                  atol=max(1e-3, 5e-7 * N))
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--target", default="sm_120")
@@ -562,7 +565,12 @@ def main() -> int:
     print()
     rc |= run_libdevice(args.target, args.time_length, args.num_stocks)
     print()
-    rc |= run_windowed(args.target, args.time_length, args.num_stocks, args.window)
+    # Build once for N=args.window, reuse across the mask=0 and mask=3
+    # validations (graph topology + window size are the same; only T/S/mask
+    # differ at run time).
+    windowed_exe = build_windowed(args.target, args.window)
+    rc |= test_windowed(windowed_exe, args.time_length, args.num_stocks,
+                          args.window)
     print()
     rc |= run_backref(args.target, args.time_length, args.num_stocks, args.window)
     print()
@@ -574,8 +582,8 @@ def main() -> int:
     rc |= run_backref_with_mask(args.target, args.time_length, args.num_stocks,
                                   args.window, mask=3)
     print()
-    rc |= run_windowed_with_mask(args.target, args.time_length, args.num_stocks,
-                                    args.window, mask=3)
+    rc |= test_windowed(windowed_exe, args.time_length, args.num_stocks,
+                          args.window, mask=3)
     print()
     rc |= run_fastwindowedsum(args.target, args.time_length, args.num_stocks,
                                 args.window)
@@ -584,9 +592,11 @@ def main() -> int:
     # that `cap_warmup = T/(K*N) = 64/(4*20) = 0` clamps num_chunks to 1.
     # Exercises the multi-chunk kernel binary in its degenerate
     # grid_y=1 launch configuration — guards against regressions in
-    # time_lb / time_ub / write-gating when `chunk_size = T`.
-    rc |= run_windowed_with_mask(args.target, T=64, S=args.num_stocks,
-                                    N=20, mask=1)
+    # time_lb / time_ub / write-gating when `chunk_size = T`.  Different
+    # N → fresh build.
+    windowed_exe_n20 = build_windowed(args.target, N=20)
+    rc |= test_windowed(windowed_exe_n20, T=64, S=args.num_stocks,
+                          N=20, mask=1)
     print()
     rc |= run_multipartition(args.target, args.time_length, args.num_stocks)
     print()
