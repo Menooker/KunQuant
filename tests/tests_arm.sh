@@ -28,9 +28,9 @@ python ./tests/gen_alpha101_stream.py /tmp/
 
 
 if [ "$OS" = "Linux" ]; then
-    export LD_LIBRARY_PATH=./build/lib.${SYSTEM_TRIPPLE}-cpython-39/KunQuant/runner/:${LD_LIBRARY_PATH}
+    export LD_LIBRARY_PATH=./build/lib.${SYSTEM_TRIPPLE}-cpython-312/KunQuant/runner/:${LD_LIBRARY_PATH}
 elif [ "$OS" = "Darwin" ]; then
-    export DYLD_LIBRARY_PATH=./build/lib.${SYSTEM_TRIPPLE}-cpython-39/KunQuant/runner/:${DYLD_LIBRARY_PATH}
+    export DYLD_LIBRARY_PATH=./build/lib.${SYSTEM_TRIPPLE}-cpython-312/KunQuant/runner/:${DYLD_LIBRARY_PATH}
 fi
-./build/temp.${SYSTEM_TRIPPLE}-cpython-39/KunCApiTest ./build/lib.${SYSTEM_TRIPPLE}-cpython-39/KunQuant/runner/libKunTest.${DYN_LIB_EXT} /tmp/alpha101_stream/alpha101_stream.${DYN_LIB_EXT}
+./build/temp.${SYSTEM_TRIPPLE}-cpython-312/KunCApiTest ./build/lib.${SYSTEM_TRIPPLE}-cpython-312/KunQuant/runner/libKunTest.${DYN_LIB_EXT} /tmp/alpha101_stream/alpha101_stream.${DYN_LIB_EXT}
 echo "All test done"
