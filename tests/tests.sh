@@ -4,6 +4,8 @@ python tests/test.py
 python tests/test2.py
 echo "KunQuant runtime tests"
 python tests/test_runtime.py
+echo "KunQuant ta-lib indicator tests"
+python tests/test_talib.py
 echo "KunQuant stream tests"
 python tests/test_stream.py
 echo "KunQuant runtime tests (AVX)"

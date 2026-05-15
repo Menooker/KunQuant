@@ -663,3 +663,52 @@ class WindowedLinearRegressionResiImpl(OpBase):
     '''
     pass
 ```
+
+## TA-Lib compatible ops
+
+A small set of TA-Lib indicators are implemented as composite ops in
+`KunQuant.predefined.talib`. Their outputs match the corresponding
+`talib.*` functions; they can be used like any other KunQuant op when
+building a Function. See `tests/test_talib.py` for usage and a
+correctness check against the `ta-lib` Python package.
+
+#### TRANGE
+
+```python
+class TRANGE(CompositiveOp):
+    '''
+    True Range. TA-Lib compatible: returns NaN on the first bar (no
+    preceding close). TR_t = max(high_t - low_t, |high_t - close_{t-1}|,
+    |low_t - close_{t-1}|).
+    '''
+    def __init__(self, high: OpBase, low: OpBase, close: OpBase) -> None: ...
+```
+
+#### ATR
+
+```python
+class ATR(CompositiveOp):
+    '''
+    Average True Range with Wilder smoothing, TA-Lib compatible.
+    Implemented as an EMA of TRANGE with alpha = 1/window (i.e.
+    span = 2*window - 1). The EMA is seeded at bar `window` with the
+    SMA of TRANGE[1..window]; bars before that emit NaN. Output matches
+    talib.ATR(high, low, close, timeperiod=window).
+    '''
+    def __init__(self, high: OpBase, low: OpBase, close: OpBase, window: int) -> None: ...
+```
+
+#### SAR
+
+```python
+class SAR(CompositiveOp):
+    '''
+    Parabolic SAR (Stop And Reverse), TA-Lib compatible. Output for bar 0
+    is NaN. From bar 1 onward the algorithm matches ta_func/ta_SAR.c
+    (Wilder MINUS_DM trend seeding, the bar-1 "cheat" iteration, and the
+    last-two-bar cap on both reversal and continuation). Output matches
+    talib.SAR(high, low, acceleration=af_init, maximum=af_max).
+    '''
+    def __init__(self, high: OpBase, low: OpBase,
+                 af_init: float = 0.02, af_step: float = 0.02, af_max: float = 0.2) -> None: ...
+```

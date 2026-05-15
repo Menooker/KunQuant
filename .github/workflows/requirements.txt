@@ -1,2 +1,3 @@
 pandas==2.2.2
 numpy==1.26.4
+ta-lib==0.6.4 ; sys_platform == 'linux' and platform_machine == 'x86_64'

@@ -305,6 +305,8 @@ KunQuant provides C-style APIs to call the generated factor code in shared libra
 
 See [Operators.md](./doc/Operators.md)
 
+A few TA-Lib indicators (TRANGE, ATR, SAR) are also implemented as composite ops; see [TA-Lib compatible ops](./doc/Operators.md#ta-lib-compatible-ops).
+
 To add new operators, see [NewOperators.md](./doc/NewOperators.md)
 
 ## Testing and validation
