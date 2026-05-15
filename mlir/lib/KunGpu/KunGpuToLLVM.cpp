@@ -87,28 +87,23 @@ struct WTDesc {
 };
 using WTDescMap = llvm::DenseMap<Value, WTDesc>;
 
-// Per-function cache for chunk-related values shared across multiple
-// output-store rewrites.  Each gpu.func builds (at most) one mask
-// index_cast and one write_start SSA value; subsequent ts.put rewrites
-// against an output arg reuse them, so we don't lean on a downstream
-// CSE pass.
+// Per-function cache for the write-start SSA value shared across
+// multiple output-store rewrites.  Each gpu.func builds (at most) one
+// write_start; subsequent ts.put rewrites against an output arg reuse
+// it, so we don't lean on a downstream CSE pass.
 //
-// Both cached values are index-typed (not i32) because they're used as
-// scf.for / arith.cmpi operands against the loop induction variable
-// which is index-typed.  The runtime scalar args (mask, chunk_size,
-// warmup) are i32; the helpers below insert the i32 → index cast once
-// at function entry.
+// `writeStart` is index-typed (not i32) because it's compared against
+// the scf.for IV which is index-typed.  The runtime scalar args (mask,
+// chunk_size, warmup) come in as i32; the helper below inserts the
+// i32 → index cast once at function entry.
 //
-//   mask         : index, cast once from arg[2] (i32).  Used to shift
-//                  output indices: out[t - mask, sid].
 //   writeStart   : (block_id y == 0) ? mask : block_id y * chunk_size.
 //                  Output stores below this time-index are suppressed —
 //                  they fall in the warmup-overlap region.
 //
-// Both are emitted at the very top of the function entry block so they
-// dominate every store site, regardless of how deeply nested.
+// Emitted at the very top of the function entry block so it dominates
+// every store site, regardless of how deeply nested.
 struct ChunkContext {
-  Value mask;
   Value writeStart;
 };
 using ChunkCtxMap = llvm::DenseMap<Operation *, ChunkContext>;
@@ -348,31 +343,14 @@ struct TimeUbPattern : OpConversionPattern<TimeUbOp> {
 };
 
 //===----------------------------------------------------------------------===//
-// Chunk-context lazy helpers.  See ChunkContext above.
+// Chunk-context lazy helper.  See ChunkContext above.
 //
 // mask / chunk_size / warmup come in as i32 func args (positions 2 / 3 /
-// 4 after time_length / num_stocks).  We cast mask to index once per
-// function and cache the result, then build writeStart from it.  Both
-// emissions land at the very top of the function entry block so the
-// resulting SSA values dominate every store-site inside the kernel.
+// 4 after time_length / num_stocks).  We build writeStart from the i32
+// mask + chunk_size args, then cast to index once and cache.  Emitted
+// at the very top of the function entry block so the resulting SSA
+// value dominates every store-site inside the kernel.
 //===----------------------------------------------------------------------===//
-
-static Value getOrCreateMask(Operation *op, ChunkCtxMap &map,
-                              ConversionPatternRewriter &rewriter) {
-  auto fn = op->getParentOfType<gpu::GPUFuncOp>();
-  ChunkContext &ctx = map[fn.getOperation()];
-  if (ctx.mask) return ctx.mask;
-  // arg layout: (i32 time_length, i32 num_stocks, i32 mask, i32 chunk_size,
-  //              i32 warmup, ts...)
-  Value maskI32 = fn.getBody().front().getArgument(2);
-  Location loc = fn.getLoc();
-
-  OpBuilder::InsertionGuard g(rewriter);
-  rewriter.setInsertionPointToStart(&fn.getBody().front());
-  ctx.mask = arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(),
-                                                    maskI32);
-  return ctx.mask;
-}
 
 static Value getOrCreateWriteStart(Operation *op, ChunkCtxMap &map,
                                      ConversionPatternRewriter &rewriter) {
@@ -381,10 +359,7 @@ static Value getOrCreateWriteStart(Operation *op, ChunkCtxMap &map,
   if (ctx.writeStart) return ctx.writeStart;
 
   // Compute in i32 (cheap on GPU) then cast once to index, since the
-  // result is compared against the scf.for IV (index-typed).  We read
-  // the i32 mask and chunk_size args directly — not the cached index
-  // mask — so the mask helper and this helper don't depend on each
-  // other and either order is fine.
+  // result is compared against the scf.for IV (index-typed).
   Block &entry = fn.getBody().front();
   Value maskI32      = entry.getArgument(2);
   Value chunkSizeI32 = entry.getArgument(3);
@@ -708,19 +683,18 @@ struct TsPutPattern : OpConversionPattern<TsPutOp> {
       LLVM::StoreOp::create(rewriter, loc, newPos, desc.posPtr);
       rewriter.eraseOp(op);
     } else {
-      // ── global ts: write at current time, gated by per-chunk write_start,
-      //    output index shifted by `mask` so the output array's time dim is
-      //    `time_length - mask`.
+      // ── global ts: write at current time, gated by per-chunk write_start.
+      //    Output time dim == time_length (== input time dim); the warmup
+      //    region [0, mask) is just left unwritten by the kernel.
       //
       //   if (t >= write_start)
-      //     out[t - mask, sid] = v
+      //     out[t, sid] = v
       //
       // The `t >= write_start` comparison is uniform across the CTA (all
       // threads share the same scf.for IV), so the lowered branch is a
       // single uniform predicate — no warp divergence at chunk boundaries.
       Value timeIdx    = getCurrentTimeIdx(op);
       Value writeStart = getOrCreateWriteStart(op, chunkCtx, rewriter);
-      Value mask       = getOrCreateMask(op, chunkCtx, rewriter);
 
       Value doWrite = arith::CmpIOp::create(
           rewriter, loc, arith::CmpIPredicate::sge, timeIdx, writeStart);
@@ -729,9 +703,8 @@ struct TsPutPattern : OpConversionPattern<TsPutOp> {
           /*withElseRegion=*/false);
 
       OpBuilder ib = OpBuilder::atBlockBegin(&ifOp.getThenRegion().front());
-      Value tOut = arith::SubIOp::create(ib, loc, timeIdx, mask);
       Value gep = gmemGEPWithOffset(ib, loc, elemTy, ptrTy, tsPtr,
-                                     tOut, /*offsetIdx=*/Value(),
+                                     timeIdx, /*offsetIdx=*/Value(),
                                      getNumStocksI64(ib, op, loc),
                                      idxTy, i64Ty);
       LLVM::StoreOp::create(ib, loc, v, gep);

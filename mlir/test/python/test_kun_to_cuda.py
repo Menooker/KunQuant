@@ -40,8 +40,14 @@ from KunQuant.ops.MiscOp import (
     Accumulator, SetAccumulator, ReturnFirstValue,
 )
 from KunQuant.Stage import Function
+from KunQuant.Driver import KunCompilerConfig
 from KunQuant.jit import KunMLIR
-from KunQuant.jit.cuda import compileit, CudaCompilerConfig
+from KunQuant.jit.cuda import compile_func, compileit, CudaCompilerConfig
+
+
+# GPU backend only supports TS layout; share one KunCompilerConfig across
+# every test that doesn't need to customise other graph-rewrite knobs.
+_KCFG_TS = KunCompilerConfig(input_layout="TS", output_layout="TS")
 
 
 def build_func_elemwise() -> Function:
@@ -214,9 +220,9 @@ def _run_one(label: str, build_fn, expected_fn, target: str, T: int, S: int,
     """Compile a Function, launch it, validate against numpy."""
     print(f"=== {label} ===")
     f = build_fn()
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
 
-    exe = compileit(f, cfg)
+    exe = compile_func(f, _KCFG_TS, ccfg)
     print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
            f"peak_intermediate_slots={exe.peak_intermediate_slots}")
 
@@ -227,8 +233,9 @@ def _run_one(label: str, build_fn, expected_fn, target: str, T: int, S: int,
     out = cp.zeros((T, S), dtype=cp.float32)
 
     executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": cp.asarray(a_h),
-                              "b": cp.asarray(b_h), "out": out})
+    executor.runGraph(exe,
+                       inputs={"a": cp.asarray(a_h), "b": cp.asarray(b_h)},
+                       outputs={"out": out})
     out_h = cp.asnumpy(out)
 
     expected = expected_fn(a_h, b_h)
@@ -260,9 +267,9 @@ def run_libdevice(target: str, T: int, S: int) -> int:
 def run_backref(target: str, T: int, S: int, N: int) -> int:
     print(f"=== backref: out = (a+b)[t - {N}] ===")
     f = build_func_backref(N)
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
 
-    exe = compileit(f, cfg)
+    exe = compile_func(f, _KCFG_TS, ccfg)
     print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
            f"peak_intermediate_slots={exe.peak_intermediate_slots}")
 
@@ -273,8 +280,9 @@ def run_backref(target: str, T: int, S: int, N: int) -> int:
     out = cp.zeros((T, S), dtype=cp.float32)
 
     executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": cp.asarray(a_h),
-                              "b": cp.asarray(b_h), "out": out})
+    executor.runGraph(exe,
+                       inputs={"a": cp.asarray(a_h), "b": cp.asarray(b_h)},
+                       outputs={"out": out})
     out_h = cp.asnumpy(out)
 
     # Reference: out[t] = (a+b)[t-N] for t >= N; undefined for t < N.
@@ -292,9 +300,9 @@ def run_backref(target: str, T: int, S: int, N: int) -> int:
 def run_fastwindowedsum(target: str, T: int, S: int, N: int) -> int:
     print(f"=== fast_windowed_sum: ws = FastWindowedSum(a + b, N={N}) ===")
     f = build_func_fastwindowedsum(N)
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
 
-    exe = compileit(f, cfg)
+    exe = compile_func(f, _KCFG_TS, ccfg)
     print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
            f"peak_intermediate_slots={exe.peak_intermediate_slots}")
 
@@ -305,8 +313,9 @@ def run_fastwindowedsum(target: str, T: int, S: int, N: int) -> int:
     out = cp.zeros((T, S), dtype=cp.float32)
 
     executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": cp.asarray(a_h),
-                              "b": cp.asarray(b_h), "ws": out})
+    executor.runGraph(exe,
+                       inputs={"a": cp.asarray(a_h), "b": cp.asarray(b_h)},
+                       outputs={"ws": out})
     out_h = cp.asnumpy(out)
 
     # Reference matches WindowedSum (same window, no NaN inputs).
@@ -330,10 +339,11 @@ def run_multipartition(target: str, T: int, S: int) -> int:
     print("=== multipartition: 3 outputs (add/mul/sub) split via "
            "partition_factor=1 ===")
     f = build_func_multipartition()
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4,
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    kcfg = KunCompilerConfig(input_layout="TS", output_layout="TS",
                               partition_factor=1)
 
-    exe = compileit(f, cfg)
+    exe = compile_func(f, kcfg, ccfg)
     print(f"  kernel_names           = {exe.kernel_names}")
     print(f"  num_kernels            = {exe.num_kernels}")
     print(f"  launch_order           = {exe.launch_order}")
@@ -357,10 +367,11 @@ def run_multipartition(target: str, T: int, S: int) -> int:
     sub_out = cp.zeros((T, S), dtype=cp.float32)
 
     executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": cp.asarray(a_h), "b": cp.asarray(b_h),
-                              "add_out": add_out,
-                              "mul_out": mul_out,
-                              "sub_out": sub_out})
+    executor.runGraph(exe,
+                       inputs={"a": cp.asarray(a_h), "b": cp.asarray(b_h)},
+                       outputs={"add_out": add_out,
+                                 "mul_out": mul_out,
+                                 "sub_out": sub_out})
 
     add_h = cp.asnumpy(add_out)
     mul_h = cp.asnumpy(mul_out)
@@ -388,8 +399,8 @@ def run_accumulator(target: str, T: int, S: int) -> int:
     print(f"=== accumulator: cnt[t] = cnt[t-1] + (a[t] > 0)  "
            f"(whole-time sentinel) ===")
     f = build_func_accumulator()
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
-    exe = compileit(f, cfg)
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    exe = compile_func(f, _KCFG_TS, ccfg)
     print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
            f"peak_intermediate_slots={exe.peak_intermediate_slots}")
 
@@ -399,7 +410,9 @@ def run_accumulator(target: str, T: int, S: int) -> int:
     out = cp.zeros((T, S), dtype=cp.float32)
 
     executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": cp.asarray(a_h), "cnt_out": out})
+    executor.runGraph(exe,
+                       inputs={"a": cp.asarray(a_h)},
+                       outputs={"cnt_out": out})
     out_h = cp.asnumpy(out)
 
     expected = np.cumsum((a_h > 0).astype(np.float32), axis=0)
@@ -416,9 +429,9 @@ def run_cmp_logical(target: str, T: int, S: int) -> int:
     """
     print("=== cmp/logical/select: 8 outputs exercising kunir bool ops ===")
     f = build_func_cmp_logical()
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
 
-    exe = compileit(f, cfg)
+    exe = compile_func(f, _KCFG_TS, ccfg)
     print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
            f"peak_intermediate_slots={exe.peak_intermediate_slots}")
 
@@ -432,7 +445,9 @@ def run_cmp_logical(target: str, T: int, S: int) -> int:
     outs = {n: cp.zeros((T, S), dtype=cp.float32) for n in out_names}
 
     executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": cp.asarray(a_h), "b": cp.asarray(b_h), **outs})
+    executor.runGraph(exe,
+                       inputs={"a": cp.asarray(a_h), "b": cp.asarray(b_h)},
+                       outputs=outs)
 
     def ref(cond: np.ndarray) -> np.ndarray:
         return np.where(cond, a_h, b_h)
@@ -471,8 +486,8 @@ def build_windowed(target: str, N: int):
     different T / S / mask (anything that doesn't change the graph
     topology or window size N)."""
     f = build_func_windowed(N)
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
-    exe = compileit(f, cfg)
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    exe = compile_func(f, _KCFG_TS, ccfg)
     print(f"  [build windowed N={N}] kernels={exe.kernel_names}  "
            f"num_buffers={exe.num_buffers}  "
            f"peak_intermediate_slots={exe.peak_intermediate_slots}")
@@ -489,9 +504,10 @@ def test_windowed(exe, T: int, S: int, N: int, mask: int = 0) -> int:
                                                     outer ts c (c[t]).
        (c = a + b, k in [0..N-1])
 
-    With `mask > 0` the output time dim shrinks by `mask` and the kernel
-    runs with that mask — exercises the multi-chunk + mask path
-    (chunk-local `t - loop_lb >= window` guard) for both outputs.
+    With `mask > 0` the kernel only writes rows `[mask, T)` of every
+    output (rows `[0, mask)` are warmup and stay at the allocator's
+    initial value).  Exercises the multi-chunk + mask path (chunk-local
+    `t - loop_lb >= window` guard) for both outputs.
 
     `exe` must have been compiled with the matching `N`.
     """
@@ -504,40 +520,37 @@ def test_windowed(exe, T: int, S: int, N: int, mask: int = 0) -> int:
     rng = np.random.default_rng(1)
     a_h = rng.standard_normal((T, S), dtype=np.float32)
     b_h = rng.standard_normal((T, S), dtype=np.float32)
-    out_T      = T - mask
-    ws_out     = cp.zeros((out_T, S), dtype=cp.float32)
-    maxabs_out = cp.zeros((out_T, S), dtype=cp.float32)
+    # Output is the same shape as input; the binding leaves rows
+    # `[0, mask)` untouched.
+    ws_out     = cp.zeros((T, S), dtype=cp.float32)
+    maxabs_out = cp.zeros((T, S), dtype=cp.float32)
 
     executor = KunMLIR.Executor()
-    inputs = {"a": cp.asarray(a_h), "b": cp.asarray(b_h),
-              "ws": ws_out, "ws_maxabs": maxabs_out}
-    if mask:
-        executor.runGraph(exe, inputs, mask=mask)
-    else:
-        executor.runGraph(exe, inputs)
+    executor.runGraph(exe,
+                       inputs={"a": cp.asarray(a_h), "b": cp.asarray(b_h)},
+                       mask=mask,
+                       outputs={"ws": ws_out, "ws_maxabs": maxabs_out})
     ws_h     = cp.asnumpy(ws_out)
     maxabs_h = cp.asnumpy(maxabs_out)
 
-    # Build full-T references, then slice from `mask` onward (no-op when
-    # mask == 0).  Output row i ↔ input time i+mask; reliable when
-    # i + mask >= N - 1.
+    # Reference is the full-T factor: output[t] = factor at time t.
     c = a_h + b_h
     cumsum = np.cumsum(c, axis=0, dtype=np.float64)
-    ws_full = np.empty((T, S), dtype=np.float32)
-    ws_full[:N - 1] = np.nan
-    ws_full[N - 1] = cumsum[N - 1]
+    ws_expected = np.empty((T, S), dtype=np.float32)
+    ws_expected[:N - 1] = np.nan
+    ws_expected[N - 1] = cumsum[N - 1]
     if T > N:
-        ws_full[N:] = (cumsum[N:] - cumsum[:-N]).astype(np.float32)
-    ws_expected = ws_full[mask:]
+        ws_expected[N:] = (cumsum[N:] - cumsum[:-N]).astype(np.float32)
 
-    maxabs_full = np.empty((T, S), dtype=np.float32)
-    maxabs_full[:N - 1] = np.nan
+    maxabs_expected = np.empty((T, S), dtype=np.float32)
+    maxabs_expected[:N - 1] = np.nan
     for t in range(N - 1, T):
         window = c[t - N + 1 : t + 1]                     # (N, S)
-        maxabs_full[t] = np.max(np.abs(window - c[t]), axis=0)
-    maxabs_expected = maxabs_full[mask:]
+        maxabs_expected[t] = np.max(np.abs(window - c[t]), axis=0)
 
-    valid_start = max(0, N - 1 - mask)
+    # Valid-from-row: the later of the kernel-written region (mask) and
+    # the windowed-op warmup (N - 1).
+    valid_start = max(mask, N - 1)
     rc = 0
     rc |= _compare_post_warmup(ws_h, ws_expected,
                                   valid_start=valid_start,
@@ -559,9 +572,9 @@ def run_backref_with_mask(target: str, T: int, S: int, N: int,
     print(f"=== backref + mask: out = (a+b)[t - {N}], mask={mask} ===")
     assert 0 < mask < T, "test requires 0 < mask < T"
     f = build_func_backref(N)
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
 
-    exe = compileit(f, cfg)
+    exe = compile_func(f, _KCFG_TS, ccfg)
     print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
            f"peak_intermediate_slots={exe.peak_intermediate_slots}")
 
@@ -569,29 +582,89 @@ def run_backref_with_mask(target: str, T: int, S: int, N: int,
     rng = np.random.default_rng(4)
     a_h = rng.standard_normal((T, S), dtype=np.float32)
     b_h = rng.standard_normal((T, S), dtype=np.float32)
-    # Output time dim shrinks by mask.
-    out = cp.zeros((T - mask, S), dtype=cp.float32)
+    # Output same shape as input; the binding leaves rows `[0, mask)`
+    # untouched.
+    out = cp.zeros((T, S), dtype=cp.float32)
 
     executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": cp.asarray(a_h),
-                              "b": cp.asarray(b_h), "out": out},
-                       mask=mask)
+    executor.runGraph(exe,
+                       inputs={"a": cp.asarray(a_h), "b": cp.asarray(b_h)},
+                       mask=mask,
+                       outputs={"out": out})
     out_h = cp.asnumpy(out)
 
-    # Reference: out_full[t] = (a+b)[t-N] for t ≥ N; undefined for t < N.
-    # With mask, out_full[mask + i] lands at out_h[i].  Reliable when
-    # mask + i ≥ N, i.e., i ≥ max(0, N - mask).
+    # Reference: expected[t] = (a+b)[t-N] for t ≥ N; NaN for t < N.
     c = a_h + b_h
-    valid_start = max(0, N - mask)
-    # Build a full-(T-mask) expected so _compare_post_warmup can validate
-    # the post-warmup tail uniformly (matches the windowed test below).
-    expected = np.empty((T - mask, S), dtype=np.float32)
-    expected[:valid_start] = np.nan
-    if valid_start < T - mask:
-        in_time = np.arange(mask + valid_start, T)
-        expected[valid_start:] = c[in_time - N]
+    expected = np.empty((T, S), dtype=np.float32)
+    expected[:N] = np.nan
+    expected[N:] = c[:T - N]
+    # Valid-from-row: later of the kernel-written region (mask) and the
+    # BackRef warmup (N).
+    valid_start = max(mask, N)
     return _compare_post_warmup(out_h, expected,
                                   valid_start=valid_start, atol=1e-5)
+
+
+def run_library(target: str, T: int, S: int) -> int:
+    """Exercise the multi-Function `compileit` shape and `Library.getModule`,
+    plus the auto-allocated-output path on `Executor.runGraph` (omitting
+    `outputs=` so the binding allocates fresh nb::ndarrays for every
+    graph output).
+
+    Two independent functions are compiled into one `Library`:
+      * elemwise_kernel : out = (a+b)*a - b*b
+      * libdevice_kernel: out = log(abs(a)) * sign(b - a)
+    """
+    print("=== library: multi-Function compileit + Library.getModule + "
+           "auto-allocated outputs ===")
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    funclist = [
+        ("elemwise_kernel",  build_func_elemwise(),  _KCFG_TS),
+        ("libdevice_kernel", build_func_libdevice(), _KCFG_TS),
+    ]
+    lib = compileit(funclist, "test_library", ccfg)
+    print(f"  library modules = {lib.names}")
+    assert set(lib.names) == {"elemwise_kernel", "libdevice_kernel"}, lib.names
+
+    import cupy as cp
+    rng = np.random.default_rng(31)
+    a_h = rng.standard_normal((T, S), dtype=np.float32)
+    b_h = rng.standard_normal((T, S), dtype=np.float32)
+    inputs = {"a": cp.asarray(a_h), "b": cp.asarray(b_h)}
+
+    executor = KunMLIR.Executor()
+    rc = 0
+    expected_by_name = {
+        "elemwise_kernel":  (a_h + b_h) * a_h - b_h * b_h,
+        "libdevice_kernel": np.log(np.abs(a_h)) * np.sign(b_h - a_h),
+    }
+    tol_by_name = {"elemwise_kernel": 1e-5, "libdevice_kernel": 1e-4}
+    for mod_name, expected in expected_by_name.items():
+        exe = lib.getModule(mod_name)
+        # No `outputs=`: the binding auto-allocates a CUDA buffer for "out"
+        # and hands it back in the returned dict.  Re-wrap via DLPack so
+        # cupy treats it as a managed cupy array we can copy back to host.
+        ret = executor.runGraph(exe, inputs=inputs)
+        assert set(ret.keys()) == {"out"}, ret.keys()
+        out_h = cp.asnumpy(cp.from_dlpack(ret["out"]))
+        if not np.allclose(out_h, expected,
+                            atol=tol_by_name[mod_name], equal_nan=True):
+            diff = np.abs(out_h - expected)
+            print(f"  FAIL {mod_name} — max abs diff "
+                   f"{np.nanmax(diff):.3e}", file=sys.stderr)
+            rc = 1
+        else:
+            print(f"  ok {mod_name} — auto-allocated output matches reference")
+
+    # Library getModule on an unknown name must raise.
+    try:
+        lib.getModule("does_not_exist")
+        print("  FAIL — getModule('does_not_exist') should have raised",
+                file=sys.stderr)
+        rc = 1
+    except RuntimeError:
+        print("  ok — getModule on unknown name raised")
+    return rc
 
 
 def main() -> int:
@@ -653,6 +726,8 @@ def main() -> int:
     rc |= run_accumulator(args.target, args.time_length, args.num_stocks)
     print()
     rc |= run_cmp_logical(args.target, args.time_length, args.num_stocks)
+    print()
+    rc |= run_library(args.target, args.time_length, args.num_stocks)
     return rc
 
 

@@ -15,6 +15,7 @@
 //===----------------------------------------------------------------------===//
 
 #include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/unique_ptr.h>
@@ -27,6 +28,8 @@
 #include "KunGpu/PtxBackend.h"
 
 #include "llvm/ADT/StringRef.h"
+
+#include <cuda.h>
 
 #include <memory>
 #include <sstream>
@@ -181,99 +184,167 @@ static CudaArrayInfo readDLPack(nb::handle obj, const std::string &paramName,
   return CudaArrayInfo{ptr, t.shape[0], t.shape[1]};
 }
 
-/// Walk the user's {name → cuda_array} dict, validate that every named
-/// arg is present and that all arrays share the same (timeLength,
-/// numStocks).  Returns the common (T, S) plus a flat list of (name, ptr)
-/// pairs.  Anything binding-side (CAI parsing, dtype/ndim/shape checks)
-/// happens here so the runtime stays a thin launcher.
-struct CollectedArgs {
+/// Reject keys in `pyDict` that are not in `expectedNames`.  Used so the
+/// error message points at the offending name instead of complaining
+/// about a different missing key down the loop.
+///
+/// Fast path: when `pyDict.size() == expectedNames.size()` we skip the
+/// per-key scan.  Either every expected name is present (no unexpected
+/// key by definition) or one is missing — in the latter case the
+/// downstream missing-key check still raises with a correct (if less
+/// precise) error.
+static void rejectUnexpectedKeys(const nb::dict &pyDict,
+                                   const std::vector<std::string> &expectedNames,
+                                   const char *kind) {
+  if (pyDict.size() == expectedNames.size())
+    return;
+  for (auto kv : pyDict) {
+    std::string key = nb::cast<std::string>(kv.first);
+    bool known = false;
+    for (auto &n : expectedNames) if (n == key) { known = true; break; }
+    if (known) continue;
+    std::string expected;
+    for (size_t j = 0; j < expectedNames.size(); ++j) {
+      if (j) expected += ", ";
+      expected += expectedNames[j];
+    }
+    throw std::runtime_error(std::string("runGraph: unexpected ") + kind +
+                              " '" + key + "' (expected: " + expected + ")");
+  }
+}
+
+/// Walk `pyInputs` in `exe.graphInputs()` order, validate that every name
+/// is present and that all arrays share the input shape (timeLength,
+/// numStocks).  Caller specifies the required `timeLength` via
+/// `requiredTimeLength` (== start + length); a value of -1 means "infer
+/// from the first input" and the binding will treat that as the locked
+/// shape.
+struct CollectedInputs {
   int64_t timeLength;
   int64_t numStocks;
   std::vector<std::pair<std::string, uintptr_t>> args;
 };
 
-static CollectedArgs collectArgs(const kun_cuda::Executable &exe,
-                                   nb::dict pyArgs,
-                                   const nb::object &streamArg,
-                                   int64_t mask) {
-  // Graph inputs come first, then outputs — same as the buffer-table
-  // layout the runtime expects.
-  const size_t numInputs = exe.graphInputs().size();
-  std::vector<std::string> ordered;
-  ordered.reserve(numInputs + exe.graphOutputs().size());
-  for (auto &n : exe.graphInputs())  ordered.push_back(n);
-  for (auto &n : exe.graphOutputs()) ordered.push_back(n);
-  if (ordered.empty())
-    throw std::runtime_error("launch: kernel has no I/O arguments");
+static CollectedInputs collectInputs(const kun_cuda::Executable &exe,
+                                        const nb::dict &pyInputs,
+                                        const nb::object &streamArg,
+                                        int64_t requiredTimeLength) {
+  const auto &inputNames = exe.graphInputs();
+  rejectUnexpectedKeys(pyInputs, inputNames, "input");
 
-  CollectedArgs out;
-  out.args.reserve(ordered.size());
-
-  // Reject extras up-front so the error message points at the offending
-  // name (the per-name loop below would otherwise just complain about a
-  // missing graph_input/output, which is misleading when the real issue
-  // is a typo'd key).
-  if (pyArgs.size() > ordered.size()) {
-    for (auto kv : pyArgs) {
-      std::string key = nb::cast<std::string>(kv.first);
-      bool known = false;
-      for (auto &n : ordered) if (n == key) { known = true; break; }
-      if (!known) {
-        std::string expected;
-        for (size_t j = 0; j < ordered.size(); ++j) {
-          if (j) expected += ", ";
-          expected += ordered[j];
-        }
-        throw std::runtime_error(
-            "launch: unexpected argument '" + key +
-            "' (kernel expects: " + expected + ")");
-      }
-    }
-  }
-
-  // We need the input time length before validating any output (output
-  // time dim = input time dim − mask).  Walk inputs first to lock it
-  // in, then outputs.
-  out.timeLength = -1;
+  CollectedInputs out;
+  out.timeLength = requiredTimeLength;
   out.numStocks  = -1;
-  for (size_t i = 0; i < ordered.size(); ++i) {
-    const std::string &name = ordered[i];
-    bool isOutput = i >= numInputs;
+  out.args.reserve(inputNames.size());
 
+  for (const std::string &name : inputNames) {
     nb::object key = nb::str(name.c_str());
-    if (!pyArgs.contains(key)) {
-      std::string expected;
-      for (size_t j = 0; j < ordered.size(); ++j) {
-        if (j) expected += ", ";
-        expected += ordered[j];
-      }
-      throw std::runtime_error("launch: missing argument '" + name +
-                                "' (kernel expects: " + expected + ")");
-    }
-    CudaArrayInfo info = readDLPack(pyArgs[key], name, streamArg);
-    int64_t expectT = isOutput ? (out.timeLength - mask) : out.timeLength;
+    if (!pyInputs.contains(key))
+      throw std::runtime_error("runGraph: missing input '" + name + "'");
+    CudaArrayInfo info = readDLPack(pyInputs[key], name, streamArg);
 
     if (out.timeLength < 0) {
-      // First arg is always an input (numInputs ≥ 1 since the kernel
-      // graph requires at least one input).  Lock in the launch shape.
       out.timeLength = info.timeLength;
       out.numStocks  = info.numStocks;
-    } else if (info.timeLength != expectT ||
-                 info.numStocks  != out.numStocks) {
+    } else if (info.timeLength != out.timeLength ||
+                 (out.numStocks >= 0 && info.numStocks != out.numStocks)) {
       std::stringstream ss;
-      ss << "launch: shape mismatch on '" << name
-         << "' (" << (isOutput ? "output" : "input") << "): expected ("
-         << expectT << ", " << out.numStocks
-         << "), got (" << info.timeLength << ", "
-         << info.numStocks << ")";
-      if (isOutput && mask > 0)
-        ss << " — output time dim must equal input time dim ("
-           << out.timeLength << ") minus mask (" << mask << ")";
+      ss << "runGraph: input '" << name << "' has shape ("
+         << info.timeLength << ", " << info.numStocks
+         << "), expected (" << out.timeLength << ", "
+         << (out.numStocks < 0 ? info.numStocks : out.numStocks) << ")";
       throw std::runtime_error(ss.str());
     }
+    if (out.numStocks < 0)
+      out.numStocks = info.numStocks;
     out.args.emplace_back(name, info.ptr);
   }
   return out;
+}
+
+/// Allocate a CUDA device buffer of `total` floats and wrap it in an
+/// `nb::ndarray<>` (no framework annotation) owning the allocation via
+/// a capsule.  Lifetime is tied to the Python object: when the array's
+/// refcount drops to zero, the capsule destructor frees via `cuMemFree`.
+static nb::ndarray<> allocOwnedCudaArray2D(int64_t T, int64_t S) {
+  size_t total = static_cast<size_t>(T) * static_cast<size_t>(S);
+  CUdeviceptr p = 0;
+  CUresult r = cuMemAlloc(&p, total * sizeof(float));
+  if (r != CUDA_SUCCESS) {
+    const char *msg = nullptr;
+    cuGetErrorString(r, &msg);
+    throw std::runtime_error(std::string("runGraph: cuMemAlloc failed: ") +
+                              (msg ? msg : "(unknown)"));
+  }
+  nb::capsule owner(reinterpret_cast<void *>(p), [](void *q) noexcept {
+    cuMemFree(reinterpret_cast<CUdeviceptr>(q));
+  });
+  // device_id: query current context's device.  Falls back to 0 if no
+  // context is current (which should not happen here — cuMemAlloc just
+  // succeeded, so there is a current context).
+  CUdevice dev = 0;
+  cuCtxGetDevice(&dev);
+  size_t shape[2] = {static_cast<size_t>(T), static_cast<size_t>(S)};
+  return nb::ndarray<>(reinterpret_cast<void *>(p), /*ndim=*/2, shape, owner,
+                        /*strides=*/nullptr,
+                        /*dtype=*/nb::dtype<float>(),
+                        /*device_type=*/nb::device::cuda::value,
+                        /*device_id=*/static_cast<int>(dev));
+}
+
+/// Walk `exe.graphOutputs()` in order: for each name, either pick the
+/// caller-allocated buffer out of `pyOutputs` (validating shape) or
+/// allocate a fresh CUDA buffer.  Appends `(name, devicePtr)` to `args`
+/// and returns a `{name: ndarray}` dict of every output that Python
+/// will see.
+///
+/// When `pyOutputs.is_none()` we short-circuit:  no dict cast, no
+/// rejectUnexpectedKeys, no per-name `contains` probe — every output
+/// is auto-allocated.  This is the common case (caller doesn't pre-
+/// allocate outputs) and keeps it tight.
+static nb::dict collectOutputs(
+    const kun_cuda::Executable &exe,
+    nb::object pyOutputs, int64_t length, int64_t numStocks,
+    const nb::object &streamArg,
+    std::vector<std::pair<std::string, uintptr_t>> &args) {
+  const auto &outputNames = exe.graphOutputs();
+  args.reserve(args.size() + outputNames.size());
+
+  // Start with a null-PyObject* `nb::dict` — `nb::handle::inc_ref()` /
+  // `dec_ref()` are `Py_XINCREF`/`Py_XDECREF` so it's safe to hold, and
+  // we skip the `PyDict_New()` that bare `nb::dict()` would do.  Only
+  // populate + extras-check when the caller passed a real dict; then
+  // the handle's `operator bool()` doubles as the "user gave us
+  // outputs" flag.
+  nb::dict userOutputs = nb::steal<nb::dict>(nb::handle());
+  if (!pyOutputs.is_none()) {
+    userOutputs = nb::cast<nb::dict>(pyOutputs);
+    rejectUnexpectedKeys(userOutputs, outputNames, "output");
+  }
+
+  nb::dict ret;
+  for (const std::string &name : outputNames) {
+    nb::object key = nb::str(name.c_str());
+    uintptr_t base;
+    if (userOutputs && userOutputs.contains(key)) {
+      CudaArrayInfo info = readDLPack(userOutputs[key], name, streamArg);
+      if (info.timeLength != length || info.numStocks != numStocks) {
+        std::stringstream ss;
+        ss << "runGraph: output '" << name << "' has shape ("
+           << info.timeLength << ", " << info.numStocks
+           << "), expected (" << length << ", " << numStocks << ")";
+        throw std::runtime_error(ss.str());
+      }
+      base = info.ptr;
+      ret[key] = userOutputs[key];
+    } else {
+      nb::ndarray<> arr = allocOwnedCudaArray2D(length, numStocks);
+      base = reinterpret_cast<uintptr_t>(arr.data());
+      ret[key] = nb::cast(std::move(arr));
+    }
+    args.emplace_back(name, base);
+  }
+  return ret;
 }
 
 /// Parse one Python `external_kernels=[...]` entry into a KernelMeta.
@@ -463,18 +534,54 @@ NB_MODULE(KunMLIR, m) {
           "Raw stream handle as an int (0 ↔ CUDA default stream).")
       .def("runGraph",
           [](kun_cuda::Executor &e, kun_cuda::Executable &exe,
-              nb::dict pyArgs, int64_t mask,
-              int minChunkWarmupFactor, double smFillFactor) {
+              nb::dict pyInputs, int64_t cur_time, int64_t length,
+              nb::object pyOutputs, int64_t mask,
+              int minChunkWarmupFactor, double smFillFactor) -> nb::dict {
+            if (cur_time != 0)
+              throw std::runtime_error(
+                  "runGraph: cur_time != 0 not supported on GPU");
+            if (length < 0)
+              throw std::runtime_error("runGraph: length must be >= 0");
+
+            // `length == 0` (default) → auto-infer from the first
+            // input's row count; otherwise it's the engine's internal
+            // time dim (== input rows == output rows).
+            const bool inferLength = (length == 0);
+
             // Thread the executor's stream into __dlpack__(stream=…)
             // so producers (CuPy / PyTorch / JAX / TF) can insert the
             // cross-stream sync needed for data-readiness on our
             // launch stream.
             nb::object streamArg = dlpackStreamArg(e.stream());
-            auto c = collectArgs(exe, pyArgs, streamArg, mask);
-            e.runGraph(exe, c.timeLength, c.numStocks, c.args,
+            auto in = collectInputs(exe, pyInputs, streamArg,
+                                       inferLength ? -1 : length);
+            if (inferLength)
+              length = in.timeLength;
+            if (mask < 0 || mask >= length)
+              throw std::runtime_error(
+                  "runGraph: mask must be in [0, length)");
+
+            // Kernel writes `output[t]` directly for `t ∈ [mask, length)`
+            // (kungpu codegen no longer subtracts mask).  Rows `[0, mask)`
+            // are left as whatever the user / allocator put there.
+            const int64_t timeLength = length;
+
+            // Build the args vector (inputs first, then outputs in
+            // exe.graphOutputs order).  Auto-allocates any output the
+            // caller didn't pre-allocate; returns the dict that goes
+            // back to Python.
+            std::vector<std::pair<std::string, uintptr_t>> args =
+                std::move(in.args);
+            nb::dict ret = collectOutputs(exe, pyOutputs, length,
+                                            in.numStocks, streamArg, args);
+
+            e.runGraph(exe, timeLength, in.numStocks, args,
                         mask, minChunkWarmupFactor, smFillFactor);
+            return ret;
           },
-          nb::arg("exe"), nb::arg("args"),
+          nb::arg("exe"), nb::arg("inputs"),
+          nb::arg("cur_time") = 0, nb::arg("length") = 0,
+          nb::arg("outputs") = nb::none(),
           nb::arg("mask") = 0,
           nb::arg("min_chunk_warmup_factor") = 4,
           nb::arg("sm_fill_factor") = 1.5,
@@ -482,14 +589,28 @@ NB_MODULE(KunMLIR, m) {
           "**Asynchronous** — call `.synchronize()` (or otherwise wait\n"
           "on the stream) before reading results back to host.\n"
           "\n"
-          "`args` is a {name → cupy_array} dict; names must equal "
-          "`exe.input_names ++ exe.output_names`.  Arrays must be "
-          "float32, 2-D, shape `(time_length, num_stocks)` (TS layout), "
-          "and reside on the GPU.\n"
+          "`inputs` is a {name → cuda_array} dict whose keys must equal\n"
+          "`exe.input_names`.  Arrays must be float32, 2-D, shape\n"
+          "`(length, num_stocks)` (TS layout), and reside on the GPU.\n"
           "\n"
-          "`mask` is the prefix-skip on graph outputs: chunk 0 starts "
-          "writing at time index `mask`, so the output array's time "
-          "dim is `time_length - mask`.  Default 0 (no skip).\n"
+          "`cur_time` mirrors CPU `kr.runGraph`; GPU only accepts 0.\n"
+          "\n"
+          "`length` is input/output time dim.  Default 0 ⇒ auto-infer\n"
+          "from the first input's row count.\n"
+          "\n"
+          "`outputs` is an optional {name → cuda_array} dict of\n"
+          "caller-allocated output buffers (subset of\n"
+          "`exe.output_names`).  Each must have shape `(length,\n"
+          "num_stocks)` (same as input).  Names missing from `outputs`\n"
+          "are auto-allocated by the binding (float32 CUDA buffers,\n"
+          "capsule-owned).  Returns a dict of every output name → its\n"
+          "buffer (user-supplied or freshly allocated).\n"
+          "\n"
+          "`mask` is the warmup-skip on graph outputs: the kernel only\n"
+          "writes to output rows `[mask, length)`; rows `[0, mask)` are\n"
+          "left untouched (whatever the user / allocator put there).\n"
+          "Default 0.\n"
+          "\n"
           "`min_chunk_warmup_factor` is the lower bound on "
           "`chunk_size / warmup` — keeps warmup-overlap overhead below "
           "`1 / factor` of total compute.  Default 4 (≤ 25% overhead).\n"
@@ -498,7 +619,7 @@ NB_MODULE(KunMLIR, m) {
           "slack.  Default 1.5.\n"
           "\n"
           "Named to match the CPU executor API "
-          "(`KunRunner.runGraph(executor, mod, ...)`).")
+          "(`KunRunner.runGraph(executor, mod, inputs, cur_time, length)`).")
       .def("synchronize", &kun_cuda::Executor::synchronize,
           "Block until every kernel queued on this stream completes.");
 

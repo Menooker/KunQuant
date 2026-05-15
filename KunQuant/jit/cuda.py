@@ -5,32 +5,49 @@ through the KunMLIR / kunir pipeline.  Reuses the existing Driver pass
 list (`Driver.optimize`) so any IR rewrites the CPU path benefits from
 also apply here — only the codegen layer is replaced.
 
-User entry point::
+Two-tier config split matches the CPU path:
+
+  * Per-Function knobs live in `KunCompilerConfig` (the CPU-shared
+    dataclass): `dtype`, `blocking_len`, `partition_factor`,
+    `input_layout` / `output_layout` (TS only on GPU), `options`.
+  * Compile-/link-time knobs live in `CudaCompilerConfig`: `gpu_arch`,
+    `warps_per_cta`, `smem_size`, `occupancy`, `opt_level`,
+    `toolkit_path`.  Shared across every Function in a `Library`.
+
+Single-Function compile::
 
     from KunQuant.jit import KunMLIR
-    from KunQuant.jit.cuda import compileit, CudaCompilerConfig
+    from KunQuant.jit.cuda import compile_func, CudaCompilerConfig
+    from KunQuant.Driver import KunCompilerConfig
 
-    exe = compileit(f, CudaCompilerConfig(gpu_arch="sm_80"))
+    exe = compile_func(f,
+                        KunCompilerConfig(input_layout="TS",
+                                            output_layout="TS"),
+                        CudaCompilerConfig(gpu_arch="sm_80"))
     executor = KunMLIR.Executor()                       # default stream
-    executor.runGraph(exe, {"a": cp_a, "b": cp_b, "out": cp_out})
+    out = executor.runGraph(exe, {"a": cp_a, "b": cp_b})  # length auto-inferred
     executor.synchronize()
 
-Scope (v0):
-  * Single Function in, single kunir.func out.  Multi-Function /
-    auto-partition support is future work.
-  * dtype = "float" only (kunir lowers f32 today).
-  * Layout is implicit: kunir uses the TS-major layout exposed by the
-    runtime (see KunCuda/Runtime.h).
+Multi-Function compile (CPU `cfake.compileit` shape)::
+
+    from KunQuant.jit.cuda import compileit, CudaCompilerConfig
+    from KunQuant.Driver import KunCompilerConfig
+
+    kcfg = KunCompilerConfig(input_layout="TS", output_layout="TS")
+    ccfg = CudaCompilerConfig(gpu_arch="sm_80")
+    lib = compileit([("mod1", f1, kcfg), ("mod2", f2, kcfg)],
+                     "my_lib", ccfg)
+    exe = lib.getModule("mod1")
 """
 
 from __future__ import annotations
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Tuple
 
 from KunQuant.jit import KunMLIR
 
-from KunQuant.Driver import optimize, post_optimize
+from KunQuant.Driver import KunCompilerConfig, optimize, post_optimize
 from KunQuant.Op import Input, Output, MayRequireWholeTime
 from KunQuant.passes import do_partition
 from KunQuant.passes.InferWindow import infer_window
@@ -96,21 +113,20 @@ def find_cuda_toolkit(override: str = "") -> str:
 
 @dataclass
 class CudaCompilerConfig:
-    """Mirrors the parts of KunCompilerConfig that matter for GPU.
-
-    `dtype`, `gpu_arch`, and the kunir target_spec fields are the only
-    knobs we actually expose.  The CPU-only fields (blocking_len,
-    input_layout, etc.) deliberately do not appear here — they're not
-    meaningful for the GPU path.
+    """Compile- / link-time knobs that are shared across every Function
+    in a `Library`.  Per-Function graph-rewriting knobs (dtype,
+    blocking_len, partition_factor, layout, pass options) live in
+    `KunQuant.Driver.KunCompilerConfig` instead — the same dataclass
+    the CPU path uses.
     """
     gpu_arch:    str = "sm_80"
-    dtype:         str = "float"   # only "float" supported in v0
 
-    # kunir.target_spec — graph-wide for v0.
+    # kunir.target_spec — graph-wide for v0.  `vector_size` is taken
+    # from the per-Function `KunCompilerConfig.blocking_len` at compile
+    # time (the two are the same concept on GPU).
     occupancy:     int = 1
     warps_per_cta: int = 4
     smem_size:     int = 49152
-    vector_size:   int = 1
 
     # LLVM optimization level (forwarded to #nvvm.target<O = ...>).
     opt_level:     int  = 3
@@ -118,45 +134,52 @@ class CudaCompilerConfig:
     # Empty → upstream search: CUDA_HOME / CUDA_PATH / standard locations.
     toolkit_path:  str  = ""
 
-    # Forwarded to `do_partition` — same default as KunCompilerConfig.
-    # Larger factor ⇒ coarser partitions (fewer, bigger kernels).  After
-    # partition each sub-Function becomes one kunir.func inside the
-    # generated gpu.module; intermediate buffers between them are
-    # auto-managed by the runtime's slot pool.
-    partition_factor: int = 3
 
-    # Pass-list options forwarded to optimize().  We seed reasonable GPU
-    # defaults; user-supplied keys override.
-    options:       Optional[dict] = None
+def _resolve_vector_size(kcfg: KunCompilerConfig) -> int:
+    """On GPU `vector_size` (kunir target_spec) is the same as
+    `blocking_len` from the per-Function config.  Default to 1 (scalar
+    kunir) if the user didn't specify."""
+    return 1 if kcfg.blocking_len is None else int(kcfg.blocking_len)
 
 
-def _gpu_pass_options(cfg: CudaCompilerConfig) -> dict:
-    """Defaults for `Driver.optimize`'s `options` dict on the GPU path.
+def _gpu_pass_options(kcfg: KunCompilerConfig) -> dict:
+    """`Driver.optimize`'s `options` dict for the GPU path.
 
-    The CPU compileit() does the same kind of seeding — we replicate the
-    bits that affect graph rewriting.  `blocking_len` is needed by some
-    decompose paths (skip-list cutoff in WindowedMin/Max); we feed it
-    `warps_per_cta * 32 * vector_size`, which matches the GPU's
-    stocks-per-block.
+    `blocking_len` is needed by some decompose paths (skip-list cutoff
+    in WindowedMin/Max).  Everything else — including `no_fast_stat` —
+    is taken verbatim from `kcfg.options`; we do not force `no_fast_stat`
+    here.  If the user wants the GPU-safe default, they should set
+    `no_fast_stat=True` in `kcfg.options` themselves.
     """
-    opts: dict = {
-        "blocking_len":   cfg.warps_per_cta * 32 * cfg.vector_size,
-        # Fast-stat tricks rely on running stats / FMA orderings that
-        # don't map cleanly onto the GPU primitives we lower today.
-        # Keep it off until the corresponding kunir lowerings exist.
-        "no_fast_stat":   True,
-    }
-    if cfg.options:
-        opts.update(cfg.options)
+    opts: dict = {"blocking_len": _resolve_vector_size(kcfg)}
+    if kcfg.options:
+        opts.update(kcfg.options)
     return opts
 
 
 def _to_dtype_token(dtype: str) -> str:
     if dtype == "float":  return "f32"
     if dtype == "double": return "f64"
-    raise ValueError(f"compile_to_cuda: unsupported dtype '{dtype}' "
+    raise ValueError(f"compile_func: unsupported dtype '{dtype}' "
                        f"(supported: float, double — kunir today only "
                        f"lowers float on GPU)")
+
+
+def _validate_kun_cfg(kcfg: KunCompilerConfig) -> None:
+    """GPU path only supports TS layout on both input and output (kunir
+    runtime is TS-major).  dtype must be a kunir-supported token."""
+    if kcfg.input_layout != "TS":
+        raise ValueError(
+            f"GPU backend only supports input_layout='TS', got "
+            f"{kcfg.input_layout!r}")
+    if kcfg.output_layout != "TS":
+        raise ValueError(
+            f"GPU backend only supports output_layout='TS', got "
+            f"{kcfg.output_layout!r}")
+    if kcfg.dtype not in ("float", "double"):
+        raise ValueError(
+            f"KunCompilerConfig.dtype must be 'float' or 'double', got "
+            f"{kcfg.dtype!r}")
 
 
 def _graph_io_names(f: Function):
@@ -168,13 +191,13 @@ def _graph_io_names(f: Function):
     ins  = [op.attrs["name"] for op in f.ops if isinstance(op, Input)]
     outs = [op.attrs["name"] for op in f.ops if isinstance(op, Output)]
     if not ins:
-        raise ValueError("CudaCompilerConfig: function has no Input ops")
+        raise ValueError("compile_func: function has no Input ops")
     if not outs:
-        raise ValueError("CudaCompilerConfig: function has no Output ops")
+        raise ValueError("compile_func: function has no Output ops")
     return ins, outs
 
 
-def _run_full_pipeline(f: Function, cfg: CudaCompilerConfig):
+def _run_full_pipeline(f: Function, kcfg: KunCompilerConfig):
     """Same pass pipeline the CPU `compileit` runs:
 
         optimize  →  do_partition  →  post_optimize
@@ -182,14 +205,15 @@ def _run_full_pipeline(f: Function, cfg: CudaCompilerConfig):
     Returns the list of post-partition Functions that the translator
     should walk (one kunir.func per Function).  Mutates `f` in place.
     """
-    options = _gpu_pass_options(cfg)
+    options = _gpu_pass_options(kcfg)
     optimize(f, options)
-    _mainf, impl = do_partition(f, cfg.partition_factor, options)
+    _mainf, impl = do_partition(f, kcfg.partition_factor, options)
     post_optimize(impl, options)
     return impl
 
 
-def _translate_partitions(impl, cfg: CudaCompilerConfig):
+def _translate_partitions(impl, kcfg: KunCompilerConfig,
+                            ccfg: CudaCompilerConfig):
     """Emit one kunir.func per partitioned Function into a single
     KunMLIR module (single `gpu.module` with N siblings).  Cross-
     partition buffers stitch up automatically because each impl's
@@ -205,12 +229,12 @@ def _translate_partitions(impl, cfg: CudaCompilerConfig):
     Returns (ModuleOp, list[dict]) — the second element is the list
     of external-kernel descriptors to forward to KunMLIR.compile.
     """
-    target = TargetSpec(occupancy=cfg.occupancy,
-                          warps_per_cta=cfg.warps_per_cta,
-                          smem_size=cfg.smem_size,
-                          vector_size=cfg.vector_size)
+    target = TargetSpec(occupancy=ccfg.occupancy,
+                          warps_per_cta=ccfg.warps_per_cta,
+                          smem_size=ccfg.smem_size,
+                          vector_size=_resolve_vector_size(kcfg))
     ir = KunMLIR.IRBuilder()
-    dtype = _to_dtype_token(cfg.dtype)
+    dtype = _to_dtype_token(kcfg.dtype)
     externals = []
     for sub in impl:
         # Per-partition warmup: max windowed-chain depth from any input
@@ -235,8 +259,9 @@ def _translate_partitions(impl, cfg: CudaCompilerConfig):
     return ir.finish(), externals
 
 
-def compileit(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.Executable:
-    """Compile a KunQuant Function to a GPU `KunMLIR.Executable`.
+def compile_func(f: Function, kcfg: KunCompilerConfig,
+                   ccfg: CudaCompilerConfig) -> KunMLIR.Executable:
+    """Compile a single KunQuant Function to a GPU `KunMLIR.Executable`.
 
     Pipeline mirrors `KunQuant.jit.cfake.compileit` on the CPU path:
 
@@ -249,23 +274,20 @@ def compileit(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.Executable:
       6. Hand off to KunMLIR.compile, which generates the cubin and
          resolves cross-kernel data flow via I/O names.
     """
-    if cfg.dtype not in ("float", "double"):
-        raise ValueError(
-            f"CudaCompilerConfig.dtype must be 'float' or 'double', got "
-            f"{cfg.dtype!r}")
+    _validate_kun_cfg(kcfg)
 
-    toolkit_path = find_cuda_toolkit(cfg.toolkit_path)
+    toolkit_path = find_cuda_toolkit(ccfg.toolkit_path)
 
     graph_inputs, graph_outputs = _graph_io_names(f)
-    impl = _run_full_pipeline(f, cfg)
-    mod, externals = _translate_partitions(impl, cfg)
+    impl = _run_full_pipeline(f, kcfg)
+    mod, externals = _translate_partitions(impl, kcfg, ccfg)
 
     return KunMLIR.compile(
         mod,
         graph_inputs=graph_inputs,
         graph_outputs=graph_outputs,
-        gpu_arch=cfg.gpu_arch,
-        opt_level=cfg.opt_level,
+        gpu_arch=ccfg.gpu_arch,
+        opt_level=ccfg.opt_level,
         toolkit_path=toolkit_path,
         external_kernels=externals,
         # Forwarded for the no-JIT-kernel case: when every partition
@@ -273,17 +295,71 @@ def compileit(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.Executable:
         # MLIR module is empty and `data.warpsPerCta` would otherwise
         # default to 1 — but the cs_rank launch uses it to size
         # blockDim, so feed the config value through.
-        warps_per_cta=cfg.warps_per_cta,
+        warps_per_cta=ccfg.warps_per_cta,
     )
 
 
-def to_mlir(f: Function, cfg: CudaCompilerConfig) -> KunMLIR.ModuleOp:
-    """Run the same passes + translator as `compileit`, but return the
-    KunMLIR module before PTX/CUBIN.  External (cs_rank) partitions
+class Library:
+    """Bag of named `KunMLIR.Executable`s, mirroring the CPU `kr.Library`
+    shape so callers can compile multiple Functions in one go and look
+    them up by name.  Returned by the multi-Function `compileit` below.
+    """
+    def __init__(self, libname: str = "") -> None:
+        self.libname = libname
+        self._modules: dict = {}
+
+    def getModule(self, name: str) -> KunMLIR.Executable:
+        if name not in self._modules:
+            raise RuntimeError(
+                f"Library.getModule: no module named '{name}' "
+                f"(have: {sorted(self._modules)})")
+        return self._modules[name]
+
+    @property
+    def names(self):
+        """All compiled module names in registration order."""
+        return list(self._modules.keys())
+
+    def _add(self, name: str, exe: KunMLIR.Executable) -> None:
+        if name in self._modules:
+            raise RuntimeError(
+                f"Library: duplicate module name '{name}'")
+        self._modules[name] = exe
+
+
+def compileit(
+    funclist: List[Tuple[str, Function, KunCompilerConfig]],
+    libname: str,
+    compiler_config: CudaCompilerConfig,
+) -> Library:
+    """Compile a list of `(name, Function, KunCompilerConfig)` tuples
+    into a `Library`, mirroring the shape of
+    `KunQuant.jit.cfake.compileit(func, libname, compiler_config)`.
+
+    Each entry's third element is the per-Function `KunCompilerConfig`
+    (dtype / blocking_len / partition_factor / layout / pass options);
+    `compiler_config` is the GPU-wide `CudaCompilerConfig` applied to
+    every entry.  cfake's other arguments (`tempdir`, `keep_files`,
+    `load`) don't apply to the GPU path and are intentionally absent.
+
+    Returns a `Library` keyed by the tuple's `name`; look up individual
+    kernels via `lib.getModule(name)`.
+    """
+    lib = Library(libname=libname)
+    for name, f, kcfg in funclist:
+        lib._add(name, compile_func(f, kcfg, compiler_config))
+    return lib
+
+
+def to_mlir(f: Function, kcfg: KunCompilerConfig,
+              ccfg: CudaCompilerConfig) -> KunMLIR.ModuleOp:
+    """Run the same passes + translator as `compile_func`, but return
+    the KunMLIR module before PTX/CUBIN.  External (cs_rank) partitions
     are absent from the returned module — they never become kunir
     ops.  Useful for debugging the IR.  Mutates `f` in place (same
-    as `compileit`)."""
+    as `compile_func`)."""
+    _validate_kun_cfg(kcfg)
     _graph_io_names(f)              # raises if no Input / Output ops
-    impl = _run_full_pipeline(f, cfg)
-    mod, _externals = _translate_partitions(impl, cfg)
+    impl = _run_full_pipeline(f, kcfg)
+    mod, _externals = _translate_partitions(impl, kcfg, ccfg)
     return mod

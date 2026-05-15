@@ -10,6 +10,11 @@
 string(REPLACE "-Wl,-z,defs" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
 string(REPLACE "-Wl,-z,defs" "" CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS}")
 
+# Re-run FindCUDAToolkit here so CUDA::cuda_driver is an imported target
+# in this directory's scope.  KunCuda already calls it but the IMPORTED
+# target it creates is scoped to that subdirectory.
+find_package(CUDAToolkit REQUIRED)
+
 # STABLE_ABI: single .abi3.so on CPython ≥ 3.12; falls back to per-version
 # on older Pythons.  Matches the runner binding (cpp/Python).
 nanobind_add_module(KunMLIR STABLE_ABI
@@ -28,6 +33,12 @@ set_target_properties(KunMLIR PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/KunQuant/jit")
 
 target_link_libraries(KunMLIR PRIVATE
+  # cuda.h + libcuda stub — the binding's runGraph wrapper calls
+  # cuMemAlloc / cuMemFree directly to back caller-omitted output
+  # buffers.  KunCudaRuntime links cuda_driver PRIVATE so we have to
+  # repeat the dependency here.
+  CUDA::cuda_driver
+
   # Compiler side
   MLIRKunIrDialect
   MLIRKunGpuDialect
