@@ -16,10 +16,11 @@ struct StreamBuffer {
     // fix-me: we can store the pre-aligned stock_count to avoid re-computation
     // of roundUp
     alignas(64) char buf[0];
-    T *getBuffer() const { return (T *)(buf); }
+    T *getBuffer() const { return (T *)const_cast<char *>(buf); }
     size_t *getPos(size_t idx, size_t stock_count, size_t window_size) const {
         assert(stock_count % 4 == 0);
-        return (size_t *)(buf + sizeof(T) * stock_count * window_size +
+        return (size_t *)(const_cast<char *>(buf) +
+                          sizeof(T) * stock_count * window_size +
                           idx * sizeof(size_t));
     }
     static size_t getBufferSize(size_t stock_count, size_t window_size,
@@ -44,7 +45,7 @@ struct StreamBuffer {
         pos += 1;
         pos = (pos >= window_size) ? 0 : pos;
         size_t *posbase = getPos(0, stock_count, window_size);
-        for (int i = 0; i < divideAndCeil(stock_count, simd_len); i++) {
+        for (size_t i = 0; i < divideAndCeil(stock_count, simd_len); i++) {
             posbase[i] = pos;
         }
         return ret;

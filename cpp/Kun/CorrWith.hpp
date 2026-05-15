@@ -26,7 +26,6 @@ void CorrWith(RuntimeStage *stage, size_t time_idx,
         INPUT::getInput(&inbuf1, stage->stage->in_buffers[1], num_stocks);
     using T = typename std::decay<decltype(*input0)>::type;
     auto outinfo = stage->stage->out_buffers[0];
-    auto simd_len = stage->ctx->simd_len;
     T *output = stage->ctx->buffers[outinfo->id].getPtr<T>();
     auto time_end =
         std::min(__start + (time_idx + 1) * time_stride, __start + __length);
@@ -71,7 +70,6 @@ void RankCorrWith(RuntimeStage *stage, size_t time_idx,
         INPUT::getInput(&inbuf1, stage->stage->in_buffers[1], num_stocks);
     using T = typename std::decay<decltype(*input0)>::type;
     auto outinfo = stage->stage->out_buffers[0];
-    auto simd_len = stage->ctx->simd_len;
     T *output = stage->ctx->buffers[outinfo->id].getPtr<T>();
     auto time_end =
         std::min(__start + (time_idx + 1) * time_stride, __start + __length);

@@ -3,8 +3,12 @@
 
 namespace kun {
 namespace {
-size_t divideAndCeil(size_t x, size_t y) { return (x + y - 1) / y; }
-size_t roundUp(size_t x, size_t y) { return divideAndCeil(x, y) * y; }
+[[maybe_unused]] size_t divideAndCeil(size_t x, size_t y) {
+    return (x + y - 1) / y;
+}
+[[maybe_unused]] size_t roundUp(size_t x, size_t y) {
+    return divideAndCeil(x, y) * y;
+}
 
 } // namespace
 } // namespace kun

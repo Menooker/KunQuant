@@ -457,22 +457,22 @@ void ForEachBackWindowOp::print(OpAsmPrinter &printer) {
 //===----------------------------------------------------------------------===//
 
 Value AddOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
-  return b.create<arith::AddFOp>(loc, lhs, rhs);
+  return arith::AddFOp::create(b, loc, lhs, rhs);
 }
 Value SubOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
-  return b.create<arith::SubFOp>(loc, lhs, rhs);
+  return arith::SubFOp::create(b, loc, lhs, rhs);
 }
 Value MulOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
-  return b.create<arith::MulFOp>(loc, lhs, rhs);
+  return arith::MulFOp::create(b, loc, lhs, rhs);
 }
 Value DivOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
-  return b.create<arith::DivFOp>(loc, lhs, rhs);
+  return arith::DivFOp::create(b, loc, lhs, rhs);
 }
 Value MaxOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
-  return b.create<arith::MaximumFOp>(loc, lhs, rhs);
+  return arith::MaximumFOp::create(b, loc, lhs, rhs);
 }
 Value MinOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
-  return b.create<arith::MinimumFOp>(loc, lhs, rhs);
+  return arith::MinimumFOp::create(b, loc, lhs, rhs);
 }
 
 // Comparison ops: dispatch arith.cmpf for FloatType operands and
@@ -481,8 +481,8 @@ static Value buildCmpScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs,
                               arith::CmpFPredicate fp,
                               arith::CmpIPredicate ip) {
   if (llvm::isa<FloatType>(lhs.getType()))
-    return b.create<arith::CmpFOp>(loc, fp, lhs, rhs);
-  return b.create<arith::CmpIOp>(loc, ip, lhs, rhs);
+    return arith::CmpFOp::create(b, loc, fp, lhs, rhs);
+  return arith::CmpIOp::create(b, loc, ip, lhs, rhs);
 }
 Value GreaterOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
   return buildCmpScalarOp(b, loc, lhs, rhs,
@@ -507,10 +507,10 @@ Value EqualOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
 
 // Logical binary ops on i1.
 Value AndOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
-  return b.create<arith::AndIOp>(loc, lhs, rhs);
+  return arith::AndIOp::create(b, loc, lhs, rhs);
 }
 Value OrOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
-  return b.create<arith::OrIOp>(loc, lhs, rhs);
+  return arith::OrIOp::create(b, loc, lhs, rhs);
 }
 
 //===----------------------------------------------------------------------===//
@@ -518,22 +518,22 @@ Value OrOp::buildScalarOp(OpBuilder &b, Location loc, Value lhs, Value rhs) {
 //===----------------------------------------------------------------------===//
 
 Value AbsOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
-  return b.create<math::AbsFOp>(loc, operand);
+  return math::AbsFOp::create(b, loc, operand);
 }
 Value LogOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
-  return b.create<math::LogOp>(loc, operand);
+  return math::LogOp::create(b, loc, operand);
 }
 Value SignOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
   // sign(x) ≈ copysign(1.0, x)
-  Value one = b.create<arith::ConstantOp>(
-      loc, operand.getType(), b.getFloatAttr(operand.getType(), 1.0));
-  return b.create<math::CopySignOp>(loc, one, operand);
+  Value one = arith::ConstantOp::create(
+      b, loc, operand.getType(), b.getFloatAttr(operand.getType(), 1.0));
+  return math::CopySignOp::create(b, loc, one, operand);
 }
 Value NotOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
   // not(x) = x ^ 1 on i1
-  Value one = b.create<arith::ConstantOp>(loc, b.getI1Type(),
+  Value one = arith::ConstantOp::create(b, loc, b.getI1Type(),
                                             b.getIntegerAttr(b.getI1Type(), 1));
-  return b.create<arith::XOrIOp>(loc, operand, one);
+  return arith::XOrIOp::create(b, loc, operand, one);
 }
 
 //===----------------------------------------------------------------------===//
@@ -544,28 +544,28 @@ TypedAttr ReduceAddOp::getInitValue(FloatType elemType) {
   return FloatAttr::get(elemType, 0.0);
 }
 Value ReduceAddOp::buildAccumOp(OpBuilder &b, Location loc, Value acc, Value elem) {
-  return b.create<arith::AddFOp>(loc, acc, elem);
+  return arith::AddFOp::create(b, loc, acc, elem);
 }
 
 TypedAttr ReduceMulOp::getInitValue(FloatType elemType) {
   return FloatAttr::get(elemType, 1.0);
 }
 Value ReduceMulOp::buildAccumOp(OpBuilder &b, Location loc, Value acc, Value elem) {
-  return b.create<arith::MulFOp>(loc, acc, elem);
+  return arith::MulFOp::create(b, loc, acc, elem);
 }
 
 TypedAttr ReduceMaxOp::getInitValue(FloatType elemType) {
   return FloatAttr::get(elemType, -std::numeric_limits<double>::infinity());
 }
 Value ReduceMaxOp::buildAccumOp(OpBuilder &b, Location loc, Value acc, Value elem) {
-  return b.create<arith::MaximumFOp>(loc, acc, elem);
+  return arith::MaximumFOp::create(b, loc, acc, elem);
 }
 
 TypedAttr ReduceMinOp::getInitValue(FloatType elemType) {
   return FloatAttr::get(elemType, std::numeric_limits<double>::infinity());
 }
 Value ReduceMinOp::buildAccumOp(OpBuilder &b, Location loc, Value acc, Value elem) {
-  return b.create<arith::MinimumFOp>(loc, acc, elem);
+  return arith::MinimumFOp::create(b, loc, acc, elem);
 }
 
 //===----------------------------------------------------------------------===//

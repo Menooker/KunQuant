@@ -103,7 +103,7 @@ struct LowerHelper {
       return emitError(loc,
           "kunir-to-kungpu: value is not a registered ts handle in tsMap");
     auto tsTy = llvm::cast<TsType>(v.getType());
-    return b.create<TsGetOp>(loc, tsTy.getElementType(),
+    return TsGetOp::create(b, loc, tsTy.getElementType(),
                               it->second, offsetI32).getResult();
   }
 
@@ -147,7 +147,7 @@ struct LowerHelper {
         KUN_ASSIGN_OR_FAIL(Value tv,   getScalar(sel.getTrueValue(), b, ol));
         KUN_ASSIGN_OR_FAIL(Value fv,   getScalar(sel.getFalseValue(),b, ol));
         scalarMap[sel.getResult()] =
-            b.create<arith::SelectOp>(ol, cond, tv, fv).getResult();
+            arith::SelectOp::create(b, ol, cond, tv, fv).getResult();
       } else if (auto br = dyn_cast<BackRefOp>(op)) {
         // Warmup guard:  if   t - outer_loop_lb < window  →  NaN
         //                else                            →  ts.get(window)
@@ -174,30 +174,30 @@ struct LowerHelper {
                               "warmup guard)");
 
         Value delta =
-            b.create<arith::SubIOp>(ol, outerTimeIdx, outerLoopLb);
+            arith::SubIOp::create(b, ol, outerTimeIdx, outerLoopLb);
         Value windowIdx =
-            b.create<arith::ConstantIndexOp>(ol, window);
-        Value inSteady = b.create<arith::CmpIOp>(
-            ol, arith::CmpIPredicate::sge, delta, windowIdx);
-        auto ifOp = b.create<scf::IfOp>(ol, TypeRange{floatTy}, inSteady,
+            arith::ConstantIndexOp::create(b, ol, window);
+        Value inSteady = arith::CmpIOp::create(
+            b, ol, arith::CmpIPredicate::sge, delta, windowIdx);
+        auto ifOp = scf::IfOp::create(b, ol, TypeRange{floatTy}, inSteady,
                                           /*withElseRegion=*/true);
         {
           OpBuilder ib =
               OpBuilder::atBlockBegin(&ifOp.getThenRegion().front());
-          Value offset = ib.create<arith::ConstantOp>(
-              ol, ib.getI32Type(), ib.getI32IntegerAttr(window));
+          Value offset = arith::ConstantOp::create(
+              ib, ol, ib.getI32Type(), ib.getI32IntegerAttr(window));
           KUN_ASSIGN_OR_FAIL(Value loaded,
               getScalarUncached(br.getInput(), offset, ib, ol));
-          ib.create<scf::YieldOp>(ol, loaded);
+          scf::YieldOp::create(ib, ol, loaded);
         }
         {
           OpBuilder ib =
               OpBuilder::atBlockBegin(&ifOp.getElseRegion().front());
           llvm::APFloat qnan =
               llvm::APFloat::getQNaN(floatTy.getFloatSemantics());
-          Value nanV = ib.create<arith::ConstantOp>(
-              ol, floatTy, FloatAttr::get(floatTy, qnan));
-          ib.create<scf::YieldOp>(ol, nanV);
+          Value nanV = arith::ConstantOp::create(
+              ib, ol, floatTy, FloatAttr::get(floatTy, qnan));
+          scf::YieldOp::create(ib, ol, nanV);
         }
         scalarMap[br.getResult()] = ifOp.getResult(0);
       } else if (auto co = dyn_cast<ConstantOp>(op)) {
@@ -211,8 +211,8 @@ struct LowerHelper {
           apv.convert(ft.getFloatSemantics(),
                       llvm::APFloat::rmNearestTiesToEven, &losesInfo);
         }
-        scalarMap[co.getResult()] = b.create<arith::ConstantOp>(
-            ol, elemTy, b.getFloatAttr(elemTy, apv));
+        scalarMap[co.getResult()] = arith::ConstantOp::create(
+            b, ol, elemTy, b.getFloatAttr(elemTy, apv));
       } else if (handleUnknown) {
         if (failed(handleUnknown(*op))) return failure();
       } else {
@@ -310,16 +310,16 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
   // convert-kungpu-to-llvm and are read at lowering time.  When the
   // caller's launcher uses num_chunks = 1 it sets chunk_size =
   // time_length so chunk 0 covers the full range.
-  Value lb = b.create<TimeLbOp>(loc, b.getIndexType());
-  Value ub = b.create<TimeUbOp>(loc, b.getIndexType());
-  Value c0 = b.create<arith::ConstantIndexOp>(loc, 0);
-  Value c1 = b.create<arith::ConstantIndexOp>(loc, 1);
+  Value lb = TimeLbOp::create(b, loc, b.getIndexType());
+  Value ub = TimeUbOp::create(b, loc, b.getIndexType());
+  Value c0 = arith::ConstantIndexOp::create(b, loc, 0);
+  Value c1 = arith::ConstantIndexOp::create(b, loc, 1);
   // Outer-loop ts.get/put always reference the current time step, i.e.
   // tail-relative offset = 0 (i32).  Created before outerFor so it dominates
   // every use inside the loop body.
-  Value zeroOffsetI32 = b.create<arith::ConstantOp>(
-      loc, b.getI32Type(), b.getI32IntegerAttr(0));
-  auto outerFor = b.create<scf::ForOp>(loc, lb, ub, c1);
+  Value zeroOffsetI32 = arith::ConstantOp::create(
+      b, loc, b.getI32Type(), b.getI32IntegerAttr(0));
+  auto outerFor = scf::ForOp::create(b, loc, lb, ub, c1);
 
   // Erase the implicit empty scf.yield (no iter_args → zero-operand yield).
   outerFor.getBody()->back().erase();
@@ -358,11 +358,11 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
     // windowed_output → allocate windowed_temp outside the loop,
     //                   fill circular buffer at each time step inside.
     if (auto woOp = dyn_cast<WindowedOutputOp>(op)) {
-      auto wt = b.create<WindowedTempOp>(ol, woOp.getResult().getType());
+      auto wt = WindowedTempOp::create(b, ol, woOp.getResult().getType());
       outer.tsMap[woOp.getResult()] = wt.getResult();
       KUN_ASSIGN_OR_FAIL(Value inputScalar,
                          outer.getScalar(woOp.getInput(), fb, ol));
-      fb.create<TsPutOp>(ol, wt.getResult(), inputScalar);
+      TsPutOp::create(fb, ol, wt.getResult(), inputScalar);
       return success();
     }
 
@@ -391,27 +391,27 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
         }
         auto elemTy = llvm::cast<FloatType>(
             llvm::cast<TsType>(defOp->getOperand(0).getType()).getElementType());
-        initVals.push_back(fb.create<arith::ConstantOp>(ol, ri.getInitValue(elemTy)));
+        initVals.push_back(arith::ConstantOp::create(fb, ol, ri.getInitValue(elemTy)));
       }
 
       // Create inner scf.for %w = 0 to window step 1 iter_args(acc_i = init_i).
       // The lambda form lets us emit a proper scf.yield as the body terminator
       // without fighting the implicit yield created by ensureTerminator.
-      Value wBound  = fb.create<arith::ConstantIndexOp>(ol, window);
-      Value wM1_i32 = fb.create<arith::ConstantOp>(
-          ol, fb.getI32Type(), fb.getI32IntegerAttr(window - 1));
+      Value wBound  = arith::ConstantIndexOp::create(fb, ol, window);
+      Value wM1_i32 = arith::ConstantOp::create(
+          fb, ol, fb.getI32Type(), fb.getI32IntegerAttr(window - 1));
 
       // Capture lowerBlock result since the lambda can't return LogicalResult.
       bool innerOk = true;
-      auto innerFor = fb.create<scf::ForOp>(
-          ol, c0, wBound, c1, initVals,
+      auto innerFor = scf::ForOp::create(
+          fb, ol, c0, wBound, c1, initVals,
           [&](OpBuilder &ib, Location il, Value w, ValueRange iterArgs) {
             // Tail-relative offset for this window step.  Iterating w from 0
             // to window-1 reads oldest-to-newest, i.e. offset = window-1-w.
             Value w_i32 =
-                ib.create<arith::IndexCastOp>(il, ib.getI32Type(), w);
+                arith::IndexCastOp::create(ib, il, ib.getI32Type(), w);
             Value windowedOffset =
-                ib.create<arith::SubIOp>(il, wM1_i32, w_i32);
+                arith::SubIOp::create(ib, il, wM1_i32, w_i32);
 
             // Inner LowerHelper inherits the outer tsMap/scalarMap so reads
             // inside the body can still reach outer-scope handles (e.g. a
@@ -434,7 +434,7 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
                                                 windowedOffset, ib, il);
               if (failed(r)) {
                 innerOk = false;
-                ib.create<scf::YieldOp>(il, initVals);
+                scf::YieldOp::create(ib, il, initVals);
                 return;
               }
               inner.scalarMap[arg] = *r;
@@ -444,14 +444,14 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
 
             if (failed(inner.lowerBlock(body, ib))) {
               innerOk = false;
-              ib.create<scf::YieldOp>(il, initVals); // keep IR structurally valid
+              scf::YieldOp::create(ib, il, initVals); // keep IR structurally valid
               return;
             }
 
             SmallVector<Value> newAccs;
             for (Value yv : yieldOp.getValues())
               newAccs.push_back(inner.scalarMap.find(yv)->second);
-            ib.create<scf::YieldOp>(il, newAccs);
+            scf::YieldOp::create(ib, il, newAccs);
           });
       if (!innerOk) return failure();
 
@@ -466,8 +466,8 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
     // loop, like windowed_temp).  Stored in tsMap so that downstream reads
     // (via getScalar → kungpu.ts.get @ offset 0) resolve to the slot.
     if (auto acc = dyn_cast<kunir::AccumulatorOp>(op)) {
-      auto ka = b.create<kungpu::AccumulatorOp>(
-          ol, acc.getResult().getType(), acc.getNameAttr());
+      auto ka = kungpu::AccumulatorOp::create(
+          b, ol, acc.getResult().getType(), acc.getNameAttr());
       outer.tsMap[acc.getResult()] = ka.getResult();
       return success();
     }
@@ -484,10 +484,10 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
                          outer.getScalar(sa.getMask(),  fb, ol));
       KUN_ASSIGN_OR_FAIL(Value valueScalar,
                          outer.getScalar(sa.getValue(), fb, ol));
-      auto ifOp = fb.create<scf::IfOp>(ol, /*resultTypes=*/TypeRange{},
+      auto ifOp = scf::IfOp::create(fb, ol, /*resultTypes=*/TypeRange{},
                                          maskScalar, /*withElseRegion=*/false);
       OpBuilder ib = OpBuilder::atBlockBegin(&ifOp.getThenRegion().front());
-      ib.create<TsPutOp>(ol, accIt->second, valueScalar);
+      TsPutOp::create(ib, ol, accIt->second, valueScalar);
       return success();
     }
 
@@ -500,8 +500,8 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
       if (inputIt == outer.tsMap.end())
         return op.emitError(
             "kunir-to-kungpu: fast_windowed_sum input must be a ts handle");
-      auto newOp = fb.create<FastWindowedSumOp>(
-          ol, /*resultType=*/inputTs.getElementType(),
+      auto newOp = FastWindowedSumOp::create(
+          fb, ol, /*resultType=*/inputTs.getElementType(),
           /*input=*/inputIt->second, fws.getWindowAttr());
       outer.scalarMap[fws.getResult()] = newOp.getResult();
       return success();
@@ -520,9 +520,9 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
     auto it = outer.scalarMap.find(rv);
     assert(it != outer.scalarMap.end() &&
            "ts return value not materialised as a scalar");
-    fb.create<TsPutOp>(loc, outParam, it->second);
+    TsPutOp::create(fb, loc, outParam, it->second);
   }
-  fb.create<scf::YieldOp>(loc);
+  scf::YieldOp::create(fb, loc);
 
   // ------------------------------------------------------------------
   // 7. Insert a replacement return before the original return op.
@@ -532,7 +532,7 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
     SmallVector<Value> nonTsRets;
     for (Value v : retOp.getOperands())
       if (!isa<TsType>(v.getType())) nonTsRets.push_back(v);
-    b.create<kunir::ReturnOp>(loc, mlir::ValueRange(nonTsRets));
+    kunir::ReturnOp::create(b, loc, mlir::ValueRange(nonTsRets));
   }
 
   // ------------------------------------------------------------------

@@ -45,7 +45,7 @@ public:
     b_.setInsertionPointToEnd(pm_->module.get().getBody());
     // One gpu.module per IRBuilder — KunMLIR's pipeline expects exactly
     // one container for all kunir.func ops.
-    gpuMod_ = b_.create<gpu::GPUModuleOp>(loc, "kungpu_kernels");
+    gpuMod_ = gpu::GPUModuleOp::create(b_, loc, "kungpu_kernels");
     b_.setInsertionPointToStart(&gpuMod_.getBodyRegion().front());
   }
 
@@ -112,9 +112,9 @@ public:
     auto target = kunir::TargetSpecAttr::get(ctx, occupancy, warpsPerCta,
                                                 smemSize, vectorSize);
 
-    curFunc_ = b_.create<kunir::FuncOp>(loc, name, funcType, inNamesAttr,
-                                          outNamesAttr, target,
-                                          unreliableCount);
+    curFunc_ = kunir::FuncOp::create(b_, loc, name, funcType, inNamesAttr,
+                                       outNamesAttr, target,
+                                       unreliableCount);
     Block &entry = curFunc_.getBodyBlock();
     b_.setInsertionPointToStart(&entry);
 
@@ -132,7 +132,7 @@ public:
           " for_each_back_window region(s) still open — close them first");
 
     Location loc = b_.getUnknownLoc();
-    b_.create<kunir::ReturnOp>(loc, ValueRange(returnValues));
+    kunir::ReturnOp::create(b_, loc, ValueRange(returnValues));
 
     // Restore insertion point to gpu.module so the next begin_func
     // appends a sibling.
@@ -164,22 +164,22 @@ public:
 
   // ── Select (cond, true_value, false_value) ──────────────────────
   Value selectOp(Value cond, Value tv, Value fv) {
-    return b_.create<kunir::SelectOp>(b_.getUnknownLoc(), cond, tv, fv);
+    return kunir::SelectOp::create(b_, b_.getUnknownLoc(), cond, tv, fv);
   }
 
   // ── Scalar constant lifted to ts<T, 1> ─────────────────────────
   Value constantOp(double value, Type tsTy) {
     auto attr = b_.getF64FloatAttr(value);
-    return b_.create<kunir::ConstantOp>(b_.getUnknownLoc(), tsTy, attr);
+    return kunir::ConstantOp::create(b_, b_.getUnknownLoc(), tsTy, attr);
   }
 
   // ── Accumulator / SetAccumulator ───────────────────────────────
   Value accumulatorOp(std::string name, Type tsTy) {
-    return b_.create<kunir::AccumulatorOp>(b_.getUnknownLoc(), tsTy,
+    return kunir::AccumulatorOp::create(b_, b_.getUnknownLoc(), tsTy,
                                             b_.getStringAttr(name));
   }
   void setAccumulatorOp(Value acc, Value mask, Value value) {
-    b_.create<kunir::SetAccumulatorOp>(b_.getUnknownLoc(), acc, mask, value);
+    kunir::SetAccumulatorOp::create(b_, b_.getUnknownLoc(), acc, mask, value);
   }
 
   // ── Windowed buffer materialization ───────────────────────────────
@@ -187,7 +187,7 @@ public:
     auto inTs = llvm::cast<kunir::TsType>(x.getType());
     auto resultTy = kunir::TsType::get(pm_->ctx.get(), inTs.getElementType(),
                                           static_cast<uint64_t>(length));
-    return b_.create<kunir::WindowedOutputOp>(b_.getUnknownLoc(), resultTy, x,
+    return kunir::WindowedOutputOp::create(b_, b_.getUnknownLoc(), resultTy, x,
                                                 length);
   }
 
@@ -195,12 +195,12 @@ public:
   Value backRefOp(Value x, int64_t window) {
     auto inTs = llvm::cast<kunir::TsType>(x.getType());
     auto resultTy = kunir::TsType::get(pm_->ctx.get(), inTs.getElementType(), 1);
-    return b_.create<kunir::BackRefOp>(b_.getUnknownLoc(), resultTy, x, window);
+    return kunir::BackRefOp::create(b_, b_.getUnknownLoc(), resultTy, x, window);
   }
   Value fastWindowedSumOp(Value x, int64_t window) {
     auto inTs = llvm::cast<kunir::TsType>(x.getType());
     auto resultTy = kunir::TsType::get(pm_->ctx.get(), inTs.getElementType(), 1);
-    return b_.create<kunir::FastWindowedSumOp>(b_.getUnknownLoc(), resultTy, x,
+    return kunir::FastWindowedSumOp::create(b_, b_.getUnknownLoc(), resultTy, x,
                                                  window);
   }
 
@@ -209,7 +209,7 @@ public:
   beginForEachBackWindow(std::vector<Value> inputs, int64_t window,
                             std::vector<Type> resultTypes) {
     Location loc = b_.getUnknownLoc();
-    auto loopOp = b_.create<kunir::ForEachBackWindowOp>(loc, resultTypes,
+    auto loopOp = kunir::ForEachBackWindowOp::create(b_, loc, resultTypes,
                                                           inputs, window);
     // Populate body block: one block arg per input, each ts<elemType, 1>.
     Block *body = new Block;
@@ -234,7 +234,7 @@ public:
       throw std::runtime_error(
           "IRBuilder.end_for_each_back_window: no open loop");
     Location loc = b_.getUnknownLoc();
-    b_.create<kunir::YieldOp>(loc, ValueRange(yieldValues));
+    kunir::YieldOp::create(b_, loc, ValueRange(yieldValues));
 
     auto loopOp = loopStack_.back();
     loopStack_.pop_back();
@@ -272,14 +272,14 @@ public:
 
 private:
   template <typename OpTy> Value makeBin(Value a, Value b) {
-    return b_.create<OpTy>(b_.getUnknownLoc(), a, b);
+    return OpTy::create(b_, b_.getUnknownLoc(), a, b);
   }
   template <typename OpTy> Value makeUn(Value x) {
-    return b_.create<OpTy>(b_.getUnknownLoc(), x);
+    return OpTy::create(b_, b_.getUnknownLoc(), x);
   }
   template <typename OpTy> Value makeReduce(Value x) {
     // SameOperandsAndResultType — pass x's type as the result type.
-    return b_.create<OpTy>(b_.getUnknownLoc(), x.getType(), x);
+    return OpTy::create(b_, b_.getUnknownLoc(), x.getType(), x);
   }
 
   std::unique_ptr<PyModule> pm_;

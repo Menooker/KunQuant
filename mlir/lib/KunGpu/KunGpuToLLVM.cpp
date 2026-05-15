@@ -120,11 +120,11 @@ using ChunkCtxMap = llvm::DenseMap<Operation *, ChunkContext>;
 //===----------------------------------------------------------------------===//
 
 static Value emitStockId(OpBuilder &b, Location loc, Type idxTy) {
-  Value tid  = b.create<gpu::ThreadIdOp>(loc, idxTy, gpu::Dimension::x);
-  Value bid  = b.create<gpu::BlockIdOp>(loc, idxTy, gpu::Dimension::x);
-  Value bdim = b.create<gpu::BlockDimOp>(loc, idxTy, gpu::Dimension::x);
-  return b.create<arith::AddIOp>(
-      loc, b.create<arith::MulIOp>(loc, bid, bdim), tid);
+  Value tid  = gpu::ThreadIdOp::create(b, loc, idxTy, gpu::Dimension::x);
+  Value bid  = gpu::BlockIdOp::create(b, loc, idxTy, gpu::Dimension::x);
+  Value bdim = gpu::BlockDimOp::create(b, loc, idxTy, gpu::Dimension::x);
+  return arith::AddIOp::create(
+      b, loc, arith::MulIOp::create(b, loc, bid, bdim), tid);
 }
 
 //===----------------------------------------------------------------------===//
@@ -170,8 +170,8 @@ static LogicalResult convertFuncSignature(kunir::FuncOp fn) {
   // Build gpu.func right before the kunir.func — both live inside the
   // enclosing gpu.module.
   OpBuilder b(fn);
-  auto newFunc = b.create<gpu::GPUFuncOp>(
-      loc, fn.getSymName(), FunctionType::get(ctx, newArgTypes, {}));
+  auto newFunc = gpu::GPUFuncOp::create(
+      b, loc, fn.getSymName(), FunctionType::get(ctx, newArgTypes, {}));
   // Mark as a kernel (sets the op-level `kernel` attribute) so that
   // convert-gpu-to-nvvm tags the resulting llvm.func with `nvvm.kernel`.
   newFunc.setKernelAttr(UnitAttr::get(ctx));
@@ -196,7 +196,7 @@ static LogicalResult convertFuncSignature(kunir::FuncOp fn) {
   newFunc.walk([&](kunir::ReturnOp r) { returns.push_back(r); });
   for (kunir::ReturnOp r : returns) {
     OpBuilder rb(r);
-    rb.create<gpu::ReturnOp>(r.getLoc());
+    gpu::ReturnOp::create(rb, r.getLoc());
     r.erase();
   }
   fn.erase();
@@ -222,11 +222,11 @@ static LogicalResult convertFuncSignature(kunir::FuncOp fn) {
   OpBuilder pb(ctx);
   pb.setInsertionPointToStart(&entry);
   Value sidIdx = emitStockId(pb, loc, idxTy);
-  Value sidI32 = pb.create<arith::IndexCastOp>(loc, i32Ty, sidIdx);
+  Value sidI32 = arith::IndexCastOp::create(pb, loc, i32Ty, sidIdx);
   Value numStocks = entry.getArgument(1); // i32
-  Value active = pb.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt,
+  Value active = arith::CmpIOp::create(pb, loc, arith::CmpIPredicate::slt,
                                             sidI32, numStocks);
-  auto ifOp = pb.create<scf::IfOp>(loc, /*resultTypes=*/TypeRange{},
+  auto ifOp = scf::IfOp::create(pb, loc, /*resultTypes=*/TypeRange{},
                                      active, /*withElseRegion=*/false);
 
   // Move all original ops (everything between the prologue we just
@@ -252,7 +252,7 @@ static LogicalResult convertFuncSignature(kunir::FuncOp fn) {
 static Value getNumStocksI64(OpBuilder &b, Operation *op, Location loc) {
   Value ns32 = op->getParentOfType<gpu::GPUFuncOp>()
                    .getBody().front().getArgument(1);
-  return b.create<arith::ExtSIOp>(loc, b.getI64Type(), ns32);
+  return arith::ExtSIOp::create(b, loc, b.getI64Type(), ns32);
 }
 static Value getCurrentTimeIdx(Operation *op) {
   auto fOp = op->getParentOfType<scf::ForOp>();
@@ -264,14 +264,14 @@ static Value gmemGEPWithOffset(OpBuilder &b, Location loc, Type elemTy,
                                 LLVM::LLVMPointerType ptrTy, Value basePt,
                                 Value timeIdx, Value offsetIdx,
                                 Value numStocksI64, Type idxTy, Type i64Ty) {
-  Value effIdx = offsetIdx ? b.create<arith::SubIOp>(loc, timeIdx, offsetIdx).getResult()
+  Value effIdx = offsetIdx ? arith::SubIOp::create(b, loc, timeIdx, offsetIdx).getResult()
                             : timeIdx;
-  Value tI64   = b.create<arith::IndexCastOp>(loc, i64Ty, effIdx);
+  Value tI64   = arith::IndexCastOp::create(b, loc, i64Ty, effIdx);
   Value sid    = emitStockId(b, loc, idxTy);
-  Value sidI64 = b.create<arith::IndexCastOp>(loc, i64Ty, sid);
-  Value lin    = b.create<arith::AddIOp>(
-      loc, b.create<arith::MulIOp>(loc, tI64, numStocksI64), sidI64);
-  return b.create<LLVM::GEPOp>(loc, ptrTy, elemTy, basePt, ValueRange{lin});
+  Value sidI64 = arith::IndexCastOp::create(b, loc, i64Ty, sid);
+  Value lin    = arith::AddIOp::create(
+      b, loc, arith::MulIOp::create(b, loc, tI64, numStocksI64), sidI64);
+  return LLVM::GEPOp::create(b, loc, ptrTy, elemTy, basePt, ValueRange{lin});
 }
 
 //===----------------------------------------------------------------------===//
@@ -307,15 +307,15 @@ struct TimeLbPattern : OpConversionPattern<TimeLbOp> {
     auto fn = op->getParentOfType<gpu::GPUFuncOp>();
     Value chunkSize = fn.getBody().front().getArgument(3);
     Value warmup    = fn.getBody().front().getArgument(4);
-    Value cyIdx = rewriter.create<gpu::BlockIdOp>(loc, idxTy, gpu::Dimension::y);
-    Value cy = rewriter.create<arith::IndexCastOp>(loc, i32Ty, cyIdx);
-    Value c0 = rewriter.create<arith::ConstantOp>(
-        loc, i32Ty, rewriter.getI32IntegerAttr(0));
-    Value isFirst = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::eq, cy, c0);
-    Value off = rewriter.create<arith::MulIOp>(loc, cy, chunkSize);
-    Value offMinusW = rewriter.create<arith::SubIOp>(loc, off, warmup);
-    Value lbI32 = rewriter.create<arith::SelectOp>(loc, isFirst, c0, offMinusW);
+    Value cyIdx = gpu::BlockIdOp::create(rewriter, loc, idxTy, gpu::Dimension::y);
+    Value cy = arith::IndexCastOp::create(rewriter, loc, i32Ty, cyIdx);
+    Value c0 = arith::ConstantOp::create(
+        rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(0));
+    Value isFirst = arith::CmpIOp::create(
+        rewriter, loc, arith::CmpIPredicate::eq, cy, c0);
+    Value off = arith::MulIOp::create(rewriter, loc, cy, chunkSize);
+    Value offMinusW = arith::SubIOp::create(rewriter, loc, off, warmup);
+    Value lbI32 = arith::SelectOp::create(rewriter, loc, isFirst, c0, offMinusW);
     rewriter.replaceOpWithNewOp<arith::IndexCastOp>(op, idxTy, lbI32);
     return success();
   }
@@ -335,13 +335,13 @@ struct TimeUbPattern : OpConversionPattern<TimeUbOp> {
     auto fn = op->getParentOfType<gpu::GPUFuncOp>();
     Value timeLen   = fn.getBody().front().getArgument(0);
     Value chunkSize = fn.getBody().front().getArgument(3);
-    Value cyIdx = rewriter.create<gpu::BlockIdOp>(loc, idxTy, gpu::Dimension::y);
-    Value cy = rewriter.create<arith::IndexCastOp>(loc, i32Ty, cyIdx);
-    Value c1 = rewriter.create<arith::ConstantOp>(
-        loc, i32Ty, rewriter.getI32IntegerAttr(1));
-    Value next = rewriter.create<arith::AddIOp>(loc, cy, c1);
-    Value end = rewriter.create<arith::MulIOp>(loc, next, chunkSize);
-    Value ubI32 = rewriter.create<arith::MinUIOp>(loc, end, timeLen);
+    Value cyIdx = gpu::BlockIdOp::create(rewriter, loc, idxTy, gpu::Dimension::y);
+    Value cy = arith::IndexCastOp::create(rewriter, loc, i32Ty, cyIdx);
+    Value c1 = arith::ConstantOp::create(
+        rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+    Value next = arith::AddIOp::create(rewriter, loc, cy, c1);
+    Value end = arith::MulIOp::create(rewriter, loc, next, chunkSize);
+    Value ubI32 = arith::MinUIOp::create(rewriter, loc, end, timeLen);
     rewriter.replaceOpWithNewOp<arith::IndexCastOp>(op, idxTy, ubI32);
     return success();
   }
@@ -369,7 +369,7 @@ static Value getOrCreateMask(Operation *op, ChunkCtxMap &map,
 
   OpBuilder::InsertionGuard g(rewriter);
   rewriter.setInsertionPointToStart(&fn.getBody().front());
-  ctx.mask = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(),
+  ctx.mask = arith::IndexCastOp::create(rewriter, loc, rewriter.getIndexType(),
                                                     maskI32);
   return ctx.mask;
 }
@@ -394,15 +394,15 @@ static Value getOrCreateWriteStart(Operation *op, ChunkCtxMap &map,
   rewriter.setInsertionPointToStart(&entry);
   auto i32Ty = rewriter.getI32Type();
   auto idxTy = rewriter.getIndexType();
-  Value cyIdx = rewriter.create<gpu::BlockIdOp>(loc, idxTy, gpu::Dimension::y);
-  Value cy = rewriter.create<arith::IndexCastOp>(loc, i32Ty, cyIdx);
-  Value c0 = rewriter.create<arith::ConstantOp>(
-      loc, i32Ty, rewriter.getI32IntegerAttr(0));
-  Value isFirst = rewriter.create<arith::CmpIOp>(
-      loc, arith::CmpIPredicate::eq, cy, c0);
-  Value off = rewriter.create<arith::MulIOp>(loc, cy, chunkSizeI32);
-  Value wsI32 = rewriter.create<arith::SelectOp>(loc, isFirst, maskI32, off);
-  ctx.writeStart = rewriter.create<arith::IndexCastOp>(loc, idxTy, wsI32);
+  Value cyIdx = gpu::BlockIdOp::create(rewriter, loc, idxTy, gpu::Dimension::y);
+  Value cy = arith::IndexCastOp::create(rewriter, loc, i32Ty, cyIdx);
+  Value c0 = arith::ConstantOp::create(
+      rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(0));
+  Value isFirst = arith::CmpIOp::create(
+      rewriter, loc, arith::CmpIPredicate::eq, cy, c0);
+  Value off = arith::MulIOp::create(rewriter, loc, cy, chunkSizeI32);
+  Value wsI32 = arith::SelectOp::create(rewriter, loc, isFirst, maskI32, off);
+  ctx.writeStart = arith::IndexCastOp::create(rewriter, loc, idxTy, wsI32);
   return ctx.writeStart;
 }
 
@@ -480,32 +480,32 @@ struct WindowedTempPattern : OpConversionPattern<WindowedTempOp> {
         OpBuilder::InsertionGuard g(rewriter);
         Block *modBody = &gpuModule.getBodyRegion().front();
         rewriter.setInsertionPoint(modBody, modBody->begin());
-        rewriter.create<LLVM::GlobalOp>(
-            loc, LLVM::LLVMArrayType::get(elemTy, N * blockSize), false,
+        LLVM::GlobalOp::create(
+            rewriter, loc, LLVM::LLVMArrayType::get(elemTy, N * blockSize), false,
             LLVM::Linkage::Internal, name, Attribute{}, 0, 3);
       }
-      Value raw = rewriter.create<LLVM::AddressOfOp>(
-          loc, LLVM::LLVMPointerType::get(ctx, 3), name);
-      Value gen    = rewriter.create<LLVM::AddrSpaceCastOp>(loc, ptrTy, raw);
-      Value tid    = rewriter.create<gpu::ThreadIdOp>(loc, idxTy, gpu::Dimension::x);
-      Value tidI32 = rewriter.create<arith::IndexCastOp>(loc, i32Ty, tid);
+      Value raw = LLVM::AddressOfOp::create(
+          rewriter, loc, LLVM::LLVMPointerType::get(ctx, 3), name);
+      Value gen    = LLVM::AddrSpaceCastOp::create(rewriter, loc, ptrTy, raw);
+      Value tid    = gpu::ThreadIdOp::create(rewriter, loc, idxTy, gpu::Dimension::x);
+      Value tidI32 = arith::IndexCastOp::create(rewriter, loc, i32Ty, tid);
       // bufPtr = smem + tid  (slot-major: slot j thread t lives at j*K + t)
-      bufPtr = rewriter.create<LLVM::GEPOp>(loc, ptrTy, elemTy, gen,
+      bufPtr = LLVM::GEPOp::create(rewriter, loc, ptrTy, elemTy, gen,
                                              ValueRange{tidI32});
     } else {
       stride = 1;
-      Value nCst = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Ty, rewriter.getI32IntegerAttr(N));
-      bufPtr = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, elemTy, nCst);
+      Value nCst = LLVM::ConstantOp::create(
+          rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(N));
+      bufPtr = LLVM::AllocaOp::create(rewriter, loc, ptrTy, elemTy, nCst);
     }
 
     // Single i32 cell tracking next-writable position; init to 0.
-    Value c1_i32 = rewriter.create<LLVM::ConstantOp>(
-        loc, i32Ty, rewriter.getI32IntegerAttr(1));
-    Value posPtr = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, i32Ty, c1_i32);
-    Value zeroI32 = rewriter.create<LLVM::ConstantOp>(
-        loc, i32Ty, rewriter.getI32IntegerAttr(0));
-    rewriter.create<LLVM::StoreOp>(loc, zeroI32, posPtr);
+    Value c1_i32 = LLVM::ConstantOp::create(
+        rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+    Value posPtr = LLVM::AllocaOp::create(rewriter, loc, ptrTy, i32Ty, c1_i32);
+    Value zeroI32 = LLVM::ConstantOp::create(
+        rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(0));
+    LLVM::StoreOp::create(rewriter, loc, zeroI32, posPtr);
 
     // Side state, keyed on the original (pre-replacement) ts Value.
     descMap[op.getResult()] = {posPtr, stride};
@@ -548,12 +548,12 @@ struct AccumulatorPattern : OpConversionPattern<kungpu::AccumulatorOp> {
       OpBuilder::InsertionGuard g(rewriter);
       Block &entry = fn.getBody().front();
       rewriter.setInsertionPointToStart(&entry);
-      Value c1_i32 = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Ty, rewriter.getI32IntegerAttr(1));
-      bufPtr = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, elemTy, c1_i32);
-      Value zero = rewriter.create<LLVM::ConstantOp>(
-          loc, elemTy, rewriter.getZeroAttr(elemTy));
-      rewriter.create<LLVM::StoreOp>(loc, zero, bufPtr);
+      Value c1_i32 = LLVM::ConstantOp::create(
+          rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+      bufPtr = LLVM::AllocaOp::create(rewriter, loc, ptrTy, elemTy, c1_i32);
+      Value zero = LLVM::ConstantOp::create(
+          rewriter, loc, elemTy, rewriter.getZeroAttr(elemTy));
+      LLVM::StoreOp::create(rewriter, loc, zero, bufPtr);
     }
 
     // posPtr = null → ts.get / ts.put treat as accumulator (slot 0 only).
@@ -568,9 +568,9 @@ static Value applyStride(OpBuilder &b, Location loc, Value idx, int64_t stride,
                           Type i32Ty) {
   if (stride == 1)
     return idx;
-  Value k = b.create<LLVM::ConstantOp>(loc, i32Ty,
+  Value k = LLVM::ConstantOp::create(b, loc, i32Ty,
                                         b.getI32IntegerAttr(stride));
-  return b.create<LLVM::MulOp>(loc, idx, k);
+  return LLVM::MulOp::create(b, loc, idx, k);
 }
 
 struct TsGetPattern : OpConversionPattern<TsGetOp> {
@@ -615,32 +615,32 @@ struct TsGetPattern : OpConversionPattern<TsGetOp> {
       //   return buf[idx * stride]
       int64_t N = static_cast<int64_t>(
           llvm::cast<TsType>(op.getTs().getType()).getMaxLookback());
-      Value pos    = rewriter.create<LLVM::LoadOp>(loc, i32Ty, desc.posPtr);
-      Value c1     = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Ty, rewriter.getI32IntegerAttr(1));
-      Value nCst   = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Ty, rewriter.getI32IntegerAttr(N));
-      Value adj    = rewriter.create<LLVM::AddOp>(loc, offsetI32, c1);
-      Value cmp    = rewriter.create<LLVM::ICmpOp>(loc, LLVM::ICmpPredicate::uge,
+      Value pos    = LLVM::LoadOp::create(rewriter, loc, i32Ty, desc.posPtr);
+      Value c1     = LLVM::ConstantOp::create(
+          rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+      Value nCst   = LLVM::ConstantOp::create(
+          rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(N));
+      Value adj    = LLVM::AddOp::create(rewriter, loc, offsetI32, c1);
+      Value cmp    = LLVM::ICmpOp::create(rewriter, loc, LLVM::ICmpPredicate::uge,
                                                     pos, adj);
-      Value posMinusAdj = rewriter.create<LLVM::SubOp>(loc, pos, adj);
-      Value posPlusN    = rewriter.create<LLVM::AddOp>(loc, pos, nCst);
-      Value wrapped     = rewriter.create<LLVM::SubOp>(loc, posPlusN, adj);
-      Value idx32       = rewriter.create<LLVM::SelectOp>(
-          loc, cmp, posMinusAdj, wrapped);
+      Value posMinusAdj = LLVM::SubOp::create(rewriter, loc, pos, adj);
+      Value posPlusN    = LLVM::AddOp::create(rewriter, loc, pos, nCst);
+      Value wrapped     = LLVM::SubOp::create(rewriter, loc, posPlusN, adj);
+      Value idx32       = LLVM::SelectOp::create(
+          rewriter, loc, cmp, posMinusAdj, wrapped);
       // LLVM GEP accepts any integer index type — keep it i32 to avoid the
       // 64-bit ops that are slow on GPUs.
       Value gepIdx = applyStride(rewriter, loc, idx32, desc.stride, i32Ty);
-      Value gep = rewriter.create<LLVM::GEPOp>(
-          loc, ptrTy, elemTy, tsPtr, ValueRange{gepIdx});
+      Value gep = LLVM::GEPOp::create(
+          rewriter, loc, ptrTy, elemTy, tsPtr, ValueRange{gepIdx});
       rewriter.replaceOpWithNewOp<LLVM::LoadOp>(op, elemTy, gep);
     } else {
       // ── global ts (function arg, TxS layout) ──────────────────────
       //   effective time = (enclosing scf.for iv) − offset
       //   load gmem[effTime * num_stocks + stock_id]
       Value timeIdx = getCurrentTimeIdx(op);
-      Value offsetIdx = rewriter.create<arith::IndexCastOp>(
-          loc, idxTy, offsetI32);
+      Value offsetIdx = arith::IndexCastOp::create(
+          rewriter, loc, idxTy, offsetI32);
       Value gep = gmemGEPWithOffset(rewriter, loc, elemTy, ptrTy, tsPtr,
                                      timeIdx, offsetIdx,
                                      getNumStocksI64(rewriter, op, loc),
@@ -678,7 +678,7 @@ struct TsPutPattern : OpConversionPattern<TsPutOp> {
       const WTDesc &desc = it->second;
       // ── accumulator: single-slot store, no pos counter to advance. ─
       if (!desc.posPtr) {
-        rewriter.create<LLVM::StoreOp>(loc, v, tsPtr);
+        LLVM::StoreOp::create(rewriter, loc, v, tsPtr);
         rewriter.eraseOp(op);
         return success();
       }
@@ -687,25 +687,25 @@ struct TsPutPattern : OpConversionPattern<TsPutOp> {
       //   pos = (pos + 1 >= N) ? 0 : pos + 1
       int64_t N = static_cast<int64_t>(
           llvm::cast<TsType>(op.getTs().getType()).getMaxLookback());
-      Value pos = rewriter.create<LLVM::LoadOp>(loc, i32Ty, desc.posPtr);
+      Value pos = LLVM::LoadOp::create(rewriter, loc, i32Ty, desc.posPtr);
 
       // Keep GEP index in i32 (cheap on GPU); LLVM accepts any int type.
       Value gepIdx = applyStride(rewriter, loc, pos, desc.stride, i32Ty);
-      Value gep = rewriter.create<LLVM::GEPOp>(
-          loc, ptrTy, elemTy, tsPtr, ValueRange{gepIdx});
-      rewriter.create<LLVM::StoreOp>(loc, v, gep);
+      Value gep = LLVM::GEPOp::create(
+          rewriter, loc, ptrTy, elemTy, tsPtr, ValueRange{gepIdx});
+      LLVM::StoreOp::create(rewriter, loc, v, gep);
 
-      Value c1     = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Ty, rewriter.getI32IntegerAttr(1));
-      Value nCst   = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Ty, rewriter.getI32IntegerAttr(N));
-      Value zero32 = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Ty, rewriter.getI32IntegerAttr(0));
-      Value posP1  = rewriter.create<LLVM::AddOp>(loc, pos, c1);
-      Value cmp    = rewriter.create<LLVM::ICmpOp>(loc, LLVM::ICmpPredicate::uge,
+      Value c1     = LLVM::ConstantOp::create(
+          rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+      Value nCst   = LLVM::ConstantOp::create(
+          rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(N));
+      Value zero32 = LLVM::ConstantOp::create(
+          rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(0));
+      Value posP1  = LLVM::AddOp::create(rewriter, loc, pos, c1);
+      Value cmp    = LLVM::ICmpOp::create(rewriter, loc, LLVM::ICmpPredicate::uge,
                                                     posP1, nCst);
-      Value newPos = rewriter.create<LLVM::SelectOp>(loc, cmp, zero32, posP1);
-      rewriter.create<LLVM::StoreOp>(loc, newPos, desc.posPtr);
+      Value newPos = LLVM::SelectOp::create(rewriter, loc, cmp, zero32, posP1);
+      LLVM::StoreOp::create(rewriter, loc, newPos, desc.posPtr);
       rewriter.eraseOp(op);
     } else {
       // ── global ts: write at current time, gated by per-chunk write_start,
@@ -722,19 +722,19 @@ struct TsPutPattern : OpConversionPattern<TsPutOp> {
       Value writeStart = getOrCreateWriteStart(op, chunkCtx, rewriter);
       Value mask       = getOrCreateMask(op, chunkCtx, rewriter);
 
-      Value doWrite = rewriter.create<arith::CmpIOp>(
-          loc, arith::CmpIPredicate::sge, timeIdx, writeStart);
-      auto ifOp = rewriter.create<scf::IfOp>(
-          loc, /*resultTypes=*/TypeRange{}, doWrite,
+      Value doWrite = arith::CmpIOp::create(
+          rewriter, loc, arith::CmpIPredicate::sge, timeIdx, writeStart);
+      auto ifOp = scf::IfOp::create(
+          rewriter, loc, /*resultTypes=*/TypeRange{}, doWrite,
           /*withElseRegion=*/false);
 
       OpBuilder ib = OpBuilder::atBlockBegin(&ifOp.getThenRegion().front());
-      Value tOut = ib.create<arith::SubIOp>(loc, timeIdx, mask);
+      Value tOut = arith::SubIOp::create(ib, loc, timeIdx, mask);
       Value gep = gmemGEPWithOffset(ib, loc, elemTy, ptrTy, tsPtr,
                                      tOut, /*offsetIdx=*/Value(),
                                      getNumStocksI64(ib, op, loc),
                                      idxTy, i64Ty);
-      ib.create<LLVM::StoreOp>(loc, v, gep);
+      LLVM::StoreOp::create(ib, loc, v, gep);
       rewriter.eraseOp(op);
     }
     return success();
@@ -777,7 +777,6 @@ struct FastWindowedSumPattern : OpConversionPattern<FastWindowedSumOp> {
     auto *ctx    = op.getContext();
     Location loc = op.getLoc();
     auto i32Ty   = rewriter.getI32Type();
-    auto idxTy   = rewriter.getIndexType();
     auto ptrTy   = LLVM::LLVMPointerType::get(ctx);
 
     auto resultTy = op.getResult().getType();
@@ -801,30 +800,30 @@ struct FastWindowedSumPattern : OpConversionPattern<FastWindowedSumOp> {
       OpBuilder::InsertionGuard g(rewriter);
       Block &entry = fn.getBody().front();
       rewriter.setInsertionPointToStart(&entry);
-      Value c1_i32 = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Ty, rewriter.getI32IntegerAttr(1));
-      Value zeroF = rewriter.create<LLVM::ConstantOp>(
-          loc, floatTy, rewriter.getFloatAttr(floatTy, 0.0));
-      Value windowI32 = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Ty, rewriter.getI32IntegerAttr(window));
+      Value c1_i32 = LLVM::ConstantOp::create(
+          rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+      Value zeroF = LLVM::ConstantOp::create(
+          rewriter, loc, floatTy, rewriter.getFloatAttr(floatTy, 0.0));
+      Value windowI32 = LLVM::ConstantOp::create(
+          rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(window));
 
-      vPtr    = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, floatTy, c1_i32);
-      addPtr  = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, floatTy, c1_i32);
-      subPtr  = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, floatTy, c1_i32);
-      nansPtr = rewriter.create<LLVM::AllocaOp>(loc, ptrTy, i32Ty,   c1_i32);
+      vPtr    = LLVM::AllocaOp::create(rewriter, loc, ptrTy, floatTy, c1_i32);
+      addPtr  = LLVM::AllocaOp::create(rewriter, loc, ptrTy, floatTy, c1_i32);
+      subPtr  = LLVM::AllocaOp::create(rewriter, loc, ptrTy, floatTy, c1_i32);
+      nansPtr = LLVM::AllocaOp::create(rewriter, loc, ptrTy, i32Ty,   c1_i32);
 
-      rewriter.create<LLVM::StoreOp>(loc, zeroF,     vPtr);
-      rewriter.create<LLVM::StoreOp>(loc, zeroF,     addPtr);
-      rewriter.create<LLVM::StoreOp>(loc, zeroF,     subPtr);
-      rewriter.create<LLVM::StoreOp>(loc, windowI32, nansPtr);
+      LLVM::StoreOp::create(rewriter, loc, zeroF,     vPtr);
+      LLVM::StoreOp::create(rewriter, loc, zeroF,     addPtr);
+      LLVM::StoreOp::create(rewriter, loc, zeroF,     subPtr);
+      LLVM::StoreOp::create(rewriter, loc, windowI32, nansPtr);
     }
 
     // ── 2. Read cur (off=0) and old (off=window, guarded). ─────────
-    Value zeroOff   = rewriter.create<arith::ConstantOp>(
-        loc, i32Ty, rewriter.getI32IntegerAttr(0));
-    Value windowOff = rewriter.create<arith::ConstantOp>(
-        loc, i32Ty, rewriter.getI32IntegerAttr(window));
-    Value cur = rewriter.create<TsGetOp>(loc, floatTy, origInput, zeroOff);
+    Value zeroOff   = arith::ConstantOp::create(
+        rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(0));
+    Value windowOff = arith::ConstantOp::create(
+        rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(window));
+    Value cur = TsGetOp::create(rewriter, loc, floatTy, origInput, zeroOff);
 
     auto forOp = op->getParentOfType<scf::ForOp>();
     if (!forOp)
@@ -832,47 +831,47 @@ struct FastWindowedSumPattern : OpConversionPattern<FastWindowedSumOp> {
           op, "fast_windowed_sum must be inside a scf.for time loop");
     Value timeIdx   = forOp.getInductionVar();
     Value loopLb    = forOp.getLowerBound();
-    Value localT    = rewriter.create<arith::SubIOp>(loc, timeIdx, loopLb);
-    Value windowIdx = rewriter.create<arith::ConstantIndexOp>(loc, window);
-    Value tGeWindow = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::sge, localT, windowIdx);
+    Value localT    = arith::SubIOp::create(rewriter, loc, timeIdx, loopLb);
+    Value windowIdx = arith::ConstantIndexOp::create(rewriter, loc, window);
+    Value tGeWindow = arith::CmpIOp::create(
+        rewriter, loc, arith::CmpIPredicate::sge, localT, windowIdx);
 
-    auto ifOp = rewriter.create<scf::IfOp>(
-        loc, TypeRange{floatTy}, tGeWindow, /*withElseRegion=*/true);
+    auto ifOp = scf::IfOp::create(
+        rewriter, loc, TypeRange{floatTy}, tGeWindow, /*withElseRegion=*/true);
     {
       OpBuilder::InsertionGuard g(rewriter);
       rewriter.setInsertionPointToStart(&ifOp.getThenRegion().front());
       Value loaded =
-          rewriter.create<TsGetOp>(loc, floatTy, origInput, windowOff);
-      rewriter.create<scf::YieldOp>(loc, loaded);
+          TsGetOp::create(rewriter, loc, floatTy, origInput, windowOff);
+      scf::YieldOp::create(rewriter, loc, loaded);
     }
     {
       OpBuilder::InsertionGuard g(rewriter);
       rewriter.setInsertionPointToStart(&ifOp.getElseRegion().front());
-      Value nanV = rewriter.create<LLVM::ConstantOp>(
-          loc, floatTy,
+      Value nanV = LLVM::ConstantOp::create(
+          rewriter, loc, floatTy,
           rewriter.getFloatAttr(
               floatTy, std::numeric_limits<double>::quiet_NaN()));
-      rewriter.create<scf::YieldOp>(loc, nanV);
+      scf::YieldOp::create(rewriter, loc, nanV);
     }
     Value old = ifOp.getResult(0);
 
     // ── 3. Algorithm step.  All arith is via LLVM ops at this phase. ──
     auto fcmp_isnan = [&](Value x) {
       // isnan(x) ⇔ x != x  (UNE catches NaN, == NaN is false)
-      return rewriter.create<LLVM::FCmpOp>(loc, LLVM::FCmpPredicate::une, x, x);
+      return LLVM::FCmpOp::create(rewriter, loc, LLVM::FCmpPredicate::une, x, x);
     };
     Value oldIsNan = fcmp_isnan(old);
     Value newIsNan = fcmp_isnan(cur);
 
     // Loaded state.
-    Value v       = rewriter.create<LLVM::LoadOp>(loc, floatTy, vPtr);
-    Value compAdd = rewriter.create<LLVM::LoadOp>(loc, floatTy, addPtr);
-    Value compSub = rewriter.create<LLVM::LoadOp>(loc, floatTy, subPtr);
-    Value numNans = rewriter.create<LLVM::LoadOp>(loc, i32Ty,   nansPtr);
+    Value v       = LLVM::LoadOp::create(rewriter, loc, floatTy, vPtr);
+    Value compAdd = LLVM::LoadOp::create(rewriter, loc, floatTy, addPtr);
+    Value compSub = LLVM::LoadOp::create(rewriter, loc, floatTy, subPtr);
+    Value numNans = LLVM::LoadOp::create(rewriter, loc, i32Ty,   nansPtr);
 
-    Value zeroF = rewriter.create<LLVM::ConstantOp>(
-        loc, floatTy, rewriter.getFloatAttr(floatTy, 0.0));
+    Value zeroF = LLVM::ConstantOp::create(
+        rewriter, loc, floatTy, rewriter.getFloatAttr(floatTy, 0.0));
 
     // kahanAdd(isnan_small, sum, small, &comp):
     //   y = small - comp;  t = sum + y;
@@ -880,49 +879,49 @@ struct FastWindowedSumPattern : OpConversionPattern<FastWindowedSumOp> {
     //   comp = isnan_small ? comp : newComp;
     //   return t
     auto kahanAdd = [&](Value isnan_small, Value sum, Value small, Value &comp) {
-      Value y     = rewriter.create<LLVM::FSubOp>(loc, small, comp);
-      Value t     = rewriter.create<LLVM::FAddOp>(loc, sum, y);
-      Value tMs   = rewriter.create<LLVM::FSubOp>(loc, t, sum);
-      Value newC  = rewriter.create<LLVM::FSubOp>(loc, tMs, y);
-      comp = rewriter.create<LLVM::SelectOp>(loc, isnan_small, comp, newC);
+      Value y     = LLVM::FSubOp::create(rewriter, loc, small, comp);
+      Value t     = LLVM::FAddOp::create(rewriter, loc, sum, y);
+      Value tMs   = LLVM::FSubOp::create(rewriter, loc, t, sum);
+      Value newC  = LLVM::FSubOp::create(rewriter, loc, tMs, y);
+      comp = LLVM::SelectOp::create(rewriter, loc, isnan_small, comp, newC);
       return t;
     };
 
     // v -= old  (skip when old is NaN)
-    Value negOld = rewriter.create<LLVM::FSubOp>(loc, zeroF, old);
+    Value negOld = LLVM::FSubOp::create(rewriter, loc, zeroF, old);
     Value tSub   = kahanAdd(oldIsNan, v, negOld, compSub);
-    v = rewriter.create<LLVM::SelectOp>(loc, oldIsNan, v, tSub);
+    v = LLVM::SelectOp::create(rewriter, loc, oldIsNan, v, tSub);
 
     // v += cur  (skip when cur is NaN)
     Value tAdd   = kahanAdd(newIsNan, v, cur, compAdd);
-    v = rewriter.create<LLVM::SelectOp>(loc, newIsNan, v, tAdd);
+    v = LLVM::SelectOp::create(rewriter, loc, newIsNan, v, tAdd);
 
     // numNans += (new_is_nan ? 1 : 0) - (old_is_nan ? 1 : 0)
-    Value oneI32  = rewriter.create<LLVM::ConstantOp>(
-        loc, i32Ty, rewriter.getI32IntegerAttr(1));
-    Value zeroI32 = rewriter.create<LLVM::ConstantOp>(
-        loc, i32Ty, rewriter.getI32IntegerAttr(0));
-    Value oldDelta = rewriter.create<LLVM::SelectOp>(
-        loc, oldIsNan, oneI32, zeroI32);
-    Value newDelta = rewriter.create<LLVM::SelectOp>(
-        loc, newIsNan, oneI32, zeroI32);
-    numNans = rewriter.create<LLVM::SubOp>(loc, numNans, oldDelta);
-    numNans = rewriter.create<LLVM::AddOp>(loc, numNans, newDelta);
+    Value oneI32  = LLVM::ConstantOp::create(
+        rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
+    Value zeroI32 = LLVM::ConstantOp::create(
+        rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(0));
+    Value oldDelta = LLVM::SelectOp::create(
+        rewriter, loc, oldIsNan, oneI32, zeroI32);
+    Value newDelta = LLVM::SelectOp::create(
+        rewriter, loc, newIsNan, oneI32, zeroI32);
+    numNans = LLVM::SubOp::create(rewriter, loc, numNans, oldDelta);
+    numNans = LLVM::AddOp::create(rewriter, loc, numNans, newDelta);
 
     // result = (numNans == 0) ? v : NaN
-    Value isFull = rewriter.create<LLVM::ICmpOp>(
-        loc, LLVM::ICmpPredicate::eq, numNans, zeroI32);
-    Value nanV = rewriter.create<LLVM::ConstantOp>(
-        loc, floatTy,
+    Value isFull = LLVM::ICmpOp::create(
+        rewriter, loc, LLVM::ICmpPredicate::eq, numNans, zeroI32);
+    Value nanV = LLVM::ConstantOp::create(
+        rewriter, loc, floatTy,
         rewriter.getFloatAttr(floatTy,
                                 std::numeric_limits<double>::quiet_NaN()));
-    Value out = rewriter.create<LLVM::SelectOp>(loc, isFull, v, nanV);
+    Value out = LLVM::SelectOp::create(rewriter, loc, isFull, v, nanV);
 
     // ── 4. Store back state. ────────────────────────────────────────
-    rewriter.create<LLVM::StoreOp>(loc, v,       vPtr);
-    rewriter.create<LLVM::StoreOp>(loc, compAdd, addPtr);
-    rewriter.create<LLVM::StoreOp>(loc, compSub, subPtr);
-    rewriter.create<LLVM::StoreOp>(loc, numNans, nansPtr);
+    LLVM::StoreOp::create(rewriter, loc, v,       vPtr);
+    LLVM::StoreOp::create(rewriter, loc, compAdd, addPtr);
+    LLVM::StoreOp::create(rewriter, loc, compSub, subPtr);
+    LLVM::StoreOp::create(rewriter, loc, numNans, nansPtr);
 
     rewriter.replaceOp(op, out);
     return success();
@@ -957,7 +956,7 @@ struct ConvertKunGpuToLLVMPass
     });
     auto materialize = [](OpBuilder &b, Type t, ValueRange vs, Location l) -> Value {
       if (vs.size() != 1) return Value();
-      return b.create<UnrealizedConversionCastOp>(l, t, vs).getResult(0);
+      return UnrealizedConversionCastOp::create(b, l, t, vs).getResult(0);
     };
     typeConv.addSourceMaterialization(materialize);
     typeConv.addTargetMaterialization(materialize);

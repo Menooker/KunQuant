@@ -22,7 +22,6 @@ KUN_TEMPLATE_EXPORT void ScaleStocks(RuntimeStage *stage, size_t time_idx,
         INPUT::getInput(&inbuf, stage->stage->in_buffers[0], num_stocks);
     using T = typename std::decay<decltype(*input)>::type;
     auto outinfo = stage->stage->out_buffers[0];
-    auto simd_len = stage->ctx->simd_len;
     T *output = OUTPUT::getOutput(&stage->ctx->buffers[outinfo->id], outinfo,
                                   num_stocks);
     auto time_end =
