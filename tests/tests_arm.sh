@@ -5,7 +5,7 @@ if [ "$OS" = "Linux" ]; then
     SYSTEM_TRIPPLE="linux-aarch64"
     DYN_LIB_EXT="so"
 elif [ "$OS" = "Darwin" ]; then
-    SYSTEM_TRIPPLE="macosx-10.9-universal2"
+    SYSTEM_TRIPPLE="macosx-10.13-universal2"
     DYN_LIB_EXT="dylib"
 else
     SYSTEM_TRIPPLE="$OS"
