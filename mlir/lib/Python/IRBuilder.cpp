@@ -252,6 +252,12 @@ public:
   Value reduceMulOp(Value x) { return makeReduce<kunir::ReduceMulOp>(x); }
   Value reduceMaxOp(Value x) { return makeReduce<kunir::ReduceMaxOp>(x); }
   Value reduceMinOp(Value x) { return makeReduce<kunir::ReduceMinOp>(x); }
+  Value reduceArgMinOp(Value x) { return makeReduce<kunir::ReduceArgMinOp>(x); }
+  Value reduceArgMaxOp(Value x) { return makeReduce<kunir::ReduceArgMaxOp>(x); }
+  Value reduceRankOp(Value x, Value cur) {
+    // SameOperandsAndResultType — pass x's type as the result type.
+    return kunir::ReduceRankOp::create(b_, b_.getUnknownLoc(), x.getType(), x, cur);
+  }
 
   // ── Finalize ──────────────────────────────────────────────────────
   std::unique_ptr<PyModule> finish() {
@@ -415,6 +421,10 @@ void registerIRBuilder(nb::module_ &m) {
       .def("reduce_mul", &IRBuilder::reduceMulOp, nb::arg("x"))
       .def("reduce_max", &IRBuilder::reduceMaxOp, nb::arg("x"))
       .def("reduce_min", &IRBuilder::reduceMinOp, nb::arg("x"))
+      .def("reduce_argmin", &IRBuilder::reduceArgMinOp, nb::arg("x"))
+      .def("reduce_argmax", &IRBuilder::reduceArgMaxOp, nb::arg("x"))
+      .def("reduce_rank",   &IRBuilder::reduceRankOp,
+            nb::arg("x"), nb::arg("current"))
 
       // Finalize / debug
       .def("to_string", &IRBuilder::toString,

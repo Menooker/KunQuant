@@ -85,6 +85,14 @@ struct LowerHelper {
   Value zeroOffsetI32;
   Value outerTimeIdx;   // outer scf.for induction var (index)
   Value outerLoopLb;    // outer scf.for lower bound (index)
+  // Inside a for_each_back_window body: the current window step offset
+  // (window-1-w).  Used by argmin/argmax to record the position index.
+  Value windowedOffsetI32;
+  // Running accumulators for each reduce op in the enclosing FBW body.
+  // Single-state reduce: 1 entry; argmin/max: {best_val, best_idx};
+  // rank: {less_count, eq_count}.  Seeded by FBW pre-loop, updated by
+  // each reduce step, read by scf.yield.
+  llvm::DenseMap<Value, SmallVector<Value, 2>> multiAccs;
 
   // Shared util: look up `v` (a ts SSA value) in tsMap, emit
   // ts.get(handle, offsetI32), return the loaded scalar.  Does NOT touch
@@ -120,6 +128,96 @@ struct LowerHelper {
     return scalar;
   }
 
+  // One step of a multi-state reduce (argmin/argmax/rank).  Mirrors
+  // cpp/Kun/Ops.hpp's step() exactly so CPU and GPU match bit-for-bit
+  // (modulo reduction-order changes).
+  LogicalResult lowerMultiReduce(Operation *op, OpBuilder &b, Location ol) {
+    auto isArgMin = isa<kunir::ReduceArgMinOp>(op);
+    auto isArgMax = isa<kunir::ReduceArgMaxOp>(op);
+    auto isRank   = isa<kunir::ReduceRankOp>(op);
+    assert(isArgMin || isArgMax || isRank);
+
+    KUN_ASSIGN_OR_FAIL(Value elem, getScalar(op->getOperand(0), b, ol));
+    FloatType elemTy = llvm::cast<FloatType>(elem.getType());
+    auto &accs = multiAccs[op->getResult(0)];
+    assert(accs.size() == 2 &&
+           "multi-state reduce must be pre-seeded with 2 iter_args");
+
+    auto fconst = [&](double v) {
+      return arith::ConstantOp::create(b, ol, elemTy,
+                                          b.getFloatAttr(elemTy, v))
+          .getResult();
+    };
+    auto fIsNan = [&](Value v) {
+      return arith::CmpFOp::create(b, ol, arith::CmpFPredicate::UNE, v, v)
+          .getResult();
+    };
+    Value nanF = fconst(std::numeric_limits<double>::quiet_NaN());
+    Value one  = fconst(1.0);
+
+    if (isArgMin || isArgMax) {
+      // accs = {best_val, best_idx}.  Ordered compare so NaN doesn't
+      // trigger the update; NaN is propagated by the final selects.
+      Value bestVal = accs[0];
+      Value bestIdx = accs[1];
+      Value bestIsNan = fIsNan(bestVal);
+      Value elemIsNan = fIsNan(elem);
+      auto pred = isArgMin ? arith::CmpFPredicate::OGT
+                            : arith::CmpFPredicate::OLT;
+      Value cmp = arith::CmpFOp::create(b, ol, pred, bestVal, elem)
+                      .getResult();
+      Value newVal = arith::SelectOp::create(b, ol, cmp, elem, bestVal)
+                          .getResult();
+      // Record the window-relative position (window-1-w) so
+      // TsArgMin = window - ReduceArgMin gives pandas's
+      // np.argmin()+1 convention (1=oldest, window=newest).
+      Value wIdxF = arith::SIToFPOp::create(b, ol, elemTy,
+                                                windowedOffsetI32)
+                        .getResult();
+      Value newIdx = arith::SelectOp::create(b, ol, cmp, wIdxF, bestIdx)
+                          .getResult();
+      Value anyNan = arith::OrIOp::create(b, ol, bestIsNan, elemIsNan)
+                          .getResult();
+      newVal = arith::SelectOp::create(b, ol, anyNan, nanF, newVal)
+                  .getResult();
+      newIdx = arith::SelectOp::create(b, ol, anyNan, nanF, newIdx)
+                  .getResult();
+      accs[0] = newVal;
+      accs[1] = newIdx;
+      return success();
+    }
+
+    // ReduceRank: accs = {less_count, eq_count}; `current` is an
+    // outer-scope ts<f, 1> already in scalarMap.
+    KUN_ASSIGN_OR_FAIL(Value cur, getScalar(op->getOperand(1), b, ol));
+    Value lessCnt = accs[0];
+    Value eqCnt   = accs[1];
+    Value curIsNan  = fIsNan(cur);
+    Value elemIsNan = fIsNan(elem);
+    Value anyNan    = arith::OrIOp::create(b, ol, curIsNan, elemIsNan)
+                          .getResult();
+    Value cmpLess = arith::CmpFOp::create(
+                        b, ol, arith::CmpFPredicate::OLT, elem, cur)
+                        .getResult();
+    Value cmpEq   = arith::CmpFOp::create(
+                        b, ol, arith::CmpFPredicate::OEQ, elem, cur)
+                        .getResult();
+    Value lessP1 = arith::AddFOp::create(b, ol, lessCnt, one).getResult();
+    Value newLess = arith::SelectOp::create(b, ol, cmpLess, lessP1, lessCnt)
+                        .getResult();
+    // NaN routed only into less_count — the final rank extract
+    // (`less + (eq + 1) / 2`, computed after the scf.for) then
+    // propagates NaN out.
+    newLess = arith::SelectOp::create(b, ol, anyNan, nanF, newLess)
+                  .getResult();
+    Value eqP1   = arith::AddFOp::create(b, ol, eqCnt, one).getResult();
+    Value newEq  = arith::SelectOp::create(b, ol, cmpEq, eqP1, eqCnt)
+                        .getResult();
+    accs[0] = newLess;
+    accs[1] = newEq;
+    return success();
+  }
+
   // Lower non-terminator ops in `ops` in definition order.
   //
   // For each op:
@@ -137,11 +235,18 @@ struct LowerHelper {
         KUN_ASSIGN_OR_FAIL(Value operand, getScalar(op->getOperand(0), b, ol));
         scalarMap[op->getResult(0)] = iface.buildScalarOp(b, ol, operand);
       } else if (auto ri = dyn_cast<ReduceArithInterface>(op)) {
+        // Running acc lives in multiAccs[result][0] (see FBW lowering
+        // for the pre-seed); single- and multi-state reduces share
+        // the same storage so scf.yield reads them uniformly.
         KUN_ASSIGN_OR_FAIL(Value elem, getScalar(op->getOperand(0), b, ol));
-        auto it = scalarMap.find(op->getResult(0));
-        assert(it != scalarMap.end() &&
-               "reduce result must be pre-seeded in scalarMap with current acc");
-        it->second = ri.buildAccumOp(b, ol, it->second, elem);
+        auto mit = multiAccs.find(op->getResult(0));
+        assert(mit != multiAccs.end() && mit->second.size() == 1 &&
+               "reduce result must be pre-seeded in multiAccs with current acc");
+        mit->second[0] = ri.buildAccumOp(b, ol, mit->second[0], elem);
+      } else if (isa<kunir::ReduceArgMinOp, kunir::ReduceArgMaxOp,
+                       kunir::ReduceRankOp>(op)) {
+        if (failed(lowerMultiReduce(op, b, ol)))
+          return failure();
       } else if (auto sel = dyn_cast<SelectOp>(op)) {
         KUN_ASSIGN_OR_FAIL(Value cond, getScalar(sel.getCond(),      b, ol));
         KUN_ASSIGN_OR_FAIL(Value tv,   getScalar(sel.getTrueValue(), b, ol));
@@ -379,19 +484,51 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
                               "must be a ts handle");
       }
 
-      // Each yield operand must come from a reduce_* op — collect init values.
+      // Build the iter_args layout: single-state reduce = 1 init,
+      // argmin/max = (best_val, best_idx), rank = (less, eq).
+      struct ReduceSlot {
+        int numAccs;
+        int startIdx;
+      };
+      SmallVector<ReduceSlot> slots; // parallel to yieldOp.getValues()
       SmallVector<Value> initVals;
+      auto elemTyOf = [](Operation *defOp) -> FloatType {
+        return llvm::cast<FloatType>(
+            llvm::cast<TsType>(defOp->getOperand(0).getType()).getElementType());
+      };
+      auto pushConst = [&](FloatType elemTy, double v) {
+        initVals.push_back(arith::ConstantOp::create(
+            fb, ol, elemTy, fb.getFloatAttr(elemTy, v)));
+      };
       for (Value yv : yieldOp.getValues()) {
         auto *defOp = yv.getDefiningOp();
-        auto ri = defOp ? dyn_cast<ReduceArithInterface>(defOp)
-                        : ReduceArithInterface{};
-        if (!ri) {
+        if (!defOp) {
+          return op.emitError("kunir-to-kungpu: for_each_back_window yield "
+                              "operand has no defining op");
+        }
+        ReduceSlot slot{0, (int)initVals.size()};
+        if (auto ri = dyn_cast<ReduceArithInterface>(defOp)) {
+          FloatType elemTy = elemTyOf(defOp);
+          initVals.push_back(arith::ConstantOp::create(
+              fb, ol, ri.getInitValue(elemTy)));
+          slot.numAccs = 1;
+        } else if (isa<kunir::ReduceArgMinOp>(defOp) ||
+                     isa<kunir::ReduceArgMaxOp>(defOp)) {
+          FloatType elemTy = elemTyOf(defOp);
+          double inf = std::numeric_limits<double>::infinity();
+          pushConst(elemTy, isa<kunir::ReduceArgMinOp>(defOp) ? inf : -inf);
+          pushConst(elemTy, 0.0);
+          slot.numAccs = 2;
+        } else if (isa<kunir::ReduceRankOp>(defOp)) {
+          FloatType elemTy = elemTyOf(defOp);
+          pushConst(elemTy, 0.0);
+          pushConst(elemTy, 0.0);
+          slot.numAccs = 2;
+        } else {
           return op.emitError("kunir-to-kungpu: for_each_back_window yield "
                               "operand must come from a reduce_* op");
         }
-        auto elemTy = llvm::cast<FloatType>(
-            llvm::cast<TsType>(defOp->getOperand(0).getType()).getElementType());
-        initVals.push_back(arith::ConstantOp::create(fb, ol, ri.getInitValue(elemTy)));
+        slots.push_back(slot);
       }
 
       // Create inner scf.for %w = 0 to window step 1 iter_args(acc_i = init_i).
@@ -429,6 +566,10 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
             LowerHelper inner{outer.tsMap, outer.scalarMap,
                                 outer.zeroOffsetI32,
                                 outer.outerTimeIdx, outer.outerLoopLb};
+            // Hand the inner helper the current window-step offset
+            // (window-1-w) so multi-state reductions (argmin/argmax)
+            // can use it as the recorded `index`.
+            inner.windowedOffsetI32 = windowedOffset;
             for (auto [i, arg] : llvm::enumerate(body.getArguments())) {
               auto r = inner.getScalarUncached(fwOp.getInputs()[i],
                                                 windowedOffset, ib, il);
@@ -439,8 +580,15 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
               }
               inner.scalarMap[arg] = *r;
             }
-            for (auto [i, yv] : llvm::enumerate(yieldOp.getValues()))
-              inner.scalarMap[yv] = iterArgs[i];
+            // Pre-seed accumulators from iter_args.
+            for (auto [i, yv] : llvm::enumerate(yieldOp.getValues())) {
+              const auto &slot = slots[i];
+              SmallVector<Value, 2> accs;
+              accs.reserve(slot.numAccs);
+              for (int j = 0; j < slot.numAccs; ++j)
+                accs.push_back(iterArgs[slot.startIdx + j]);
+              inner.multiAccs[yv] = std::move(accs);
+            }
 
             if (failed(inner.lowerBlock(body, ib))) {
               innerOk = false;
@@ -448,17 +596,48 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
               return;
             }
 
-            SmallVector<Value> newAccs;
-            for (Value yv : yieldOp.getValues())
-              newAccs.push_back(inner.scalarMap.find(yv)->second);
+            // Yield the updated accumulators back into the iter_args.
+            SmallVector<Value> newAccs(initVals.size());
+            for (auto [i, yv] : llvm::enumerate(yieldOp.getValues())) {
+              const auto &slot = slots[i];
+              const auto &accs = inner.multiAccs[yv];
+              for (int j = 0; j < slot.numAccs; ++j)
+                newAccs[slot.startIdx + j] = accs[j];
+            }
             scf::YieldOp::create(ib, il, newAccs);
           });
       if (!innerOk) return failure();
 
-      // Map for_each_back_window results (scalar reduce accs) to the inner
-      // for's results.
-      for (auto [i, res] : llvm::enumerate(fwOp.getResults()))
-        outer.scalarMap[res] = innerFor.getResult(i);
+      // Project each fwOp result from the inner-for's iter_arg slice:
+      // single-state passes through, argmin/max returns best_idx, rank
+      // computes less + (eq + 1) / 2.
+      OpBuilder::InsertionGuard guardPost(b);
+      b.setInsertionPointAfter(innerFor);
+      for (auto [i, res] : llvm::enumerate(fwOp.getResults())) {
+        const auto &slot = slots[i];
+        Value yv = yieldOp.getValues()[i];
+        auto *defOp = yv.getDefiningOp();
+        Value finalVal;
+        if (slot.numAccs == 1) {
+          finalVal = innerFor.getResult(slot.startIdx);
+        } else if (isa<kunir::ReduceArgMinOp>(defOp) ||
+                     isa<kunir::ReduceArgMaxOp>(defOp)) {
+          finalVal = innerFor.getResult(slot.startIdx + 1);
+        } else {
+          // ReduceRankOp:  less + (eq + 1) / 2
+          Value less = innerFor.getResult(slot.startIdx);
+          Value eq   = innerFor.getResult(slot.startIdx + 1);
+          auto elemTy = llvm::cast<FloatType>(less.getType());
+          Value one = arith::ConstantOp::create(
+              b, ol, elemTy, b.getFloatAttr(elemTy, 1.0));
+          Value two = arith::ConstantOp::create(
+              b, ol, elemTy, b.getFloatAttr(elemTy, 2.0));
+          Value eqp1 = arith::AddFOp::create(b, ol, eq, one);
+          Value half = arith::DivFOp::create(b, ol, eqp1, two);
+          finalVal = arith::AddFOp::create(b, ol, less, half);
+        }
+        outer.scalarMap[res] = finalVal;
+      }
       return success();
     }
 

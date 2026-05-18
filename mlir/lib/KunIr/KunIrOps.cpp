@@ -172,6 +172,9 @@ LogicalResult ReduceAddOp::verify() { return verifyInsideForEachBackWindow(*this
 LogicalResult ReduceMulOp::verify() { return verifyInsideForEachBackWindow(*this); }
 LogicalResult ReduceMaxOp::verify() { return verifyInsideForEachBackWindow(*this); }
 LogicalResult ReduceMinOp::verify() { return verifyInsideForEachBackWindow(*this); }
+LogicalResult ReduceArgMinOp::verify() { return verifyInsideForEachBackWindow(*this); }
+LogicalResult ReduceArgMaxOp::verify() { return verifyInsideForEachBackWindow(*this); }
+LogicalResult ReduceRankOp::verify()   { return verifyInsideForEachBackWindow(*this); }
 
 //===----------------------------------------------------------------------===//
 // BackRef + FastWindowedSum — share a verifier (same shape / constraints)

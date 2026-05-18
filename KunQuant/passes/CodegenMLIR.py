@@ -38,6 +38,7 @@ from KunQuant.ops.ElewiseOp import (
 )
 from KunQuant.ops.ReduceOp import (
     ReduceAdd, ReduceMul, ReduceMax, ReduceMin,
+    ReduceArgMax, ReduceArgMin, ReduceRank,
 )
 from KunQuant.ops.MiscOp import (
     BackRef, FastWindowedSum,
@@ -72,6 +73,13 @@ _UNARY = {
 _REDUCE = {
     ReduceAdd: "reduce_add", ReduceMul: "reduce_mul",
     ReduceMax: "reduce_max", ReduceMin: "reduce_min",
+    ReduceArgMin: "reduce_argmin", ReduceArgMax: "reduce_argmax",
+}
+# Reduces that need a 2nd input (the outer-scope "current" value).
+# `ReduceRank(iter_val, current)` is the only one today; kept as a separate
+# table so `_emit_reduction` can dispatch without conflating arity.
+_REDUCE_WITH_CURRENT = {
+    ReduceRank: "reduce_rank",
 }
 
 
@@ -196,6 +204,14 @@ def _emit_reduction(op: ReductionOp,
                      ir: KunMLIR.IRBuilder,
                      val_map: Dict[OpBase, KunMLIR.Value]) -> KunMLIR.Value:
     cls = type(op)
+    if cls in _REDUCE_WITH_CURRENT:
+        # ReduceRank(iter_val, current): 2 inputs.
+        if len(op.inputs) != 2:
+            raise NotImplementedError(
+                f"CodegenMLIR: {cls.__name__} expects 2 inputs (iter, "
+                f"current); got {len(op.inputs)} (op = {op})")
+        return getattr(ir, _REDUCE_WITH_CURRENT[cls])(
+            val_map[op.inputs[0]], val_map[op.inputs[1]])
     if cls not in _REDUCE:
         raise NotImplementedError(
             f"CodegenMLIR: reduction {cls.__name__} not supported yet "

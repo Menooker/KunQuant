@@ -622,16 +622,48 @@ struct TsGetPattern : OpConversionPattern<TsGetOp> {
       rewriter.replaceOpWithNewOp<LLVM::LoadOp>(op, elemTy, gep);
     } else {
       // ── global ts (function arg, TxS layout) ──────────────────────
-      //   effective time = (enclosing scf.for iv) − offset
-      //   load gmem[effTime * num_stocks + stock_id]
+      // Load gmem[(timeIdx - offset) * num_stocks + sid].  When offset
+      // is a known zero (the common ts.get for current time) we skip
+      // the bounds guard; otherwise wrap in `scf.if (t >= offset)`
+      // returning NaN out-of-bounds to mirror CPU `InputTS::getWindow`.
       Value timeIdx = getCurrentTimeIdx(op);
       Value offsetIdx = arith::IndexCastOp::create(
           rewriter, loc, idxTy, offsetI32);
+      bool offsetIsZero = false;
+      if (auto a = offsetI32.getDefiningOp<arith::ConstantOp>())
+        offsetIsZero = (llvm::cast<IntegerAttr>(a.getValue()).getInt() == 0);
+      else if (auto l = offsetI32.getDefiningOp<LLVM::ConstantOp>())
+        offsetIsZero = (llvm::cast<IntegerAttr>(l.getValue()).getInt() == 0);
+
       Value gep = gmemGEPWithOffset(rewriter, loc, elemTy, ptrTy, tsPtr,
                                      timeIdx, offsetIdx,
                                      getNumStocksI64(rewriter, op, loc),
                                      idxTy, i64Ty);
-      rewriter.replaceOpWithNewOp<LLVM::LoadOp>(op, elemTy, gep);
+      if (offsetIsZero) {
+        rewriter.replaceOpWithNewOp<LLVM::LoadOp>(op, elemTy, gep);
+        return success();
+      }
+      Value inRange = arith::CmpIOp::create(
+          rewriter, loc, arith::CmpIPredicate::sge, timeIdx, offsetIdx);
+      auto ifOp = scf::IfOp::create(rewriter, loc, TypeRange{elemTy},
+                                       inRange, /*withElseRegion=*/true);
+      {
+        OpBuilder::InsertionGuard g(rewriter);
+        rewriter.setInsertionPointToStart(&ifOp.getThenRegion().front());
+        Value loaded = LLVM::LoadOp::create(rewriter, loc, elemTy, gep);
+        scf::YieldOp::create(rewriter, loc, loaded);
+      }
+      {
+        OpBuilder::InsertionGuard g(rewriter);
+        rewriter.setInsertionPointToStart(&ifOp.getElseRegion().front());
+        Value nanV = LLVM::ConstantOp::create(
+            rewriter, loc,
+            llvm::cast<FloatType>(elemTy),
+            rewriter.getFloatAttr(elemTy,
+                                    std::numeric_limits<double>::quiet_NaN()));
+        scf::YieldOp::create(rewriter, loc, nanV);
+      }
+      rewriter.replaceOp(op, ifOp.getResult(0));
     }
     return success();
   }

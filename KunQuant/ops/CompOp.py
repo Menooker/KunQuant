@@ -11,7 +11,12 @@ import math
 def _is_fast_stat(opt: dict, attrs: dict) -> bool:
     return not opt.get("no_fast_stat", True) and not attrs.get("no_fast_stat", False)
 
-def _decide_use_skip_list(window: int, blocking_len: int) -> bool:
+def _decide_use_skip_list(options: dict, window: int, blocking_len: int) -> bool:
+    # GPU lowering doesn't implement SkipList ops; the caller can force
+    # the naive ForeachBackWindow path with `options["no_skip_list"]`
+    # regardless of window/blocking_len cost.
+    if options.get("no_skip_list", False):
+        return False
     naive_cost = window
     skip_list_cost = math.log2(window) * blocking_len * 5
     return skip_list_cost < naive_cost
@@ -65,7 +70,7 @@ class _WindowedMinMaxBase(WindowedReduce):
     def decompose(self, options: dict) -> List[OpBase]:
         window = self.attrs["window"]
         blocking_len = options["blocking_len"]
-        if _decide_use_skip_list(window, blocking_len):
+        if _decide_use_skip_list(options, window, blocking_len):
             b = Builder(self.get_parent())
             with b:
                 newv = self.inputs[0]
@@ -469,7 +474,7 @@ class TsArgMax(WindowedReduce):
     def decompose(self, options: dict) -> List[OpBase]:
         window = self.attrs["window"]
         blocking_len = options["blocking_len"]
-        if _decide_use_skip_list(window, blocking_len):
+        if _decide_use_skip_list(options, window, blocking_len):
             b = Builder(self.get_parent())
             with b:
                 TsArgMin(0-self.inputs[0], window)
@@ -690,6 +695,11 @@ class WindowedQuantile(CompositiveOp, WindowedTrait):
         return self.attrs["window"] + 1
     
     def decompose(self, options: dict) -> List[OpBase]:
+        if options.get("no_skip_list", False):
+            raise RuntimeError(
+                "WindowedQuantile has no non-skip-list decompose path; "
+                "it cannot run under options[\"no_skip_list\"]=True "
+                "(e.g. on the GPU backend)")
         b = Builder(self.get_parent())
         window = self.attrs["window"]
         v = self.inputs[0]

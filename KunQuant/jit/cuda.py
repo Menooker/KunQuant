@@ -145,15 +145,20 @@ def _resolve_vector_size(kcfg: KunCompilerConfig) -> int:
 def _gpu_pass_options(kcfg: KunCompilerConfig) -> dict:
     """`Driver.optimize`'s `options` dict for the GPU path.
 
-    `blocking_len` is needed by some decompose paths (skip-list cutoff
-    in WindowedMin/Max).  Everything else — including `no_fast_stat` —
-    is taken verbatim from `kcfg.options`; we do not force `no_fast_stat`
-    here.  If the user wants the GPU-safe default, they should set
-    `no_fast_stat=True` in `kcfg.options` themselves.
+    `blocking_len` is needed by some decompose paths (it's also the
+    skip-list / naive cost-model knob).  `kcfg.options` flows through
+    verbatim — including `no_fast_stat`, `opt_reduce`, `fast_log`,
+    all of which the GPU lowering now supports.
+
+    `no_skip_list=True` is forced unconditionally and overrides any
+    user-provided value: the kunir codegen has no lowering for
+    `SkipList*` ops, so the naive `ForeachBackWindow + Reduce*` path
+    is the only one that lowers on GPU.
     """
     opts: dict = {"blocking_len": _resolve_vector_size(kcfg)}
     if kcfg.options:
         opts.update(kcfg.options)
+    opts["no_skip_list"] = True
     return opts
 
 

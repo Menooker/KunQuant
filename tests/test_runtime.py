@@ -160,12 +160,9 @@ _GPU_SKIP_TESTS = {
     "test_runtime",
     "test_ema",                # ExpMovingAvg not in CodegenMLIR
     "test_ema_init",           # same
-    "test_argmin_issue19",     # ReduceArgMin / ReduceRank not in CodegenMLIR
     "test_aligned",            # CPU-only shape-error check
-    "test_skew_kurt",          # WindowedSkew/Kurt decompose not GPU-ready
     "test_loop_index",         # WindowedMaxDrawdown / WindowLoopIndex
     "test_quantile",           # SkipList
-    "test_large_rank",         # SkipList (TsRank/etc. with large window)
     "test_stream_double",
     "test_repro_crash_gh_issue_71",
     "test_generic_cross_sectional",
@@ -185,6 +182,9 @@ _GPU_LIB_NAMES = {
     "test_log64",           # float64
     "test_pow",             # Pow → Exp(Log(x) * expo) + Sqrt special-case
     "test_covar",           # WindowedCovariance + WindowedCorrelation, double
+    "test_skew",            # WindowedSkew/Kurt (both fast & slow paths)
+    "test_large_rank",      # TsRank/TsArgMin/Max via naive FBW (no_skip_list)
+    "test_argmin",          # TsArgMin/TsRank/WindowedMin small-window
 }
 
 
@@ -474,8 +474,8 @@ def test_large_rank(lib):
     # test with duplicates
     inp[400:410,:] = -1
     # inp[1400:1410,:] = 10
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": inp}, 0, 2000)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, modu, {"a": inp}, 0, 2000)
     outrank = out["ou1"]
     df = pd.DataFrame(inp)
     expected_rank = df.rolling(200).rank().to_numpy()
@@ -557,8 +557,8 @@ def test_argmin_issue19(lib):
     data = [ 0.6898481863442985, 0.6992020600574415, 0.6992020600574417, 0.6968635916291558, 0.6968635916291558, 0.6968635916291558 ]
     for i in range(6):
         inp[i, :] = data[i]
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": inp}, 0, 6)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, modu, {"a": inp}, 0, 6)
     df = pd.DataFrame(inp)
     expected =df.rolling(5, min_periods=1).apply(lambda x: x.argmin() + 1, raw=True)
     output = out["ou2"][4:]
@@ -808,8 +808,8 @@ def test_skew_kurt():
     modu = lib.getModule("test_skew")
     assert(modu)
     inp = np.random.rand(20, 24)
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, modu, {"a": inp}, 0, 20)
     output = out["ou2"]
     df = pd.DataFrame(inp)
     expected = df.rolling(5).skew()

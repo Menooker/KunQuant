@@ -351,6 +351,43 @@ def KunIr_ReduceMinOp : KunIr_ReduceOp<"reduce_min"> {
 }
 
 //===----------------------------------------------------------------------===//
+// Multi-accumulator reductions — NaN-propagating, used by TsArgMin/Max/TsRank.
+// These don't fit the single-state `ReduceArithInterface` (argmin/max track
+// both the running best value *and* its window-relative position; rank tracks
+// less-count + equal-count).  The FBW lowering in `KunIrToKunGpu.cpp`
+// special-cases them to emit the matching N-iter-arg scf.for body.
+//===----------------------------------------------------------------------===//
+
+def KunIr_ReduceArgMinOp : KunIr_Op<"reduce_argmin",
+    [Pure, SameOperandsAndResultType]> {
+  let summary = "ArgMin reduction — window-relative index (window-1-w) of "
+                  "the smallest element; NaN propagates.";
+  let arguments = (ins KunIr_AnyTs:$value);
+  let results = (outs KunIr_AnyTs:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = "$value `:` type($value) attr-dict";
+}
+def KunIr_ReduceArgMaxOp : KunIr_Op<"reduce_argmax",
+    [Pure, SameOperandsAndResultType]> {
+  let summary = "ArgMax reduction — window-relative index (window-1-w) of "
+                  "the largest element; NaN propagates.";
+  let arguments = (ins KunIr_AnyTs:$value);
+  let results = (outs KunIr_AnyTs:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = "$value `:` type($value) attr-dict";
+}
+def KunIr_ReduceRankOp : KunIr_Op<"reduce_rank",
+    [Pure, SameOperandsAndResultType]> {
+  let summary = "Per-window cross-sectional rank of `current` against the "
+                  "iterated window values: less_count + (eq_count + 1) / 2.";
+  let arguments = (ins KunIr_AnyTs:$value, KunIr_AnyTs:$current);
+  let results = (outs KunIr_AnyTs:$result);
+  let hasVerifier = 1;
+  let assemblyFormat =
+    "$value `,` $current `:` type($value) `,` type($current) attr-dict";
+}
+
+//===----------------------------------------------------------------------===//
 // BackRef — read input value at t - window
 //
 // At time step t, returns input[t - window]; semantically NaN when t < window
