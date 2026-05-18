@@ -808,7 +808,8 @@ void Executable::ensureSlotPool(int64_t timeLength, int64_t numStocks) {
     return;
   }
   size_t bytesPerSlot = static_cast<size_t>(timeLength) *
-                          static_cast<size_t>(numStocks) * sizeof(float);
+                          static_cast<size_t>(numStocks) *
+                          bytesPerElem(data_.dtype);
   slotBufs_.resize(plan_->peakIntermediateSlots, 0);
   for (int i = 0; i < plan_->peakIntermediateSlots; ++i) {
     CUdeviceptr p = 0;

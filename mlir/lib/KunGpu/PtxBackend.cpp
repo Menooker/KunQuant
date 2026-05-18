@@ -4,6 +4,8 @@
 #include "KunGpu/KunGpuUtils.h"
 #include "KunGpu/Pipelines.h"
 #include "KunIr/KunIrAttrs.h"
+#include "KunIr/KunIrOps.h"
+#include "KunIr/KunIrTypes.h"
 
 #include "mlir/Dialect/GPU/IR/CompilationInterfaces.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -17,6 +19,8 @@
 #include "mlir/Pass/PassManager.h"
 
 #include "llvm/ADT/SmallVector.h"
+
+#include <optional>
 #include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
@@ -143,6 +147,41 @@ LogicalResult compileKunIrToPtx(ModuleOp module,
 LogicalResult compileKunIrToExecutable(ModuleOp module,
                                         const PtxCompileOptions &options,
                                         ::kun_cuda::ExecutableData &out) {
+  // Sample the kunir.func element type before the kunir → llvm lowering
+  // erases it.  Verify graph-wide uniformity at the same time — every
+  // kunir.func in the module must agree on dtype, otherwise the slot
+  // pool wouldn't have a single byte-size to use.
+  std::optional<::kun_cuda::Datatype> sampledDtype;
+  std::string dtypeOwner;
+  WalkResult dtypeWalk = module.walk([&](kunir::FuncOp f) -> WalkResult {
+    for (Type t : f.getFunctionTypeTyped().getInputs()) {
+      auto ts = dyn_cast<kunir::TsType>(t);
+      if (!ts) continue;
+      Type et = ts.getElementType();
+      ::kun_cuda::Datatype dt;
+      if (et.isF32())      dt = ::kun_cuda::Datatype::Float;
+      else if (et.isF64()) dt = ::kun_cuda::Datatype::Double;
+      else {
+        f.emitError("compileKunIrToExecutable: unsupported ts element "
+                    "type — only f32 and f64");
+        return WalkResult::interrupt();
+      }
+      if (!sampledDtype) {
+        sampledDtype = dt;
+        dtypeOwner   = f.getSymName().str();
+      } else if (*sampledDtype != dt) {
+        f.emitError("compileKunIrToExecutable: kunir.func '")
+            << f.getSymName() << "' has dtype "
+            << (dt == ::kun_cuda::Datatype::Double ? "f64" : "f32")
+            << " but earlier '" << dtypeOwner << "' had "
+            << (*sampledDtype == ::kun_cuda::Datatype::Double ? "f64" : "f32");
+        return WalkResult::interrupt();
+      }
+    }
+    return WalkResult::advance();
+  });
+  if (dtypeWalk.wasInterrupted()) return failure();
+
   // 1.  kunir → llvm dialect.  After this the gpu.module body is fully
   //     lowered and our discardable kungpu.* attrs sit on llvm.func ops.
   if (failed(lowerKunIrToLLVMDialect(module))) return failure();
@@ -215,6 +254,7 @@ LogicalResult compileKunIrToExecutable(ModuleOp module,
   out.cubin.assign(cubin.begin(), cubin.end());
   out.warpsPerCta = warpsPerCta;
   out.vectorSize  = vectorSize;
+  out.dtype       = sampledDtype.value_or(::kun_cuda::Datatype::Float);
   out.kernels     = std::move(kernels);
   return success();
 }

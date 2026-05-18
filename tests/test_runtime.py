@@ -96,7 +96,8 @@ def _sts_reblock(flat: np.ndarray, blocking: int) -> np.ndarray:
         flat.reshape((T, S // blocking, blocking)).transpose((1, 0, 2)))
 
 
-def runGraph(executor, modu, inputs, cur_time, length, outputs=None):
+def runGraph(executor, modu, inputs, cur_time, length, outputs=None,
+              gpu_sm_fill_factor=None):
     """Backend-aware `kr.runGraph`.  CPU path is a pass-through; GPU
     path moves numpy inputs to cupy, runs, syncs, and copies results
     back into the caller-supplied numpy outputs (if any).  Returns the
@@ -105,7 +106,13 @@ def runGraph(executor, modu, inputs, cur_time, length, outputs=None):
     STs-blocked (3-D) inputs are transparently unblocked to TS before
     launch; outputs are re-blocked to match.  The matching `compileit`
     wrapper has already rewritten the function's layout attr to `TS`,
-    so the kunir codegen never sees `STs`."""
+    so the kunir codegen never sees `STs`.
+
+    `gpu_sm_fill_factor` (GPU only) overrides the runtime's chunk-grid
+    heuristic — pass `0.0` to force a single time chunk, useful when
+    a test asserts bit-exactness against a single-pass reference (the
+    multi-chunk Kahan restart introduces ≤1 ulp drift).
+    """
     if not GPU_MODE:
         return kr.runGraph(executor, modu, inputs, cur_time, length,
                             outputs if outputs is not None else {})
@@ -123,8 +130,10 @@ def runGraph(executor, modu, inputs, cur_time, length, outputs=None):
             ts_inputs[k] = v
 
     gpu_inputs = {k: cp.asarray(v) for k, v in ts_inputs.items()}
-    ret = executor.runGraph(modu, gpu_inputs,
-                              cur_time=cur_time, length=length)
+    rg_kwargs = {"cur_time": cur_time, "length": length}
+    if gpu_sm_fill_factor is not None:
+        rg_kwargs["sm_fill_factor"] = gpu_sm_fill_factor
+    ret = executor.runGraph(modu, gpu_inputs, **rg_kwargs)
     executor.synchronize()
 
     out_np = {}
@@ -149,18 +158,14 @@ _GPU_SKIP_TESTS = {
     "test_corrwith",
     "test_aggregrate",
     "test_runtime",
-    "test_avg_stddev_TS",      # double dtype
-    "test_rank2",              # double dtype
-    "test_rank029",            # double dtype
     "test_ema",                # ExpMovingAvg not in CodegenMLIR
     "test_ema_init",           # same
     "test_argmin_issue19",     # ReduceArgMin / ReduceRank not in CodegenMLIR
     "test_aligned",            # CPU-only shape-error check
-    "test_skew_kurt",          # double + WindowedSkew/Kurt
+    "test_skew_kurt",          # WindowedSkew/Kurt decompose not GPU-ready
     "test_loop_index",         # WindowedMaxDrawdown / WindowLoopIndex
-    "test_covar",              # double + WindowedCovariance/Correlation
-    "test_quantile",           # double + SkipList
-    "test_large_rank",         # double + large-window SkipList
+    "test_quantile",           # SkipList
+    "test_large_rank",         # SkipList (TsRank/etc. with large window)
     "test_stream_double",
     "test_repro_crash_gh_issue_71",
     "test_generic_cross_sectional",
@@ -171,10 +176,15 @@ _GPU_SKIP_TESTS = {
 # `compileit` runs on the GPU side — keeps the build green even though
 # most check_xxx entries still produce unsupported kunir.
 _GPU_LIB_NAMES = {
-    "avg_and_stddev",   # WindowedAvg + WindowedStddev (Sqrt + FBW over input)
-    "test_rank",        # cross-sectional Rank (external cs_rank kernel)
-    "test_log",         # float32 only — float64 call gated below
-    "test_pow",         # Pow → Exp(Log(...) * expo) + Sqrt special-case
+    "avg_and_stddev",       # WindowedAvg + WindowedStddev (Sqrt + FBW)
+    "avg_and_stddev_TS",    # same, double dtype, TS layout
+    "test_rank",            # cross-sectional Rank (external cs_rank_f32)
+    "test_rank2",           # Add + Rank, double dtype (cs_rank_f64)
+    "test_rank_alpha029",   # Rank chain + WindowedSum, double
+    "test_log",             # float32
+    "test_log64",           # float64
+    "test_pow",             # Pow → Exp(Log(x) * expo) + Sqrt special-case
+    "test_covar",           # WindowedCovariance + WindowedCorrelation, double
 }
 
 
@@ -186,11 +196,6 @@ def _run(fn, *args, **kwargs):
         name = fn.__name__
         if name in _GPU_SKIP_TESTS:
             print(f"[skip on GPU] {name}")
-            return
-        # test_log(lib, dtype, name): GPU only has f32 kunir today;
-        # the f64 invocation has to skip.
-        if name == "test_log" and len(args) >= 2 and args[1] == "float64":
-            print(f"[skip on GPU] {name} {args[1]}")
             return
     fn(*args, **kwargs)
 
@@ -393,8 +398,8 @@ def test_avg_stddev_TS(lib):
     expected_mean = df.rolling(10).mean().to_numpy().transpose()
     expected_stddev = df.rolling(10).std().to_numpy().transpose()
     blocked = np.ascontiguousarray(inp.transpose())
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": blocked}, 0, 20)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, modu, {"a": blocked}, 0, 20)
     outmean = out["ou1"].transpose()
     outstd = out["ou2"].transpose()
     np.testing.assert_allclose(outmean, expected_mean, rtol=1e-6, equal_nan=True)
@@ -420,8 +425,8 @@ def test_covar(lib):
     df2 = pd.DataFrame(inp2)
     expected_covar = df.rolling(10).cov(df2).to_numpy()
     expected_corr = df.rolling(10).corr(df2).to_numpy()
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": inp, "b": inp2}, 0, 200)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, modu, {"a": inp, "b": inp2}, 0, 200)
     outcovar = out["ou1"]
     outcorr = out["ou2"]
     np.testing.assert_allclose(outcovar, expected_covar, rtol=1e-6, equal_nan=True)
@@ -616,8 +621,8 @@ def test_rank2(lib):
         df = df + df
         expected = (df.rank(pct=True, axis = 1) + df).to_numpy().transpose()
         blocked = np.ascontiguousarray(inp.transpose())
-        executor = kr.createSingleThreadExecutor()
-        out = kr.runGraph(executor, modu, {"a": blocked}, 0, 200)
+        executor = createSingleThreadExecutor()
+        out = runGraph(executor, modu, {"a": blocked}, 0, 200)
         output = out["out"].transpose()
         # print(expected[:,0])
         # print(output[:,0])
@@ -659,8 +664,15 @@ def test_rank029(lib):
         inner = inner.to_numpy().transpose()
         expected = expected.to_numpy().transpose()
         blocked = np.ascontiguousarray(inp.transpose())
-        executor = kr.createSingleThreadExecutor()
-        out = kr.runGraph(executor, modu, {"a": blocked}, 0, 300)
+        executor = createSingleThreadExecutor()
+        # The outer Rank(WindowedSum(...)) is sensitive to near-ties:
+        # GPU multi-chunk Kahan drifts ≤1 ulp in the inner sum, which
+        # can flip cross-sectional tie-breaking and shift rank buckets
+        # by 0.025-0.05.  Force single-chunk so the Kahan state runs
+        # uninterrupted — perf is irrelevant for a correctness test
+        # and this restores bit-exactness with pandas.
+        out = runGraph(executor, modu, {"a": blocked}, 0, 300,
+                        gpu_sm_fill_factor=0.0 if GPU_MODE else None)
         output1 = out["ou1"].transpose()
         output2 = out["ou2"].transpose()
         np.set_printoptions(precision=60)

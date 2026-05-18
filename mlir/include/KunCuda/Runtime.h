@@ -74,6 +74,18 @@ enum class KernelKind : int32_t {
   ExtCsRankF64 = 2,
 };
 
+/// Per-kernel element type.  Currently single-precision (f32) and
+/// double-precision (f64) are supported.  Determines the byte size used
+/// when allocating intermediate slots and validating user-supplied I/O.
+enum class Datatype : int32_t {
+  Float  = 0,   ///< f32 — 4 bytes/elem
+  Double = 1,   ///< f64 — 8 bytes/elem
+};
+
+inline size_t bytesPerElem(Datatype dt) noexcept {
+  return dt == Datatype::Double ? 8u : 4u;
+}
+
 /// Per-kernel metadata, in name form.  This is what the compiler can
 /// produce by walking a single lowered llvm.func — no graph topology
 /// reasoning required.
@@ -104,6 +116,11 @@ struct ExecutableData {
                                      ///<   from numStocks (see
                                      ///<   launchExtCsRankKernel).
   int64_t vectorSize  = 1;          ///< from kungpu.target_spec (graph-wide)
+  Datatype dtype      = Datatype::Float;  ///< element type of every kernel
+                                           ///<   I/O.  Graph-wide; verified
+                                           ///<   at compile time.  Used by
+                                           ///<   the runtime to size the
+                                           ///<   intermediate slot pool.
   std::vector<KernelMeta> kernels;  ///< unordered set; runtime topo-sorts
   std::vector<std::string> graphInputs;
   std::vector<std::string> graphOutputs;
@@ -149,6 +166,7 @@ public:
   const std::vector<std::string> &graphOutputs() const noexcept { return data_.graphOutputs; }
   int64_t warpsPerCta() const noexcept { return data_.warpsPerCta; }
   int64_t vectorSize()  const noexcept { return data_.vectorSize; }
+  Datatype dtype()      const noexcept { return data_.dtype; }
   size_t  numKernels()  const noexcept { return data_.kernels.size(); }
 
   // ── Accessors (runtime-resolved plan) ─────────────────────────────

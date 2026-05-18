@@ -127,7 +127,8 @@ static void requireRowMajorContiguous2D(const std::string &paramName,
 /// the capsule fall out of scope at function exit — the underlying
 /// tensor stays alive because the user is still holding `obj`.
 static CudaArrayInfo readDLPack(nb::handle obj, const std::string &paramName,
-                                  const nb::object &streamArg) {
+                                  const nb::object &streamArg,
+                                  kun_cuda::Datatype expectedDtype) {
   if (!nb::hasattr(obj, "__dlpack__"))
     throw std::runtime_error(
         "'" + paramName + "' does not implement __dlpack__ — pass a CuPy "
@@ -159,20 +160,25 @@ static CudaArrayInfo readDLPack(nb::handle obj, const std::string &paramName,
         "'" + paramName + "' must be 2-D (got " +
         std::to_string(t.ndim) + "-D)");
 
-  // ── dtype: kDLFloat, 32-bit, 1 lane ─────────────────────────────────
-  if (t.dtype.code != kDLFloat || t.dtype.bits != 32 || t.dtype.lanes != 1)
+  // ── dtype: kDLFloat, matches executable's element type ──────────────
+  const uint8_t expectedBits =
+      expectedDtype == kun_cuda::Datatype::Double ? 64 : 32;
+  if (t.dtype.code != kDLFloat || t.dtype.bits != expectedBits ||
+      t.dtype.lanes != 1)
     throw std::runtime_error(
         "'" + paramName + "' DLPack dtype is (code=" +
         std::to_string(static_cast<int>(t.dtype.code)) +
         ", bits=" + std::to_string(static_cast<int>(t.dtype.bits)) +
         ", lanes=" + std::to_string(static_cast<int>(t.dtype.lanes)) +
-        ") — need float32 (kDLFloat, 32, 1)");
+        ") — kernel expects float" + std::to_string(expectedBits) +
+        " (kDLFloat, " + std::to_string(expectedBits) + ", 1)");
 
   // ── strides: NULL = row-major contiguous; else validate.  DLPack
   //    strides are in *elements*, not bytes — convert before checking.
+  const int64_t elemBytes = static_cast<int64_t>(kun_cuda::bytesPerElem(expectedDtype));
   if (t.strides) {
-    int64_t sb[2] = {t.strides[0] * 4, t.strides[1] * 4};
-    requireRowMajorContiguous2D(paramName, t.shape, sb, /*elemSize=*/4);
+    int64_t sb[2] = {t.strides[0] * elemBytes, t.strides[1] * elemBytes};
+    requireRowMajorContiguous2D(paramName, t.shape, sb, elemBytes);
   }
 
   // ── data pointer (apply byte_offset before handing to kernel) ───────
@@ -241,7 +247,7 @@ static CollectedInputs collectInputs(const kun_cuda::Executable &exe,
     nb::object key = nb::str(name.c_str());
     if (!pyInputs.contains(key))
       throw std::runtime_error("runGraph: missing input '" + name + "'");
-    CudaArrayInfo info = readDLPack(pyInputs[key], name, streamArg);
+    CudaArrayInfo info = readDLPack(pyInputs[key], name, streamArg, exe.dtype());
 
     if (out.timeLength < 0) {
       out.timeLength = info.timeLength;
@@ -262,14 +268,17 @@ static CollectedInputs collectInputs(const kun_cuda::Executable &exe,
   return out;
 }
 
-/// Allocate a CUDA device buffer of `total` floats and wrap it in an
-/// `nb::ndarray<>` (no framework annotation) owning the allocation via
-/// a capsule.  Lifetime is tied to the Python object: when the array's
-/// refcount drops to zero, the capsule destructor frees via `cuMemFree`.
-static nb::ndarray<> allocOwnedCudaArray2D(int64_t T, int64_t S) {
+/// Allocate a CUDA device buffer of `T*S` elements (`sizeof(elem) =
+/// bytesPerElem(dt)`) and wrap it in an `nb::ndarray<>` (no framework
+/// annotation) owning the allocation via a capsule.  Lifetime is tied
+/// to the Python object: when the array's refcount drops to zero, the
+/// capsule destructor frees via `cuMemFree`.
+static nb::ndarray<> allocOwnedCudaArray2D(int64_t T, int64_t S,
+                                              kun_cuda::Datatype dt) {
+  const size_t elemBytes = kun_cuda::bytesPerElem(dt);
   size_t total = static_cast<size_t>(T) * static_cast<size_t>(S);
   CUdeviceptr p = 0;
-  CUresult r = cuMemAlloc(&p, total * sizeof(float));
+  CUresult r = cuMemAlloc(&p, total * elemBytes);
   if (r != CUDA_SUCCESS) {
     const char *msg = nullptr;
     cuGetErrorString(r, &msg);
@@ -279,15 +288,15 @@ static nb::ndarray<> allocOwnedCudaArray2D(int64_t T, int64_t S) {
   nb::capsule owner(reinterpret_cast<void *>(p), [](void *q) noexcept {
     cuMemFree(reinterpret_cast<CUdeviceptr>(q));
   });
-  // device_id: query current context's device.  Falls back to 0 if no
-  // context is current (which should not happen here — cuMemAlloc just
-  // succeeded, so there is a current context).
   CUdevice dev = 0;
   cuCtxGetDevice(&dev);
   size_t shape[2] = {static_cast<size_t>(T), static_cast<size_t>(S)};
+  nb::dlpack::dtype npDtype =
+      dt == kun_cuda::Datatype::Double ? nb::dtype<double>()
+                                         : nb::dtype<float>();
   return nb::ndarray<>(reinterpret_cast<void *>(p), /*ndim=*/2, shape, owner,
                         /*strides=*/nullptr,
-                        /*dtype=*/nb::dtype<float>(),
+                        /*dtype=*/npDtype,
                         /*device_type=*/nb::device::cuda::value,
                         /*device_id=*/static_cast<int>(dev));
 }
@@ -327,7 +336,8 @@ static nb::dict collectOutputs(
     nb::object key = nb::str(name.c_str());
     uintptr_t base;
     if (userOutputs && userOutputs.contains(key)) {
-      CudaArrayInfo info = readDLPack(userOutputs[key], name, streamArg);
+      CudaArrayInfo info =
+          readDLPack(userOutputs[key], name, streamArg, exe.dtype());
       if (info.timeLength != length || info.numStocks != numStocks) {
         std::stringstream ss;
         ss << "runGraph: output '" << name << "' has shape ("
@@ -338,7 +348,8 @@ static nb::dict collectOutputs(
       base = info.ptr;
       ret[key] = userOutputs[key];
     } else {
-      nb::ndarray<> arr = allocOwnedCudaArray2D(length, numStocks);
+      nb::ndarray<> arr =
+          allocOwnedCudaArray2D(length, numStocks, exe.dtype());
       base = reinterpret_cast<uintptr_t>(arr.data());
       ret[key] = nb::cast(std::move(arr));
     }
