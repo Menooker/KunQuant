@@ -87,6 +87,8 @@ LogicalResult OrOp::verify()  { return verifyLogicalBinary(*this, getLhs(), getR
 
 LogicalResult AbsOp::verify()  { return success(); }
 LogicalResult LogOp::verify()  { return success(); }
+LogicalResult ExpOp::verify()  { return success(); }
+LogicalResult SqrtOp::verify() { return success(); }
 LogicalResult SignOp::verify() { return success(); }
 
 LogicalResult NotOp::verify() {
@@ -522,6 +524,12 @@ Value AbsOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
 }
 Value LogOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
   return math::LogOp::create(b, loc, operand);
+}
+Value ExpOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
+  return math::ExpOp::create(b, loc, operand);
+}
+Value SqrtOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
+  return math::SqrtOp::create(b, loc, operand);
 }
 Value SignOp::buildScalarOp(OpBuilder &b, Location loc, Value operand) {
   // sign(x) ≈ copysign(1.0, x)

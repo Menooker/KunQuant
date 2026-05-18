@@ -149,12 +149,11 @@ _GPU_SKIP_TESTS = {
     "test_corrwith",
     "test_aggregrate",
     "test_runtime",
-    "test_avg_stddev",         # WindowedStddev needs Sqrt (not in CodegenMLIR)
+    "test_avg_stddev",         # mean OK, but stddev decompose disagrees
+                                # with pandas — needs more debugging
     "test_avg_stddev_TS",      # double dtype
     "test_rank2",              # double dtype
     "test_rank029",            # double dtype
-    "test_log",                # split: float32 may work, float64 unsupported
-    "test_pow",                # Pow decomposes to Exp/Log, Exp missing
     "test_ema",                # ExpMovingAvg not in CodegenMLIR
     "test_ema_init",           # same
     "test_argmin_issue19",     # ReduceArgMin / ReduceRank not in CodegenMLIR
@@ -174,7 +173,9 @@ _GPU_SKIP_TESTS = {
 # `compileit` runs on the GPU side — keeps the build green even though
 # most check_xxx entries still produce unsupported kunir.
 _GPU_LIB_NAMES = {
-    "test_rank",
+    "test_rank",        # cross-sectional Rank (external cs_rank kernel)
+    "test_log",         # float32 only — float64 call gated below
+    "test_pow",         # Pow → Exp(Log(...) * expo) + Sqrt special-case
 }
 
 
@@ -182,9 +183,16 @@ def _run(fn, *args, **kwargs):
     """Call `fn(*args, **kwargs)` unless we're in GPU mode and `fn` is in
     `_GPU_SKIP_TESTS` — then just print and return.  Keeps the dispatch
     block at the bottom of the file unchanged in shape."""
-    if GPU_MODE and fn.__name__ in _GPU_SKIP_TESTS:
-        print(f"[skip on GPU] {fn.__name__}")
-        return
+    if GPU_MODE:
+        name = fn.__name__
+        if name in _GPU_SKIP_TESTS:
+            print(f"[skip on GPU] {name}")
+            return
+        # test_log(lib, dtype, name): GPU only has f32 kunir today;
+        # the f64 invocation has to skip.
+        if name == "test_log" and len(args) >= 2 and args[1] == "float64":
+            print(f"[skip on GPU] {name} {args[1]}")
+            return
     fn(*args, **kwargs)
 
 def test_aggregrate(dtype):
@@ -366,8 +374,8 @@ def test_avg_stddev(lib):
     expected_mean = df.rolling(10).mean().to_numpy().transpose()
     expected_stddev = df.rolling(10).std().to_numpy().transpose()
     blocked = ST_ST8t(inp)
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": blocked}, 0, 20)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, modu, {"a": blocked}, 0, 20)
     outmean = ST8t_ST(out["ou1"])
     outstd = ST8t_ST(out["ou2"])
     np.testing.assert_allclose(outmean, expected_mean, rtol=1e-6, equal_nan=True)
@@ -682,8 +690,8 @@ def test_log(lib, dtype, name):
     inp[1,:] = np.nan
     # print(inp)
     blocked = ST_ST8t(inp, is_double=(dtype=="float64"))
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": blocked}, 0, 20)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, modu, {"a": blocked}, 0, 20)
     output = ST8t_ST(out["outlog"])
     # print(expected[:,0])
     # print(output[:,0])
@@ -720,8 +728,8 @@ def test_pow(lib):
         expo[i,:] = pow(10, i/8-1)
     expo[-1,:] = 0
     expo[1,:] = np.nan
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": ST_ST8t(base), "b": ST_ST8t(expo)}, 0, 20)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, modu, {"a": ST_ST8t(base), "b": ST_ST8t(expo)}, 0, 20)
     # print(out.keys())
     # print(expected[:,0])
     # print(output[:,0])

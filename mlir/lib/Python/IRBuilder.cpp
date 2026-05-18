@@ -150,6 +150,8 @@ public:
 
   Value absOp(Value x)  { return makeUn<kunir::AbsOp>(x); }
   Value logOp(Value x)  { return makeUn<kunir::LogOp>(x); }
+  Value expOp(Value x)  { return makeUn<kunir::ExpOp>(x); }
+  Value sqrtOp(Value x) { return makeUn<kunir::SqrtOp>(x); }
   Value signOp(Value x) { return makeUn<kunir::SignOp>(x); }
 
   // ── Comparison + logical (binary, return ts<i1, 1>) ─────────────
@@ -355,6 +357,8 @@ void registerIRBuilder(nb::module_ &m) {
       .def("min",    &IRBuilder::minOp,    nb::arg("lhs"), nb::arg("rhs"))
       .def("abs",    &IRBuilder::absOp,    nb::arg("x"))
       .def("log",    &IRBuilder::logOp,    nb::arg("x"))
+      .def("exp",    &IRBuilder::expOp,    nb::arg("x"))
+      .def("sqrt",   &IRBuilder::sqrtOp,   nb::arg("x"))
       .def("sign",   &IRBuilder::signOp,   nb::arg("x"))
 
       // Comparison + logical (binary). Cmp ops return ts<i1, 1>;

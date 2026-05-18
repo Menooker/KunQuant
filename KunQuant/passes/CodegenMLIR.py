@@ -31,7 +31,7 @@ from KunQuant.Op import (
     ReductionOp, SimpleCrossSectionalOp, ConstantOp,
 )
 from KunQuant.ops.ElewiseOp import (
-    Add, Sub, Mul, Div, Max, Min, Abs, Log, Sign,
+    Add, Sub, Mul, Div, Max, Min, Abs, Log, Exp, Sqrt, Sign,
     AddConst, SubConst, MulConst, DivConst,
     GreaterThan, GreaterEqual, LessThan, LessEqual, Equals,
     And, Or, Not, Select,
@@ -63,7 +63,7 @@ _BINARY_CONST = {
     AddConst: "add", SubConst: "sub", MulConst: "mul", DivConst: "div",
 }
 _UNARY = {
-    Abs: "abs", Log: "log", Sign: "sign",
+    Abs: "abs", Log: "log", Exp: "exp", Sqrt: "sqrt", Sign: "sign",
     Not: "not_",
     # NOTE: `Rank` is intentionally absent.  Cross-sectional rank
     # partitions are routed to a pre-compiled CUmodule by

@@ -79,6 +79,12 @@ def KunIr_AbsOp  : KunIr_UnaryElemwiseOp<"abs">  {
 def KunIr_LogOp  : KunIr_UnaryElemwiseOp<"log">  {
   let summary = "Element-wise natural logarithm";
 }
+def KunIr_ExpOp  : KunIr_UnaryElemwiseOp<"exp">  {
+  let summary = "Element-wise natural exponential";
+}
+def KunIr_SqrtOp : KunIr_UnaryElemwiseOp<"sqrt"> {
+  let summary = "Element-wise square root";
+}
 def KunIr_SignOp : KunIr_UnaryElemwiseOp<"sign"> {
   let summary = "Element-wise sign (-1, 0, 1)";
 }
