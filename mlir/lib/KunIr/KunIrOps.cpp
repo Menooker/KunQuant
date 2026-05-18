@@ -271,6 +271,15 @@ LogicalResult SetAccumulatorOp::verify() {
       llvm::cast<IntegerType>(maskTy.getElementType()).getWidth() != 1)
     return emitOpError("mask element type must be i1, got '")
            << maskTy.getElementType() << "'";
+  auto resultTy = llvm::cast<TsType>(getResult().getType());
+  if (resultTy.getElementType() != accTy.getElementType())
+    return emitOpError("result element type '")
+           << resultTy.getElementType()
+           << "' must match accumulator element type '"
+           << accTy.getElementType() << "'";
+  if (resultTy.getMaxLookback() != 1)
+    return emitOpError("result maxLookback must be 1, got ")
+           << resultTy.getMaxLookback();
   return success();
 }
 

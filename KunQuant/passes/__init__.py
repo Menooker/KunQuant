@@ -7,3 +7,4 @@ from .CodegenCpp import codegen_cpp
 from .InferWindow import infer_window
 from .InferWindow import infer_input_window
 from .MergeLoops import merge_loops
+from .ExperimentalExpand import experimental_expand

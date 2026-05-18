@@ -158,8 +158,7 @@ _GPU_SKIP_TESTS = {
     "test_corrwith",
     "test_aggregrate",
     "test_runtime",
-    "test_ema",                # ExpMovingAvg not in CodegenMLIR
-    "test_ema_init",           # same
+    "test_ema_init",           # __init Input not supported yet
     "test_aligned",            # CPU-only shape-error check
     "test_quantile",           # SkipList
     "test_stream_double",
@@ -185,6 +184,7 @@ _GPU_LIB_NAMES = {
     "test_large_rank",      # TsRank/TsArgMin/Max via naive FBW (no_skip_list)
     "test_argmin",          # TsArgMin/TsRank/WindowedMin small-window
     "test_max_drawdown",    # WindowedMaxDrawdown (uses WindowLoopIndex)
+    "test_ema",             # ExpMovingAvg (expanded by experimental_expand)
 }
 
 
@@ -504,8 +504,8 @@ def test_ema(lib):
     assert(modu)
     inp = np.random.rand(20, 24).astype("float32")
     inp[5,:] = np.nan
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, modu, {"a": inp}, 0, 20)
     output = out["ou2"]
     df = pd.DataFrame(inp)
     expected = RefExpMovingAvg(df)

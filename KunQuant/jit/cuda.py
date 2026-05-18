@@ -159,6 +159,10 @@ def _gpu_pass_options(kcfg: KunCompilerConfig) -> dict:
     if kcfg.options:
         opts.update(kcfg.options)
     opts["no_skip_list"] = True
+    # Pipeline lowering doesn't know about ExpMovingAvg or the
+    # WindowedLinearRegression* family — turn on the Accumulator-based
+    # expansion pass instead.
+    opts["experimental_expand"] = True
     return opts
 
 

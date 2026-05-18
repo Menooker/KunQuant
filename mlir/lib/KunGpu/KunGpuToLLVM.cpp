@@ -527,7 +527,7 @@ struct AccumulatorPattern : OpConversionPattern<kungpu::AccumulatorOp> {
       return rewriter.notifyMatchFailure(
           op, "kungpu.accumulator must be inside a gpu.func");
 
-    // Alloca + zero-init at function entry so the slot is well-defined
+    // Alloca + init_val-init at function entry so the slot is well-defined
     // before the time loop begins.
     Value bufPtr;
     {
@@ -537,9 +537,10 @@ struct AccumulatorPattern : OpConversionPattern<kungpu::AccumulatorOp> {
       Value c1_i32 = LLVM::ConstantOp::create(
           rewriter, loc, i32Ty, rewriter.getI32IntegerAttr(1));
       bufPtr = LLVM::AllocaOp::create(rewriter, loc, ptrTy, elemTy, c1_i32);
-      Value zero = LLVM::ConstantOp::create(
-          rewriter, loc, elemTy, rewriter.getZeroAttr(elemTy));
-      LLVM::StoreOp::create(rewriter, loc, zero, bufPtr);
+      double initVal = op.getInitVal().convertToDouble();
+      Value initCst = LLVM::ConstantOp::create(
+          rewriter, loc, elemTy, rewriter.getFloatAttr(elemTy, initVal));
+      LLVM::StoreOp::create(rewriter, loc, initCst, bufPtr);
     }
 
     // posPtr = null → ts.get / ts.put treat as accumulator (slot 0 only).

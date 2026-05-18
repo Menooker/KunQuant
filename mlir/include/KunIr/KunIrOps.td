@@ -193,8 +193,9 @@ def KunIr_ConstantOp : KunIr_Op<"constant", [Pure]> {
 // load and store its current value.  The handle storage is owned by a
 // single LLVM alloca after kungpu-to-llvm lowering.
 //
-// `kunir.accumulator` is Pure with a `name` StrAttr — two accumulators
-// sharing the same name CSE to a single handle (single backing slot).
+// `kunir.accumulator` is NOT Pure: each op identifies a distinct slot
+// with its own `init_val`, so CSE-ing two accumulators to one slot would
+// silently merge their state.
 //
 // `kunir.set_accumulator` is NOT Pure: writing to the slot is a side
 // effect and must not be CSE'd or hoisted past dependent reads.  When the
@@ -202,9 +203,10 @@ def KunIr_ConstantOp : KunIr_Op<"constant", [Pure]> {
 // overwritten with `value`; otherwise it retains the previous value.
 //===----------------------------------------------------------------------===//
 
-def KunIr_AccumulatorOp : KunIr_Op<"accumulator", [Pure]> {
+def KunIr_AccumulatorOp : KunIr_Op<"accumulator"> {
   let summary = "Stateful single-slot scalar register (read via ts.get @0)";
-  let arguments = (ins StrAttr:$name);
+  let arguments = (ins StrAttr:$name,
+                       DefaultValuedAttr<F64Attr, "0.0">:$init_val);
   let results = (outs KunIr_AnyTs:$result);
   let hasVerifier = 1;
   let assemblyFormat = "$name `:` type($result) attr-dict";
@@ -217,13 +219,18 @@ def KunIr_SetAccumulatorOp : KunIr_Op<"set_accumulator"> {
     `mask` is true at the current time step, stores `value` into the
     accumulator slot; otherwise the slot is unchanged.  Side-effecting
     (NOT Pure): never CSE / dedup.
+
+    Returns the slot's new value for the current step — i.e.
+    `mask ? value : prev_accumulator`.  Downstream consumers can read
+    this directly without a second `ts.get` of the slot.
   }];
   let arguments = (ins KunIr_AnyTs:$acc,
                        KunIr_AnyTs:$mask,
                        KunIr_AnyTs:$value);
+  let results = (outs KunIr_AnyTs:$result);
   let hasVerifier = 1;
   let assemblyFormat =
-    "$acc `,` $mask `,` $value `:` type($acc) `,` type($mask) `,` type($value) attr-dict";
+    "$acc `,` $mask `,` $value `:` type($acc) `,` type($mask) `,` type($value) `->` type($result) attr-dict";
 }
 
 //===----------------------------------------------------------------------===//

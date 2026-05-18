@@ -92,17 +92,19 @@ def KunGpu_TimeUbOp : KunGpu_Op<"time_ub", [Pure]> {
 // (or `value` for put) must match the ts element type.
 //===----------------------------------------------------------------------===//
 
-def KunGpu_AccumulatorOp : KunGpu_Op<"accumulator", [Pure]> {
+def KunGpu_AccumulatorOp : KunGpu_Op<"accumulator"> {
   let summary = "Allocate a single-slot per-thread accumulator (alloca)";
   let description = [{
     Allocates a per-thread single-slot register backing a `kunir.accumulator`.
     The result is a `ts<T, 1>` handle that ts.put / ts.get treat at offset 0
     only — there is no time dimension and no circular indexing.  The slot is
-    zero-initialised at allocation time.
+    initialised to `init_val` at allocation time (default 0.0).
 
-    Pure with a `name` StrAttr — same-name accumulators CSE to one slot.
+    NOT Pure: each op carries its own `init_val` and identifies a distinct
+    slot, so dedup'ing same-name accumulators would silently merge state.
   }];
-  let arguments = (ins StrAttr:$name);
+  let arguments = (ins StrAttr:$name,
+                       DefaultValuedAttr<F64Attr, "0.0">:$init_val);
   let results = (outs KunIr_AnyTs:$result);
   let assemblyFormat = "$name `:` type($result) attr-dict";
 }

@@ -32,17 +32,32 @@ class FastWindowedSum(OpBase, WindowedTrait, GloablStatefulOpTrait):
 class Accumulator(OpBase, GlobalStatefulProducerTrait, MayRequireWholeTime):
     '''
     Accumulator is a stateful op that accumulates the input value over time.
-    It can be used to compute running totals, moving averages, etc.'''
+    It can be used to compute running totals, moving averages, etc.
+
+    `init_val` is the initial scalar stored in the slot before the first
+    time step.  Pass a float (default 0) for a plain numeric init, or the
+    string "nan" for a NaN init (mirrors ConstantOp's "nan" handling).
+    '''
     def __init__(self, v: OpBase, name: str,
-                  is_whole_time_required: bool = False) -> None:
+                  is_whole_time_required: bool = False,
+                  init_val: Union[float, str] = 0) -> None:
+        if isinstance(init_val, str) and init_val != "nan":
+            raise RuntimeError(
+                f"Accumulator init_val str must be 'nan', got {init_val!r}")
         super().__init__([v],
                           [("name", name),
-                           ("whole_time", is_whole_time_required)])
+                           ("whole_time", is_whole_time_required),
+                           ("init_val", init_val)])
     def is_whole_time_required(self) -> bool:
         return self.attrs["whole_time"]
     def get_state_variable_name_prefix(self) -> str:
         return "accu_"
-    
+
+    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str], aligned: bool) -> str:
+        from KunQuant.passes.CodegenCpp import _float_value_to_float
+        init = _float_value_to_float(self.attrs["init_val"], elem_type)
+        return f"{self.get_func_or_class_full_name(elem_type, simd_lanes)} {self.get_state_variable_name_prefix()}{idx} {{ {init} }};"
+
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:
         return f"auto v{idx} = accu_{idx}.asValue();"
 

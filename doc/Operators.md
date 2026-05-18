@@ -456,16 +456,40 @@ class Accumulator(OpBase, GlobalStatefulProducerTrait, MayRequireWholeTime):
     '''
     Accumulator is a stateful op that accumulates the input value over time.
     It can be used to compute running totals, moving averages, etc.
-    Set `is_whole_time_required=True` if the accumulator's state can only
-    be reconstructed from the full time history.
+
+    The first positional input `v` is a graph-keepalive only — it does NOT
+    feed the slot.  The slot's value is governed by `init_val` (its initial
+    contents) and by paired `SetAccumulator` ops (which write the slot).
+
+    Parameters:
+        v: keepalive input (any OpBase in the time-step's value graph).
+        name: human-readable label.  Per-op uniqueness is NOT required —
+            each `Accumulator` op identifies a distinct slot, even when two
+            ops share a name (no CSE / dedup).
+        is_whole_time_required: set to True if the accumulator's state
+            can only be reconstructed from the full time history (forces
+            the runtime to collapse to a single chunk).
+        init_val: initial scalar stored in the slot before the first time
+            step.  Pass a Python float (default `0`) for a numeric init,
+            or the string `"nan"` for a NaN init.  NaN init is useful as
+            a "not-yet-seeded" sentinel for ops like EMA.
     '''
     def __init__(self, v: OpBase, name: str,
-                  is_whole_time_required: bool = False) -> None:
+                  is_whole_time_required: bool = False,
+                  init_val: Union[float, str] = 0) -> None:
         pass
 
 class SetAccumulator(OpBase):
     '''
-    Set the value of an Accumulator to a value, if mask is set. Otherwise, it does nothing.
+    Conditionally overwrite an Accumulator's slot.  When `mask` is true at
+    the current time step, stores `value` into the slot; otherwise the slot
+    is unchanged.
+
+    The op also returns the slot's new value for the current step — i.e.
+    `mask ? value : prev_accumulator`.  Downstream consumers can use the
+    SetAccumulator's SSA result directly as the freshly-written value
+    without re-reading the slot.  `accu` must be the result of an
+    `Accumulator` op.
     '''
     def __init__(self, accu: OpBase, mask: OpBase, value: OpBase) -> None:
         pass

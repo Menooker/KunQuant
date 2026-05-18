@@ -176,12 +176,14 @@ public:
   }
 
   // ── Accumulator / SetAccumulator ───────────────────────────────
-  Value accumulatorOp(std::string name, Type tsTy) {
+  Value accumulatorOp(std::string name, Type tsTy, double initVal) {
     return kunir::AccumulatorOp::create(b_, b_.getUnknownLoc(), tsTy,
-                                            b_.getStringAttr(name));
+                                            b_.getStringAttr(name),
+                                            b_.getF64FloatAttr(initVal));
   }
-  void setAccumulatorOp(Value acc, Value mask, Value value) {
-    kunir::SetAccumulatorOp::create(b_, b_.getUnknownLoc(), acc, mask, value);
+  Value setAccumulatorOp(Value acc, Value mask, Value value) {
+    return kunir::SetAccumulatorOp::create(
+        b_, b_.getUnknownLoc(), acc.getType(), acc, mask, value);
   }
 
   // ── Windowed buffer materialization ───────────────────────────────
@@ -388,13 +390,15 @@ void registerIRBuilder(nb::module_ &m) {
             "ts<T, 1>).  Pass float('nan') for NaN.")
 
       .def("accumulator", &IRBuilder::accumulatorOp,
-            nb::arg("name"), nb::arg("type"),
+            nb::arg("name"), nb::arg("type"), nb::arg("init_val") = 0.0,
             "Build a kunir.accumulator with the given name and ts<T, 1> "
-            "result type.  Same-name accumulators CSE to a single slot.")
+            "result type.  `init_val` is the initial scalar stored in the "
+            "slot before the first time step (pass float('nan') for NaN).")
       .def("set_accumulator", &IRBuilder::setAccumulatorOp,
             nb::arg("acc"), nb::arg("mask"), nb::arg("value"),
             "Conditionally store `value` into `acc` when `mask` is true. "
-            "Side-effecting; returns no SSA value.")
+            "Side-effecting; returns the slot's new value for the current "
+            "step (`mask ? value : prev_accumulator`).")
 
       .def("select", &IRBuilder::selectOp,
             nb::arg("cond"), nb::arg("true_value"), nb::arg("false_value"))

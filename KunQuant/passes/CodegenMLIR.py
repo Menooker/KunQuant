@@ -180,16 +180,20 @@ def _emit_simple(op: OpBase,
         return ir.window_loop_index(ts_1)
     if isinstance(op, Accumulator):
         # The Python op's `inputs[0]` is a keep-alive in the graph IR;
-        # it does NOT feed the slot.  Only the `name` attr matters at
-        # the MLIR level — same-name accumulators CSE to one slot.
-        return ir.accumulator(op.attrs["name"], ts_1)
+        # it does NOT feed the slot.  The `name` attr is informational;
+        # each op identifies a distinct slot (kunir.accumulator is not
+        # Pure, so MLIR CSE will not dedup two accumulators).
+        init_v = op.attrs["init_val"]
+        init_f = float("nan") if init_v == "nan" else float(init_v)
+        return ir.accumulator(op.attrs["name"], ts_1, init_f)
     if isinstance(op, SetAccumulator):
-        # Side-effect: returns no SSA value.  ReturnFirstValue is what
-        # keeps this op alive in the Python graph (see MiscOp.py).
-        ir.set_accumulator(val_map[op.inputs[0]],
-                            val_map[op.inputs[1]],
-                            val_map[op.inputs[2]])
-        return None
+        # Side-effecting (writes the slot) but also returns the slot's
+        # new value for the current step (`mask ? value : prev`), so
+        # downstream consumers can use the SetAccumulator's SSA result
+        # directly — matches the CPU C++ SetAccumulator semantics.
+        return ir.set_accumulator(val_map[op.inputs[0]],
+                                   val_map[op.inputs[1]],
+                                   val_map[op.inputs[2]])
     if isinstance(op, ReturnFirstValue):
         # In the Python graph IR, ReturnFirstValue's only job is to keep
         # side-effecting siblings (SetAccumulator etc.) reachable from a

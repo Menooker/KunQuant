@@ -657,7 +657,8 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
     // (via getScalar → kungpu.ts.get @ offset 0) resolve to the slot.
     if (auto acc = dyn_cast<kunir::AccumulatorOp>(op)) {
       auto ka = kungpu::AccumulatorOp::create(
-          b, ol, acc.getResult().getType(), acc.getNameAttr());
+          b, ol, acc.getResult().getType(), acc.getNameAttr(),
+          acc.getInitValAttr());
       outer.tsMap[acc.getResult()] = ka.getResult();
       return success();
     }
@@ -665,6 +666,8 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
     // kunir.set_accumulator → scf.if (mask) { kungpu.ts.put %acc, %value }
     // inside the outer time loop.  mask and value are loaded at offset 0
     // (current time step) via the standard scalarMap-cached getScalar.
+    // The op's SSA result = `mask ? value : prev_slot` — emitted as an
+    // arith.select and stashed in scalarMap for downstream consumers.
     if (auto sa = dyn_cast<kunir::SetAccumulatorOp>(op)) {
       auto accIt = outer.tsMap.find(sa.getAcc());
       if (accIt == outer.tsMap.end())
@@ -674,10 +677,15 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
                          outer.getScalar(sa.getMask(),  fb, ol));
       KUN_ASSIGN_OR_FAIL(Value valueScalar,
                          outer.getScalar(sa.getValue(), fb, ol));
+      KUN_ASSIGN_OR_FAIL(Value prevScalar,
+                         outer.getScalar(sa.getAcc(),   fb, ol));
+      Value newScalar = arith::SelectOp::create(
+          fb, ol, maskScalar, valueScalar, prevScalar);
       auto ifOp = scf::IfOp::create(fb, ol, /*resultTypes=*/TypeRange{},
                                          maskScalar, /*withElseRegion=*/false);
       OpBuilder ib = OpBuilder::atBlockBegin(&ifOp.getThenRegion().front());
       TsPutOp::create(ib, ol, accIt->second, valueScalar);
+      outer.scalarMap[sa.getResult()] = newScalar;
       return success();
     }
 
