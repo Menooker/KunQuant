@@ -149,8 +149,6 @@ _GPU_SKIP_TESTS = {
     "test_corrwith",
     "test_aggregrate",
     "test_runtime",
-    "test_avg_stddev",         # mean OK, but stddev decompose disagrees
-                                # with pandas — needs more debugging
     "test_avg_stddev_TS",      # double dtype
     "test_rank2",              # double dtype
     "test_rank029",            # double dtype
@@ -173,6 +171,7 @@ _GPU_SKIP_TESTS = {
 # `compileit` runs on the GPU side — keeps the build green even though
 # most check_xxx entries still produce unsupported kunir.
 _GPU_LIB_NAMES = {
+    "avg_and_stddev",   # WindowedAvg + WindowedStddev (Sqrt + FBW over input)
     "test_rank",        # cross-sectional Rank (external cs_rank kernel)
     "test_log",         # float32 only — float64 call gated below
     "test_pow",         # Pow → Exp(Log(...) * expo) + Sqrt special-case

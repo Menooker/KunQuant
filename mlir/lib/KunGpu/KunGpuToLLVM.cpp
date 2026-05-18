@@ -250,8 +250,19 @@ static Value getNumStocksI64(OpBuilder &b, Operation *op, Location loc) {
   return arith::ExtSIOp::create(b, loc, b.getI64Type(), ns32);
 }
 static Value getCurrentTimeIdx(Operation *op) {
-  auto fOp = op->getParentOfType<scf::ForOp>();
-  return fOp ? fOp.getInductionVar() : Value();
+  // The enclosing function may contain nested scf.for's — outermost is
+  // the per-thread time loop, inner ones come from for_each_back_window
+  // bodies.  Reads/writes against a global ts (function-arg or graph
+  // intermediate) must use the OUTER time loop's IV regardless of how
+  // deep they sit; `op->getParentOfType<scf::ForOp>()` would otherwise
+  // grab the FBW's window-step IV and produce gmem addresses indexed
+  // by `w ∈ [0, window)` instead of the actual time `t`.
+  scf::ForOp outermost;
+  for (Operation *p = op->getParentOp(); p; p = p->getParentOp()) {
+    if (auto f = dyn_cast<scf::ForOp>(p))
+      outermost = f;
+  }
+  return outermost ? outermost.getInductionVar() : Value();
 }
 
 // linear gmem address = base + (timeIdx - offsetIdx) * num_stocks + stock_id
