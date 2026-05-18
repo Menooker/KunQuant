@@ -32,6 +32,7 @@ from KunQuant.Op import (
 )
 from KunQuant.ops.ElewiseOp import (
     Add, Sub, Mul, Div, Max, Min, Abs, Log, Sign,
+    AddConst, SubConst, MulConst, DivConst,
     GreaterThan, GreaterEqual, LessThan, LessEqual, Equals,
     And, Or, Not, Select,
 )
@@ -54,6 +55,12 @@ _BINARY = {
     LessThan:     "lt", LessEqual:    "le",
     Equals:       "eq",
     And:          "and_", Or:         "or_",
+}
+# Const-on-one-side variants — emit ConstantOp + the matching binary op.
+# `swap=True` puts the scalar on the LEFT (e.g. SubConst(x, v, swap=True)
+# means `v - x`, where for plain SubConst it would mean `x - v`).
+_BINARY_CONST = {
+    AddConst: "add", SubConst: "sub", MulConst: "mul", DivConst: "div",
 }
 _UNARY = {
     Abs: "abs", Log: "log", Sign: "sign",
@@ -130,6 +137,17 @@ def _emit_simple(op: OpBase,
         getattr(ir, _BINARY[cls])
         return getattr(ir, _BINARY[cls])(val_map[op.inputs[0]],
                                            val_map[op.inputs[1]])
+    if cls in _BINARY_CONST:
+        # Materialize the scalar attr as a kunir.constant, then emit
+        # the matching binary op.  `swap=True` puts the scalar on the
+        # left-hand side (matters for Sub/Div, no-op for Add/Mul).
+        scalar = float(op.attrs["value"])
+        const_val = ir.constant(scalar, ts_1)
+        x = val_map[op.inputs[0]]
+        ir_op = getattr(ir, _BINARY_CONST[cls])
+        if op.attrs.get("swap", False):
+            return ir_op(const_val, x)
+        return ir_op(x, const_val)
     if cls in _UNARY:
         return getattr(ir, _UNARY[cls])(val_map[op.inputs[0]])
     if isinstance(op, WindowedTempOutput):

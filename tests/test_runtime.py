@@ -1,4 +1,6 @@
 from KunQuant.Driver import KunCompilerConfig
+import argparse
+import dataclasses
 import numpy as np
 import pandas as pd
 import sys
@@ -13,6 +15,177 @@ from KunQuant.predefined.Alpha101 import *
 from KunQuant.runner import KunRunner as kr
 import sys
 from KunQuant.jit.env import cpu_arch
+
+
+# ── Backend dispatch (CPU vs GPU) ────────────────────────────────────
+#
+# `--gpu-arch sm_XX` flips us into GPU mode: every compile / executor /
+# runGraph call below the line goes through KunMLIR / KunQuant.jit.cuda
+# instead of cfake / KunRunner.  Tests that the GPU backend can't run
+# yet (STs layout, double dtype, streaming, custom cross-sectional C++,
+# aggregrate/corrwith helpers, Library.load) are skipped — see
+# `_GPU_SKIP_TESTS` below.
+_argp = argparse.ArgumentParser()
+_argp.add_argument("--gpu-arch", default="",
+                    help="GPU compute capability (e.g. sm_80).  Empty = CPU.")
+_args, _ = _argp.parse_known_args()
+GPU_MODE = bool(_args.gpu_arch)
+GPU_ARCH = _args.gpu_arch
+
+if GPU_MODE:
+    import cupy as cp
+    from KunQuant.jit import KunMLIR as _kr_mlir
+    from KunQuant.jit import cuda as _cuda_jit
+    # KunMLIR.compile + cuMemAlloc inherit the calling thread's primary
+    # CUDA context — touch a cupy allocator early so it exists.
+    cp.cuda.Device(0).use()
+    cp.zeros((1,), dtype=cp.float32)
+
+
+def compileit(funclist, libname):
+    """Backend-aware wrapper around `cfake.compileit` / `cuda.compileit`.
+    Both have the same `(funclist, libname, compiler_config)` shape; we
+    just pick the right compiler_config based on `GPU_MODE`.
+
+    GPU codegen only supports `TS` layout, so when a test built a
+    function with `STs` we transparently flip the layout flags to `TS`
+    here.  The matching `runGraph` wrapper does the input/output
+    blocking-shape reshape, keeping the test source unchanged."""
+    if GPU_MODE:
+        gpu_funclist = []
+        for name, f, kcfg in funclist:
+            if kcfg.input_layout == "STs" or kcfg.output_layout == "STs":
+                kcfg = dataclasses.replace(kcfg, input_layout="TS",
+                                                  output_layout="TS")
+            gpu_funclist.append((name, f, kcfg))
+        ccfg = _cuda_jit.CudaCompilerConfig(gpu_arch=GPU_ARCH)
+        return _cuda_jit.compileit(gpu_funclist, libname, ccfg)
+    return cfake.compileit(funclist, libname,
+                            cfake.CppCompilerConfig(machine=get_compiler_flags()))
+
+
+def createSingleThreadExecutor():
+    if GPU_MODE:
+        return _kr_mlir.Executor()
+    return kr.createSingleThreadExecutor()
+
+
+def createMultiThreadExecutor(n):
+    if GPU_MODE:
+        return _kr_mlir.Executor()
+    return kr.createMultiThreadExecutor(n)
+
+
+def _sts_unblock(blocked: np.ndarray) -> np.ndarray:
+    """STs blocked input `(S/blocking, T, blocking)`  →  TS dense
+    `(T, S)`.  test_runtime.py's STs convention has the stock axis
+    outer and time inner, so we transpose `(1, 0, 2)` before reshaping
+    the stock-block + lane back into one S axis."""
+    Sb, T, blocking = blocked.shape
+    return np.ascontiguousarray(
+        blocked.transpose((1, 0, 2)).reshape((T, Sb * blocking)))
+
+
+def _sts_reblock(flat: np.ndarray, blocking: int) -> np.ndarray:
+    """TS dense `(T, S)`  →  STs blocked `(S/blocking, T, blocking)`.
+    Inverse of `_sts_unblock`; pull `blocking` from the source rather
+    than re-deriving from dtype so it stays consistent with whatever
+    the test used to block the input."""
+    T, S = flat.shape
+    return np.ascontiguousarray(
+        flat.reshape((T, S // blocking, blocking)).transpose((1, 0, 2)))
+
+
+def runGraph(executor, modu, inputs, cur_time, length, outputs=None):
+    """Backend-aware `kr.runGraph`.  CPU path is a pass-through; GPU
+    path moves numpy inputs to cupy, runs, syncs, and copies results
+    back into the caller-supplied numpy outputs (if any).  Returns the
+    `{name: numpy_ndarray}` dict the CPU runtime also returns.
+
+    STs-blocked (3-D) inputs are transparently unblocked to TS before
+    launch; outputs are re-blocked to match.  The matching `compileit`
+    wrapper has already rewritten the function's layout attr to `TS`,
+    so the kunir codegen never sees `STs`."""
+    if not GPU_MODE:
+        return kr.runGraph(executor, modu, inputs, cur_time, length,
+                            outputs if outputs is not None else {})
+
+    # Strip STs blocking on inputs; remember the blocking factor so we
+    # can re-block matching outputs.  1-D inputs (e.g. __init single-
+    # value) pass through untouched.
+    blocking = None
+    ts_inputs = {}
+    for k, v in inputs.items():
+        if v.ndim == 3:
+            blocking = v.shape[-1]
+            ts_inputs[k] = _sts_unblock(v)
+        else:
+            ts_inputs[k] = v
+
+    gpu_inputs = {k: cp.asarray(v) for k, v in ts_inputs.items()}
+    ret = executor.runGraph(modu, gpu_inputs,
+                              cur_time=cur_time, length=length)
+    executor.synchronize()
+
+    out_np = {}
+    for k, v in ret.items():
+        arr = v if isinstance(v, cp.ndarray) else cp.from_dlpack(v)
+        host = cp.asnumpy(arr)
+        if blocking is not None:
+            host = _sts_reblock(host, blocking)
+        if outputs is not None and k in outputs:
+            outputs[k][...] = host
+            out_np[k] = outputs[k]
+        else:
+            out_np[k] = host
+    return out_np
+
+
+# Tests not yet runnable through the GPU backend (STs / double / stream /
+# unsupported ops / aggregrate / corrwith / Library.load).  Anything else
+# is attempted in GPU mode.
+_GPU_SKIP_TESTS = {
+    "test_stream_lifetime_gh_issue_41",
+    "test_corrwith",
+    "test_aggregrate",
+    "test_runtime",
+    "test_avg_stddev",         # WindowedStddev needs Sqrt (not in CodegenMLIR)
+    "test_avg_stddev_TS",      # double dtype
+    "test_rank2",              # double dtype
+    "test_rank029",            # double dtype
+    "test_log",                # split: float32 may work, float64 unsupported
+    "test_pow",                # Pow decomposes to Exp/Log, Exp missing
+    "test_ema",                # ExpMovingAvg not in CodegenMLIR
+    "test_ema_init",           # same
+    "test_argmin_issue19",     # ReduceArgMin / ReduceRank not in CodegenMLIR
+    "test_aligned",            # CPU-only shape-error check
+    "test_skew_kurt",          # double + WindowedSkew/Kurt
+    "test_loop_index",         # WindowedMaxDrawdown / WindowLoopIndex
+    "test_covar",              # double + WindowedCovariance/Correlation
+    "test_quantile",           # double + SkipList
+    "test_large_rank",         # double + large-window SkipList
+    "test_stream_double",
+    "test_repro_crash_gh_issue_71",
+    "test_generic_cross_sectional",
+}
+
+# Names from `check_xxx()` factory tuples that GPU can actually compile.
+# Anything not in here is filtered out of the lib funclist before
+# `compileit` runs on the GPU side — keeps the build green even though
+# most check_xxx entries still produce unsupported kunir.
+_GPU_LIB_NAMES = {
+    "test_rank",
+}
+
+
+def _run(fn, *args, **kwargs):
+    """Call `fn(*args, **kwargs)` unless we're in GPU mode and `fn` is in
+    `_GPU_SKIP_TESTS` — then just print and return.  Keeps the dispatch
+    block at the bottom of the file unchanged in shape."""
+    if GPU_MODE and fn.__name__ in _GPU_SKIP_TESTS:
+        print(f"[skip on GPU] {fn.__name__}")
+        return
+    fn(*args, **kwargs)
 
 def test_aggregrate(dtype):
     a = np.random.rand(240, 16).astype(dtype)
@@ -128,13 +301,14 @@ def test_cfake():
         inp2 = Input("b")
         Output(inp1 * inp2 + 10, "out")
     f = Function(builder.ops)
-    lib = cfake.compileit([("test1", f, cfake.KunCompilerConfig(input_layout="TS", output_layout="TS"))],
-        "cfaketest", cfake.CppCompilerConfig(machine=get_compiler_flags()))
+    lib = compileit(
+        [("test1", f, KunCompilerConfig(input_layout="TS", output_layout="TS"))],
+        "cfaketest")
     mod = lib.getModule("test1")
     inp = np.random.rand(10, 24).astype("float32")
     inp2 = np.random.rand(10, 24).astype("float32")
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, mod, {"a": inp, "b": inp2}, 0, 10)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, mod, {"a": inp, "b": inp2}, 0, 10)
     np.testing.assert_allclose(inp * inp2 + 10, out["out"])
 
 def test_runtime(libpath):
@@ -398,8 +572,8 @@ def test_rank(lib):
         # print(df)
         expected = df.rank(pct=True, axis = 1).to_numpy().transpose()
         blocked = ST_ST8t(inp)
-        executor = kr.createSingleThreadExecutor()
-        out = kr.runGraph(executor, modu, {"a": blocked}, 0, timelen)
+        executor = createSingleThreadExecutor()
+        out = runGraph(executor, modu, {"a": blocked}, 0, timelen)
         output = ST8t_ST(out["ou2"])
         # print(expected[:,0])
         # print(output[:,0])
@@ -736,10 +910,16 @@ def test_loop_index():
         expected[:,i] = rolling_max_dd(inp[:,i], 5, min_periods=1)
     np.testing.assert_allclose(output[5:], expected[5:], equal_nan=True, atol=1e-7, rtol=1e-7)
 
-test_stream_lifetime_gh_issue_41()
-test_corrwith()
-test_aggregrate("float32")
-test_aggregrate("float64")
+_run(test_stream_lifetime_gh_issue_41)
+_run(test_corrwith)
+_run(test_aggregrate, "float32")
+_run(test_aggregrate, "float64")
+# The shared library bundles all the lib-based tests.  CPU compiles
+# the whole thing; GPU keeps only entries in `_GPU_LIB_NAMES` since
+# the rest is STs / double / stream / ops the kunir codegen doesn't
+# support yet.  Lib-consuming tests that aren't in `_GPU_LIB_NAMES`
+# are in `_GPU_SKIP_TESTS`, so `_run` short-circuits before they ever
+# try to `lib.getModule(...)`.
 funclist = [
     check_1(),
     check_TS(),
@@ -762,30 +942,34 @@ funclist = [
     check_large_rank(),
     repro_crash_gh_issue_71(),
     ]
-lib = cfake.compileit(funclist, "test", cfake.CppCompilerConfig(machine=get_compiler_flags()))
+if GPU_MODE:
+    funclist = [t for t in funclist if t[0] in _GPU_LIB_NAMES]
+lib = compileit(funclist, "test")
 
-test_cfake()
-test_avg_stddev_TS(lib)
-kun_test_dll = os.path.join(cfake.get_runtime_path(), "KunTest.dll" if cfake.is_windows() else "libKunTest.so")
-if os.path.exists(kun_test_dll):
-    test_runtime(kun_test_dll)
-test_avg_stddev(lib)
-test_rank(lib)
-test_log(lib, "float32", "")
-test_pow(lib)
-test_ema(lib)
-test_ema_init(lib)
-test_argmin_issue19(lib)
-test_generic_cross_sectional()
-test_stream_double()
-test_log(lib, "float64", "64")
-test_rank2(lib)
-test_rank029(lib)
-test_skew_kurt()
-test_aligned(lib)
-test_loop_index()
-test_covar(lib)
-test_quantile(lib)
-test_large_rank(lib)
-test_repro_crash_gh_issue_71(lib)
+_run(test_cfake)
+_run(test_avg_stddev_TS, lib)
+if not GPU_MODE:
+    kun_test_dll = os.path.join(cfake.get_runtime_path(),
+                                  "KunTest.dll" if cfake.is_windows() else "libKunTest.so")
+    if os.path.exists(kun_test_dll):
+        _run(test_runtime, kun_test_dll)
+_run(test_avg_stddev, lib)
+_run(test_rank, lib)
+_run(test_log, lib, "float32", "")
+_run(test_pow, lib)
+_run(test_ema, lib)
+_run(test_ema_init, lib)
+_run(test_argmin_issue19, lib)
+_run(test_generic_cross_sectional)
+_run(test_stream_double)
+_run(test_log, lib, "float64", "64")
+_run(test_rank2, lib)
+_run(test_rank029, lib)
+_run(test_skew_kurt)
+_run(test_aligned, lib)
+_run(test_loop_index)
+_run(test_covar, lib)
+_run(test_quantile, lib)
+_run(test_large_rank, lib)
+_run(test_repro_crash_gh_issue_71, lib)
 print("done")
