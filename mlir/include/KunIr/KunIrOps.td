@@ -388,6 +388,18 @@ def KunIr_ReduceRankOp : KunIr_Op<"reduce_rank",
 }
 
 //===----------------------------------------------------------------------===//
+// WindowLoopIndex — current FBW step index, 0 = oldest, window-1 = newest.
+// Result is the integer index converted to the function's element type.
+//===----------------------------------------------------------------------===//
+
+def KunIr_WindowLoopIndexOp : KunIr_Op<"window_loop_index", [Pure]> {
+  let summary = "Current step index of the enclosing for_each_back_window";
+  let results = (outs KunIr_AnyTs:$result);
+  let hasVerifier = 1;
+  let assemblyFormat = "`:` type($result) attr-dict";
+}
+
+//===----------------------------------------------------------------------===//
 // BackRef — read input value at t - window
 //
 // At time step t, returns input[t - window]; semantically NaN when t < window

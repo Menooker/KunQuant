@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 from KunQuant.Op import (
     OpBase, Input, Output, ForeachBackWindow, IterValue, WindowedTempOutput,
-    ReductionOp, SimpleCrossSectionalOp, ConstantOp,
+    WindowLoopIndex, ReductionOp, SimpleCrossSectionalOp, ConstantOp,
 )
 from KunQuant.ops.ElewiseOp import (
     Add, Sub, Mul, Div, Max, Min, Abs, Log, Exp, Sqrt, Sign,
@@ -174,6 +174,10 @@ def _emit_simple(op: OpBase,
         v = op.attrs["value"]
         fv = float("nan") if v == "nan" else float(v)
         return ir.constant(fv, ts_1)
+    if isinstance(op, WindowLoopIndex):
+        # Resolved by the kunir → kungpu pass to the enclosing
+        # for_each_back_window's induction variable.
+        return ir.window_loop_index(ts_1)
     if isinstance(op, Accumulator):
         # The Python op's `inputs[0]` is a keep-alive in the graph IR;
         # it does NOT feed the slot.  Only the `name` attr matters at

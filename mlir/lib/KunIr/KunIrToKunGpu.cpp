@@ -88,6 +88,9 @@ struct LowerHelper {
   // Inside a for_each_back_window body: the current window step offset
   // (window-1-w).  Used by argmin/argmax to record the position index.
   Value windowedOffsetI32;
+  // Inside a for_each_back_window body: the raw step index `w` (0 to
+  // window-1, 0 = oldest).  Used by `kunir.window_loop_index`.
+  Value windowIdxI32;
   // Running accumulators for each reduce op in the enclosing FBW body.
   // Single-state reduce: 1 entry; argmin/max: {best_val, best_idx};
   // rank: {less_count, eq_count}.  Seeded by FBW pre-loop, updated by
@@ -247,6 +250,12 @@ struct LowerHelper {
                        kunir::ReduceRankOp>(op)) {
         if (failed(lowerMultiReduce(op, b, ol)))
           return failure();
+      } else if (auto wli = dyn_cast<kunir::WindowLoopIndexOp>(op)) {
+        // sitofp(w, elemTy) — `w` is the enclosing scf.for's IV.
+        auto resTsTy = llvm::cast<TsType>(wli.getResult().getType());
+        auto elemTy = llvm::cast<FloatType>(resTsTy.getElementType());
+        scalarMap[wli.getResult()] =
+            arith::SIToFPOp::create(b, ol, elemTy, windowIdxI32).getResult();
       } else if (auto sel = dyn_cast<SelectOp>(op)) {
         KUN_ASSIGN_OR_FAIL(Value cond, getScalar(sel.getCond(),      b, ol));
         KUN_ASSIGN_OR_FAIL(Value tv,   getScalar(sel.getTrueValue(), b, ol));
@@ -568,8 +577,10 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
                                 outer.outerTimeIdx, outer.outerLoopLb};
             // Hand the inner helper the current window-step offset
             // (window-1-w) so multi-state reductions (argmin/argmax)
-            // can use it as the recorded `index`.
+            // can use it as the recorded `index`, and the raw step
+            // index `w` for `kunir.window_loop_index`.
             inner.windowedOffsetI32 = windowedOffset;
+            inner.windowIdxI32 = w_i32;
             for (auto [i, arg] : llvm::enumerate(body.getArguments())) {
               auto r = inner.getScalarUncached(fwOp.getInputs()[i],
                                                 windowedOffset, ib, il);

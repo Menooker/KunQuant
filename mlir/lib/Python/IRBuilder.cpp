@@ -258,6 +258,9 @@ public:
     // SameOperandsAndResultType — pass x's type as the result type.
     return kunir::ReduceRankOp::create(b_, b_.getUnknownLoc(), x.getType(), x, cur);
   }
+  Value windowLoopIndexOp(Type ts_ty) {
+    return kunir::WindowLoopIndexOp::create(b_, b_.getUnknownLoc(), ts_ty);
+  }
 
   // ── Finalize ──────────────────────────────────────────────────────
   std::unique_ptr<PyModule> finish() {
@@ -425,6 +428,8 @@ void registerIRBuilder(nb::module_ &m) {
       .def("reduce_argmax", &IRBuilder::reduceArgMaxOp, nb::arg("x"))
       .def("reduce_rank",   &IRBuilder::reduceRankOp,
             nb::arg("x"), nb::arg("current"))
+      .def("window_loop_index", &IRBuilder::windowLoopIndexOp,
+            nb::arg("ts_ty"))
 
       // Finalize / debug
       .def("to_string", &IRBuilder::toString,

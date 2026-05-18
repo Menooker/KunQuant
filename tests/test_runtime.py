@@ -161,7 +161,6 @@ _GPU_SKIP_TESTS = {
     "test_ema",                # ExpMovingAvg not in CodegenMLIR
     "test_ema_init",           # same
     "test_aligned",            # CPU-only shape-error check
-    "test_loop_index",         # WindowedMaxDrawdown / WindowLoopIndex
     "test_quantile",           # SkipList
     "test_stream_double",
     "test_repro_crash_gh_issue_71",
@@ -185,6 +184,7 @@ _GPU_LIB_NAMES = {
     "test_skew",            # WindowedSkew/Kurt (both fast & slow paths)
     "test_large_rank",      # TsRank/TsArgMin/Max via naive FBW (no_skip_list)
     "test_argmin",          # TsArgMin/TsRank/WindowedMin small-window
+    "test_max_drawdown",    # WindowedMaxDrawdown (uses WindowLoopIndex)
 }
 
 
@@ -900,8 +900,8 @@ def test_loop_index():
     modu = lib.getModule("test_max_drawdown")
     assert(modu)
     inp = np.random.rand(20, 24).astype("float32")
-    executor = kr.createSingleThreadExecutor()
-    out = kr.runGraph(executor, modu, {"a": inp}, 0, 20)
+    executor = createSingleThreadExecutor()
+    out = runGraph(executor, modu, {"a": inp}, 0, 20)
     output = out["out"]
     
     # reference implementation, from https://stackoverflow.com/a/21059308. Modified for our version of maxdd
