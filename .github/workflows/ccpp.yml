@@ -16,7 +16,7 @@ jobs:
         submodules: recursive
     - uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.12'
         cache: 'pip' # caching pip dependencies
     - run: pip install -r .github/workflows/requirements.txt
     - name: download data
@@ -44,7 +44,7 @@ jobs:
         submodules: recursive
     - uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.12'
         cache: 'pip' # caching pip dependencies
     - run: pip install -r .github/workflows/requirements.txt
     - name: Cache SDE
@@ -82,7 +82,7 @@ jobs:
         submodules: recursive
     - uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.12'
         cache: 'pip' # caching pip dependencies
     - run: pip install -r .github/workflows/requirements.txt
     - name: make
