@@ -110,9 +110,10 @@ def _expand_linreg(op: WindowedLinearRegression) -> List[OpBase]:
     v      = op.inputs[0]
 
     # sum_y = rolling sum of v over the window; NaN until window full.
-    sum_y  = FastWindowedSum(v, window)
+    # FastWindowedSum requires a WindowedDataSourceOp input sized window+1.
+    sum_y  = FastWindowedSum(WindowedTempOutput(v, window + 1), window)
     # sum_yy = rolling sum of v² — same pattern over a v*v intermediate.
-    sum_yy = FastWindowedSum(v * v, window)
+    sum_yy = FastWindowedSum(WindowedTempOutput(v * v, window + 1), window)
     # sum_xy = Σ idx * v where idx is the window position (0=oldest,
     # window-1=newest).  Express via FBW + WindowLoopIndex + Mul +
     # ReduceAdd; OOB reads (warmup) return NaN, so sum_xy is NaN until

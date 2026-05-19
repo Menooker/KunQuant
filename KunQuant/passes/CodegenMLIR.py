@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 from KunQuant.Op import (
     OpBase, Input, Output, ForeachBackWindow, IterValue, WindowedTempOutput,
     WindowLoopIndex, ReductionOp, SimpleCrossSectionalOp, ConstantOp,
+    WindowedTrait,
 )
 from KunQuant.ops.ElewiseOp import (
     Add, Sub, Mul, Div, Max, Min, Abs, Log, Exp, Sqrt, Sign,
@@ -341,6 +342,13 @@ def translate_function(f: Function, target: TargetSpec,
         if isinstance(op, Input):
             continue                      # already mapped from func_args
         if isinstance(op, Output):
+            # An Output may also be read as a windowed source within the
+            # same partition; emit a kunir.output_ref so downstream sees
+            # its gmem buffer as a ts handle.
+            if any(isinstance(u, WindowedTrait)
+                    for u in f.op_to_id[op].uses):
+                val_map[op] = ir.output_ref(op.attrs["name"],
+                                              val_map[op.inputs[0]])
             continue                      # handled at the end via Return
         if isinstance(op, ForeachBackWindow):
             _emit_loop(op, ir, val_map, ts_1,

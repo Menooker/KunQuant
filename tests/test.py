@@ -166,7 +166,52 @@ v4 = ReduceAdd@(v3)
 v5 = ForeachBackWindow@{window:10}(v2)
 v6 = ReduceAdd@(v5)
 v7 = Output@{name:}(v4)
-v8 = Output@{name:}(v6)''')        
+v8 = Output@{name:}(v6)''')
+
+    # case 4, Output wraps a WindowedTempOutput directly.  The pre-pass
+    # peels it off; the resulting Output(Mul) then triggers the existing
+    # WindowedTempOutput → Output fold, leaving the loop reading the
+    # Output as a windowed source.
+    builder = Builder()
+    with builder:
+        inp = Input("a")
+        sq = Mul(inp, inp)
+        wto = WindowedTempOutput(sq, 10)
+        v1 = ReduceAdd(ForeachBackWindow(wto, 10))
+        Output(wto, "xport")
+        Output(v1, "reduced")
+    f = Function(builder.ops)
+    temp_window_elim(f)
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = Mul@(v0,v0)
+v2 = Output@{name:xport}(v1)
+v3 = ForeachBackWindow@{window:10}(v2)
+v4 = ReduceAdd@(v3)
+v5 = Output@{name:reduced}(v4)''')
+
+    # case 5, a WindowedTempOutput shared by both an Output and multiple
+    # windowed consumers in the same function.
+    builder = Builder()
+    with builder:
+        inp = Input("a")
+        sq = Mul(inp, inp)
+        wto = WindowedTempOutput(sq, 31)
+        v1 = ReduceAdd(ForeachBackWindow(wto, 30))
+        v2 = ReduceAdd(ForeachBackWindow(wto, 20))
+        Output(wto, "xport")
+        Output(v1, "r30")
+        Output(v2, "r20")
+    f = Function(builder.ops)
+    temp_window_elim(f)
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = Mul@(v0,v0)
+v2 = Output@{name:xport}(v1)
+v3 = ForeachBackWindow@{window:30}(v2)
+v4 = ReduceAdd@(v3)
+v5 = ForeachBackWindow@{window:20}(v2)
+v6 = ReduceAdd@(v5)
+v7 = Output@{name:r30}(v4)
+v8 = Output@{name:r20}(v6)''')
 
 def check_window():
     # case 1, temp window on input

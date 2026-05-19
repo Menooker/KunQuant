@@ -16,6 +16,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/map.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/unique_ptr.h>
@@ -393,7 +394,8 @@ pyCompile(PyModule &pm,
             const std::string &targetFeatures, unsigned optLevel,
             const std::string &toolkitPath,
             nb::list externalKernels,
-            int warpsPerCta) {
+            int warpsPerCta,
+            nb::dict outputUnreliable) {
   if (graphInputs.empty())
     throw std::runtime_error(
         "KunMLIR.compile: graph_inputs cannot be empty");
@@ -443,6 +445,11 @@ pyCompile(PyModule &pm,
   // handing off to Executable's ctor (which validates + plans).
   data.graphInputs  = graphInputs;
   data.graphOutputs = graphOutputs;
+  for (auto item : outputUnreliable) {
+    auto name = nb::cast<std::string>(item.first);
+    auto val  = nb::cast<int64_t>(item.second);
+    data.outputUnreliable[name] = val;
+  }
   return std::make_unique<kun_cuda::Executable>(std::move(data));
 }
 
@@ -510,7 +517,12 @@ NB_MODULE(KunMLIR, m) {
             [](const kun_cuda::Executable &e) {
               const auto &b = e.data().cubin;
               return nb::bytes(b.data(), b.size());
-            });
+            })
+      .def("getOutputUnreliableCount",
+            &kun_cuda::Executable::outputUnreliable,
+            nb::rv_policy::reference_internal,
+            "Return {output_name: unreliable_count} — leading time steps "
+            "of each graph output to drop.");
 
   // ── Executor ────────────────────────────────────────────────────────
   // Mirrors the CPU `kun::Executor` shape: an opaque object that wraps a
@@ -645,6 +657,7 @@ NB_MODULE(KunMLIR, m) {
          nb::arg("toolkit_path")   = "",
          nb::arg("external_kernels") = nb::list(),
          nb::arg("warps_per_cta")    = 0,
+         nb::arg("output_unreliable") = nb::dict(),
          "Compile a kunir module all the way to a loaded Executable.\n"
          "\n"
          "Pipeline: kunir → LLVM dialect → upstream `gpu-module-to-binary`\n"

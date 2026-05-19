@@ -250,6 +250,25 @@ def KunIr_SetAccumulatorOp : KunIr_Op<"set_accumulator"> {
 // with a specific maxLookback.  The element types must match.
 //===----------------------------------------------------------------------===//
 
+//===----------------------------------------------------------------------===//
+// OutputRef op
+//
+// Expose a graph-output buffer as a ts handle so the same kernel can
+// both write to it and read trailing values from it.  `$value` is the
+// scalar to write at the current step.  Lowering hoists the write to
+// the op site so reads at offset 0 see the just-written scalar.  At
+// most one output_ref per name.
+//===----------------------------------------------------------------------===//
+
+def KunIr_OutputRefOp : KunIr_Op<"output_ref", [Pure]> {
+  let summary = "ts handle to a graph-output buffer";
+  let arguments = (ins StrAttr:$name, KunIr_AnyTs:$value);
+  let results   = (outs KunIr_AnyTs:$result);
+  let hasVerifier = 1;
+  let assemblyFormat =
+    "$name `,` $value `:` type($value) `->` type($result) attr-dict";
+}
+
 def KunIr_WindowedOutputOp : KunIr_Op<"windowed_output", [Pure]> {
   let summary = "Store a segment of a time-series stream with fixed lookback";
   let description = [{

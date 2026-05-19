@@ -129,6 +129,23 @@ LogicalResult SelectOp::inferReturnTypes(
 }
 
 //===----------------------------------------------------------------------===//
+// OutputRefOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult OutputRefOp::verify() {
+  auto valTy = llvm::cast<TsType>(getValue().getType());
+  auto resTy = llvm::cast<TsType>(getResult().getType());
+  if (valTy.getElementType() != resTy.getElementType())
+    return emitOpError("result element type '")
+           << resTy.getElementType()
+           << "' must match value element type '"
+           << valTy.getElementType() << "'";
+  if (getName().empty())
+    return emitOpError("output name must be non-empty");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // WindowedOutputOp
 //===----------------------------------------------------------------------===//
 

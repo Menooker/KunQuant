@@ -37,7 +37,24 @@ def for_each_op(op: OpBase, f: Function, replace_map: dict) -> Tuple[OpBase, OpB
         return (None, traverse_replace_map(max_window_op, replace_map))
     return (op, None)
 
+def _unwrap_output_wto(ops: List[OpBase], f: Function) -> bool:
+    """Rewrite Output(WindowedTempOutput(x)) → Output(x)."""
+    changed = False
+    for op in ops:
+        if not isinstance(op, Output):
+            continue
+        src = op.inputs[0]
+        if not isinstance(src, WindowedTempOutput):
+            continue
+        while isinstance(src, WindowedTempOutput):
+            src = src.inputs[0]
+        f.op_to_id[src].uses[op] = 1
+        op.inputs[0] = src
+        changed = True
+    return changed
+
 def temp_window_elim_impl(ops: List[OpBase], f: Function) -> List[OpBase]:
+    _unwrap_output_wto(ops, f)
     replace_map = dict()
     out = []
     changed = False

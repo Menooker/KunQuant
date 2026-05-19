@@ -30,6 +30,9 @@
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringMap.h"
+
+#include <limits>
 
 using namespace mlir;
 using namespace kunir;
@@ -384,16 +387,33 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
   for (auto [i, ty] : llvm::enumerate(oldFT.getResults()))
     if (isa<TsType>(ty)) tsRetIdx.push_back(i);
 
+  // Output buffer args are dense streams.  Type them as `ts<T, inf>` so
+  // a kunir.output_ref can expose them as windowed read sources without
+  // tripping windowed-input verifiers.
   SmallVector<Value> outParams;
   for (unsigned i : tsRetIdx) {
-    outParams.push_back(entry.addArgument(oldFT.getResult(i), loc));
-    newArgTys.push_back(oldFT.getResult(i));
+    auto origTy = llvm::cast<TsType>(oldFT.getResult(i));
+    auto infTy  = TsType::get(ctx, origTy.getElementType(),
+                                 std::numeric_limits<uint64_t>::max());
+    outParams.push_back(entry.addArgument(infTy, loc));
+    newArgTys.push_back(infTy);
   }
   SmallVector<Type> newRetTys;
   for (auto [i, ty] : llvm::enumerate(oldFT.getResults()))
     if (!isa<TsType>(ty)) newRetTys.push_back(ty);
   funcOp.setFunctionTypeAttr(
       TypeAttr::get(FunctionType::get(ctx, newArgTys, newRetTys)));
+
+  // For each ts output: false = pending normal return-time write,
+  // true = already written by an output_ref (skip at return time).
+  // A missing entry means the name isn't a ts output of this func.
+  llvm::StringMap<bool> outNameToIsTakenOver;
+  if (auto outNamesAttr = funcOp.getOutputNames()) {
+    for (unsigned i : tsRetIdx) {
+      auto name = llvm::cast<StringAttr>(outNamesAttr[i]).getValue();
+      outNameToIsTakenOver[name] = false;
+    }
+  }
 
 
   // ------------------------------------------------------------------
@@ -689,6 +709,36 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
       return success();
     }
 
+    // output_ref → hoist the write here and register the output buffer
+    // as a ts handle so downstream reads use the same buffer.
+    if (auto oref = dyn_cast<kunir::OutputRefOp>(op)) {
+      auto name = oref.getName();
+      auto it = outNameToIsTakenOver.find(name);
+      if (it == outNameToIsTakenOver.end())
+        return op.emitError("kunir-to-kungpu: output_ref references "
+                            "unknown output '") << name << "'";
+      if (it->second)
+        return op.emitError("kunir-to-kungpu: duplicate output_ref for "
+                            "output '") << name << "'";
+      it->second = true;
+      // Resolve the matching gpu.func output arg by parallel scan over
+      // (output names, outParams).  Both arrays have one entry per ts
+      // output and follow `tsRetIdx` order.
+      auto outNamesAttr = funcOp.getOutputNames();
+      Value buf;
+      for (auto [k, i] : llvm::enumerate(tsRetIdx)) {
+        if (llvm::cast<StringAttr>(outNamesAttr[i]).getValue() == name) {
+          buf = outParams[k];
+          break;
+        }
+      }
+      KUN_ASSIGN_OR_FAIL(Value valueScalar,
+                         outer.getScalar(oref.getValue(), fb, ol));
+      TsPutOp::create(fb, ol, buf, valueScalar);
+      outer.tsMap[oref.getResult()] = buf;
+      return success();
+    }
+
     // fast_windowed_sum → preserved as a kunir op with scalar result and
     // ts-handle input.  The kungpu-to-llvm pass owns the actual lowering
     // (per-thread state allocas + the Kahan-corrected step).
@@ -713,8 +763,16 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
 
   // ------------------------------------------------------------------
   // 6. Emit ts.put for each ts return value, then close the outer for.
+  //    Outputs already written by an output_ref are skipped.
   // ------------------------------------------------------------------
-  for (auto [outParam, rv] : llvm::zip(outParams, tsRetVals)) {
+  auto outNamesAttr = funcOp.getOutputNames();
+  for (auto [k, pair] : llvm::enumerate(llvm::zip(outParams, tsRetVals))) {
+    auto [outParam, rv] = pair;
+    if (outNamesAttr) {
+      auto name = llvm::cast<StringAttr>(outNamesAttr[tsRetIdx[k]]).getValue();
+      auto it = outNameToIsTakenOver.find(name);
+      if (it != outNameToIsTakenOver.end() && it->second) continue;
+    }
     auto it = outer.scalarMap.find(rv);
     assert(it != outer.scalarMap.end() &&
            "ts return value not materialised as a scalar");

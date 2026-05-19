@@ -3,6 +3,8 @@
 #include "IRBuilder.h"
 #include "PyModule.h"
 
+#include <limits>
+
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/unique_ptr.h>
 #include <nanobind/stl/vector.h>
@@ -184,6 +186,15 @@ public:
   Value setAccumulatorOp(Value acc, Value mask, Value value) {
     return kunir::SetAccumulatorOp::create(
         b_, b_.getUnknownLoc(), acc.getType(), acc, mask, value);
+  }
+
+  // ── Graph-output buffer as ts handle ─────────────────────────────
+  Value outputRefOp(std::string name, Value value) {
+    auto vTs = llvm::cast<kunir::TsType>(value.getType());
+    auto resTy = kunir::TsType::get(pm_->ctx.get(), vTs.getElementType(),
+                                       std::numeric_limits<uint64_t>::max());
+    return kunir::OutputRefOp::create(b_, b_.getUnknownLoc(), resTy,
+                                          b_.getStringAttr(name), value);
   }
 
   // ── Windowed buffer materialization ───────────────────────────────
@@ -406,6 +417,11 @@ void registerIRBuilder(nb::module_ &m) {
       // Windowed materialization
       .def("windowed_output", &IRBuilder::windowedOutputOp,
             nb::arg("x"), nb::arg("length"))
+
+      .def("output_ref", &IRBuilder::outputRefOp,
+            nb::arg("name"), nb::arg("value"),
+            "ts handle to a graph-output buffer.  Downstream reads use "
+            "the same buffer the kernel writes `value` into.")
 
       // Back-reference + Fast windowed sum
       .def("back_ref",          &IRBuilder::backRefOp,

@@ -207,18 +207,16 @@ def _graph_io_names(f: Function):
 
 
 def _run_full_pipeline(f: Function, kcfg: KunCompilerConfig):
-    """Same pass pipeline the CPU `compileit` runs:
-
-        optimize  →  do_partition  →  post_optimize
-
-    Returns the list of post-partition Functions that the translator
-    should walk (one kunir.func per Function).  Mutates `f` in place.
+    """Run optimize / partition / post_optimize.  Returns
+    `(impl, global_unreliable)`; the second is a pre-partition
+    `infer_window` snapshot keyed by Output name.  Mutates `f`.
     """
     options = _gpu_pass_options(kcfg)
     optimize(f, options)
+    global_unreliable = infer_window(f, options)
     _mainf, impl = do_partition(f, kcfg.partition_factor, options)
     post_optimize(impl, options)
-    return impl
+    return impl, global_unreliable
 
 
 def _translate_partitions(impl, kcfg: KunCompilerConfig,
@@ -246,15 +244,10 @@ def _translate_partitions(impl, kcfg: KunCompilerConfig,
     dtype = _to_dtype_token(kcfg.dtype)
     externals = []
     for sub in impl:
-        # Per-partition warmup: max windowed-chain depth from any input
-        # to any output of THIS partition.  Earlier partitions have already
-        # written their (post-warmup) values into the shared device buffers
-        # by the time this kernel runs, so we don't accumulate their
-        # unreliable counts here.  infer_window walks back to Input ops
-        # of the partition; cross-partition deps stop at those Inputs.
-        # If any op in this partition requires the whole time history,
-        # override the inferred warmup with the sentinel so the runtime
-        # collapses this kernel to a single chunk.
+        # Per-kernel warmup is partition-local: the runtime serialises
+        # kernel launches so an upstream kernel's reliable writes are
+        # already in place by the time a downstream kernel reads.  Each
+        # kernel's chunk grid only needs to cover its own local warmup.
         if any(isinstance(op, MayRequireWholeTime)
                 and op.is_whole_time_required()
                 for op in sub.ops):
@@ -288,7 +281,7 @@ def compile_func(f: Function, kcfg: KunCompilerConfig,
     toolkit_path = find_cuda_toolkit(ccfg.toolkit_path)
 
     graph_inputs, graph_outputs = _graph_io_names(f)
-    impl = _run_full_pipeline(f, kcfg)
+    impl, global_unreliable = _run_full_pipeline(f, kcfg)
     mod, externals = _translate_partitions(impl, kcfg, ccfg)
 
     return KunMLIR.compile(
@@ -305,6 +298,7 @@ def compile_func(f: Function, kcfg: KunCompilerConfig,
         # default to 1 — but the cs_rank launch uses it to size
         # blockDim, so feed the config value through.
         warps_per_cta=ccfg.warps_per_cta,
+        output_unreliable=global_unreliable,
     )
 
 
@@ -369,6 +363,6 @@ def to_mlir(f: Function, kcfg: KunCompilerConfig,
     as `compile_func`)."""
     _validate_kun_cfg(kcfg)
     _graph_io_names(f)              # raises if no Input / Output ops
-    impl = _run_full_pipeline(f, kcfg)
+    impl, _global_unreliable = _run_full_pipeline(f, kcfg)
     mod, _externals = _translate_partitions(impl, kcfg, ccfg)
     return mod

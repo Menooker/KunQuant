@@ -35,6 +35,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -124,6 +125,13 @@ struct ExecutableData {
   std::vector<KernelMeta> kernels;  ///< unordered set; runtime topo-sorts
   std::vector<std::string> graphInputs;
   std::vector<std::string> graphOutputs;
+  /// Per-graph-output warmup depth.  Walks the full dependency chain
+  /// (across partitions).  Used by the user-facing
+  /// `Executable::getOutputUnreliableCount` to tell callers how many
+  /// leading time steps of each Output buffer to skip.  Populated by
+  /// the Python frontend (which has the pre-partition `infer_window`
+  /// snapshot); empty when not supplied.
+  std::map<std::string, int64_t> outputUnreliable;
 };
 
 //===----------------------------------------------------------------------===//
@@ -168,6 +176,9 @@ public:
   int64_t vectorSize()  const noexcept { return data_.vectorSize; }
   Datatype dtype()      const noexcept { return data_.dtype; }
   size_t  numKernels()  const noexcept { return data_.kernels.size(); }
+  const std::map<std::string, int64_t> &outputUnreliable() const noexcept {
+    return data_.outputUnreliable;
+  }
 
   // ── Accessors (runtime-resolved plan) ─────────────────────────────
   // Defined out-of-line so the header doesn't need GraphPlan's layout.

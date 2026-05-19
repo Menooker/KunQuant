@@ -301,7 +301,12 @@ template <typename T, int stride>
 struct Accumulator {
     using simd_t = kun_simd::vec<T, stride>;
     using float_mask_t = typename simd_t::Masktype;
-    simd_t v = 0;
+    simd_t v;
+    // Default-init to 0 for backward compat with existing Accumulator()
+    // call sites; the codegen emits Accumulator{init_val} for non-zero
+    // inits and the brace-init binds to this constructor.
+    Accumulator() : v(0) {}
+    Accumulator(T init) : v(init) {}
     struct Value {
         simd_t v;
         Accumulator& acc;
