@@ -19,8 +19,7 @@ isx86 = cpu_arch != "aarch64"
 # has no kunir lowering).  We filter their Output ops out of the Function
 # before compileit on the GPU path — the rest of alpha158 compiles fine.
 #   QTLU / QTLD → WindowedQuantile → SkipList (CPU-only).
-#   CORR / CORD → SetInfOrNanToValue wrapper not in CodegenMLIR's dispatch.
-_GPU_SKIP_FACTOR_PREFIXES = ("QTLU", "QTLD", "CORR", "CORD")
+_GPU_SKIP_FACTOR_PREFIXES = ("QTLU", "QTLD")
 
 
 def _filter_outputs_for_gpu(f: Function) -> None:

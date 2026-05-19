@@ -403,7 +403,7 @@ def KunIr_ReduceArgMaxOp : KunIr_Op<"reduce_argmax",
   let assemblyFormat = "$value `:` type($value) attr-dict";
 }
 def KunIr_ReduceRankOp : KunIr_Op<"reduce_rank",
-    [Pure, SameOperandsAndResultType]> {
+    [Pure, AllTypesMatch<["value", "result"]>]> {
   let summary = "Per-window cross-sectional rank of `current` against the "
                   "iterated window values: less_count + (eq_count + 1) / 2.";
   let arguments = (ins KunIr_AnyTs:$value, KunIr_AnyTs:$current);

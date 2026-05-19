@@ -191,7 +191,14 @@ LogicalResult ReduceMaxOp::verify() { return verifyInsideForEachBackWindow(*this
 LogicalResult ReduceMinOp::verify() { return verifyInsideForEachBackWindow(*this); }
 LogicalResult ReduceArgMinOp::verify() { return verifyInsideForEachBackWindow(*this); }
 LogicalResult ReduceArgMaxOp::verify() { return verifyInsideForEachBackWindow(*this); }
-LogicalResult ReduceRankOp::verify()   { return verifyInsideForEachBackWindow(*this); }
+LogicalResult ReduceRankOp::verify() {
+  if (failed(verifyInsideForEachBackWindow(*this))) return failure();
+  auto vT = llvm::cast<TsType>(getValue().getType());
+  auto cT = llvm::cast<TsType>(getCurrent().getType());
+  if (cT.getElementType() != vT.getElementType())
+    return emitOpError("current element type must match value element type");
+  return success();
+}
 LogicalResult WindowLoopIndexOp::verify() {
   return verifyInsideForEachBackWindow(*this);
 }
@@ -879,9 +886,19 @@ LogicalResult ReturnOp::verify() {
 
   for (auto [i, opType, resType] :
        llvm::enumerate(getOperandTypes(), resultTypes)) {
-    if (opType != resType)
-      return emitOpError("operand #") << i << " type '" << opType
-             << "' does not match function result type '" << resType << "'";
+    if (opType == resType) continue;
+    // ts<T, inf> operand → ts<T, 1> result is allowed for graph-output
+    // passes through a ts handle (function arg / output_ref).  The
+    // lowering scalarizes via ts.get @ offset 0 before ts.put.
+    auto opTs  = llvm::dyn_cast<TsType>(opType);
+    auto resTs = llvm::dyn_cast<TsType>(resType);
+    if (opTs && resTs &&
+        opTs.getElementType() == resTs.getElementType() &&
+        opTs.getMaxLookback() == kInfLookback &&
+        resTs.getMaxLookback() == 1)
+      continue;
+    return emitOpError("operand #") << i << " type '" << opType
+           << "' does not match function result type '" << resType << "'";
   }
   return success();
 }

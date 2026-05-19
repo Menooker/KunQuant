@@ -22,6 +22,9 @@ does support:
   Intermediate ops are stashed in ``state[lin_op] : List[OpBase]`` so each
   consumer Impl (``Slope``, ``RSqaure``, ``Resi``) can pick the entries it
   needs and emit its final formula.
+
+* ``SetInfOrNanToValue(a, value)`` → ``Select(isnan(a - a), value, a)``
+  (mirrors the C++ implementation; ``a - a`` is NaN for both NaN and ±Inf).
 """
 
 from typing import Dict, List
@@ -30,7 +33,7 @@ from KunQuant.Op import (
     OpBase, Builder, ConstantOp, ForeachBackWindow, IterValue,
     WindowedTempOutput, WindowLoopIndex,
 )
-from KunQuant.ops.ElewiseOp import Select, Equals, Not
+from KunQuant.ops.ElewiseOp import Select, Equals, Not, SetInfOrNanToValue
 from KunQuant.ops.ReduceOp import ReduceAdd
 from KunQuant.ops.MiscOp import (
     FastWindowedSum, Accumulator, SetAccumulator,
@@ -173,6 +176,19 @@ def _expand_lr_resi(impl: WindowedLinearRegressionResiImpl,
     return state[_LR_V] - pred
 
 
+# ── SetInfOrNanToValue expansion ────────────────────────────────────
+
+def _expand_set_inf_or_nan(op: SetInfOrNanToValue) -> OpBase:
+    # Mirrors the C++ implementation in cpp/Kun/Ops.hpp:
+    # `mask = isnan(a - a); return select(mask, v, a)`.
+    # `a - a` is 0 for finite `a` and NaN for NaN/±Inf (Inf-Inf == NaN),
+    # so isnan-of-diff catches both NaN and Inf in one shot.
+    a = op.inputs[0]
+    diff = a - a
+    mask = Not(Equals(diff, diff))
+    return Select(mask, ConstantOp(op.attrs["value"]), a)
+
+
 # ── Pass driver ─────────────────────────────────────────────────────
 
 def _experimental_expand_impl(
@@ -237,6 +253,15 @@ def _experimental_expand_impl(
             b = Builder(op.get_parent())
             with b:
                 new_val = _expand_lr_resi(op, state[lin_op], window)
+            out.extend(b.ops)
+            replace_map[op] = new_val
+            changed = True
+            continue
+
+        if isinstance(op, SetInfOrNanToValue):
+            b = Builder(op.get_parent())
+            with b:
+                new_val = _expand_set_inf_or_nan(op)
             out.extend(b.ops)
             replace_map[op] = new_val
             changed = True

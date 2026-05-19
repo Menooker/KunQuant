@@ -3,6 +3,7 @@ from KunQuant.Stage import *
 from KunQuant.ops import *
 import KunQuant.passes
 from KunQuant.passes import *
+from KunQuant.Driver import post_optimize
 
 def optimize(f: Function):
     decompose(f)
@@ -115,6 +116,45 @@ v2 = Mul@(v0,v1)
 v3 = Output@{name:out2}(v2)''']
     check_partition(f, exp1, exp2)
 
+def test_partition_wto_input_peel():
+    # WTO whose underlying value gets pulled cross-partition.  Many
+    # AddConst-Output pairs split the producing partition off from the
+    # FBS consumers; without the WTO(Input) peel in the partitioner, the
+    # FBS-side partition rewires WTO.inputs[0] to a local synthetic
+    # Input and post-partition `temp_window_elim` folds WTO(Input) →
+    # Input, leaving a degenerate `Output(Input)` passthrough.
+    # original IR:
+    # partition 1:
+    #   a = Input("xxx")  # partition temp input
+    #   b = WindowedTempOutput(a)
+    #   c = use(b)
+    # partition 2:
+    #   d = use(b)   # cross partition op
+    # if without peeling, partition 2 will import WindowedTempOutput as cross partition op.
+    # So WindowedTempOutput will be wired to an output op of partition 1. This is bad for performance.
+    builder = Builder()
+    with builder:
+        a = Input("a")
+        b = Input("b")
+        x = Mul(a, b)
+        for i in range(8):
+            Output(AddConst(x, float(i)), f"add_{i}")
+        wt = WindowedTempOutput(x, 30)
+        for i in range(5):
+            Output(FastWindowedSum(wt, 5 + i * 4), f"fbs_{i}")
+    f = Function(builder.ops)
+    optimize(f)
+    _, impl = do_partition(f, 1)
+    post_optimize(impl, {})
+    for sub in impl:
+        for op in sub.ops:
+            if isinstance(op, Output) and isinstance(op.inputs[0], Input):
+                raise RuntimeError(
+                    f"partitioner left Output(Input) passthrough in "
+                    f"partition {sub.name!r}: {op}")
+
+
 test_partition1()
 test_partition_cylic()
 test_partition_rank_out()
+test_partition_wto_input_peel()

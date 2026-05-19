@@ -773,10 +773,19 @@ void LowerKunIrToKunGpuPass::runOnOperation() {
       auto it = outNameToIsTakenOver.find(name);
       if (it != outNameToIsTakenOver.end() && it->second) continue;
     }
-    auto it = outer.scalarMap.find(rv);
-    assert(it != outer.scalarMap.end() &&
-           "ts return value not materialised as a scalar");
-    TsPutOp::create(fb, loc, outParam, it->second);
+    // Most return values are scalars produced inside the time loop.
+    // A ts<T, inf> operand (graph-input passthrough) is also accepted;
+    // resolve it to a scalar via ts.get @ 0.
+    Value scalarVal;
+    auto sit = outer.scalarMap.find(rv);
+    if (sit != outer.scalarMap.end()) {
+      scalarVal = sit->second;
+    } else {
+      auto res = outer.getScalar(rv, fb, loc);
+      if (failed(res)) return signalPassFailure();
+      scalarVal = *res;
+    }
+    TsPutOp::create(fb, loc, outParam, scalarVal);
   }
   scf::YieldOp::create(fb, loc);
 
