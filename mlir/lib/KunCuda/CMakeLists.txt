@@ -72,7 +72,7 @@ function(kun_add_bundled_ptx_kernel cu_path)
               -DSYMBOL=${_symbol}
               -DPTX_VERSION=7.8
               -P "${_kun_embed_cmake}"
-      DEPENDS ${_obj_tgt} "${_kun_embed_cmake}"
+      DEPENDS ${_obj_tgt} $<TARGET_OBJECTS:${_obj_tgt}> "${_kun_embed_cmake}"
       COMMENT "Embedding ${_stem}.ptx as ${_symbol}[] (downgrading to ISA 7.8)"
       VERBATIM
       COMMAND_EXPAND_LISTS)

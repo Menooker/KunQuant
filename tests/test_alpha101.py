@@ -8,7 +8,7 @@ import sys
 import time
 import os
 from KunQuant.jit import cfake
-from KunQuant.Op import Builder, Input, Output, Scale
+from KunQuant.Op import Builder, Input, Output
 from KunQuant.Stage import Function
 from KunQuant.predefined.Alpha101 import AllData, all_alpha
 from KunQuant.runner import KunRunner as kr
@@ -31,36 +31,6 @@ if GPU_MODE:
 
     cp.cuda.Device(0).use()
     cp.zeros((1,), dtype=cp.float32)
-
-
-_GPU_SKIP_DEP_TYPES = (Scale,)
-
-
-def _depends_on_type(op, dep_types, seen=None):
-    if seen is None:
-        seen = set()
-    if op in seen:
-        return False
-    seen.add(op)
-    if isinstance(op, dep_types):
-        return True
-    return any(_depends_on_type(inp, dep_types, seen) for inp in op.inputs)
-
-
-def _filter_outputs_for_gpu(f: Function) -> None:
-    kept = []
-    dropped = []
-    for op in f.ops:
-        if isinstance(op, Output) and _depends_on_type(op.inputs[0],
-                                                       _GPU_SKIP_DEP_TYPES):
-            dropped.append(op.attrs["name"])
-            continue
-        kept.append(op)
-    if dropped:
-        print(f"[gpu] dropping {len(dropped)} unsupported outputs: "
-              f"{dropped}")
-    f.set_ops(kept)
-
 
 def get_simd_len(avx: str, dtype: str = "float"):
     element_width = 32 if dtype == "float" else 64
@@ -552,7 +522,6 @@ def do_compile(avx, keep, tempdir):
         for name, f, kcfg in funclist:
             if name == "alpha_101_stream":
                 continue
-            _filter_outputs_for_gpu(f)
             kcfg = dataclasses.replace(kcfg, input_layout="TS",
                                        output_layout="TS",
                                        blocking_len=1)

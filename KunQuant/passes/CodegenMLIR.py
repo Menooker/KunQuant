@@ -9,7 +9,7 @@ pybind class.
 Scope (v0): only the ops kunir currently supports.
   - Elemwise binary: Add, Sub, Mul, Div, Max, Min
   - Elemwise unary:  Abs, Log, Sign
-  - Cross-sectional: Rank
+  - Cross-sectional: Rank, Scale
   - Windowed:        WindowedTempOutput, ForeachBackWindow + IterValue,
                       ReduceAdd / ReduceMul / ReduceMax / ReduceMin
   - Boundaries:      Input, Output
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 from KunQuant.Op import (
     OpBase, Input, Output, ForeachBackWindow, IterValue, WindowedTempOutput,
     WindowLoopIndex, ReductionOp, SimpleCrossSectionalOp, ConstantOp,
-    WindowedTrait, Rank,
+    WindowedTrait, Rank, Scale,
 )
 from KunQuant.ops.ElewiseOp import (
     Add, Sub, Mul, Div, Max, Min, Abs, Log, Exp, Sqrt, Sign,
@@ -69,7 +69,7 @@ _BINARY_CONST = {
 _UNARY = {
     Abs: "abs", Log: "log", Exp: "exp", Sqrt: "sqrt", Sign: "sign",
     Not: "not_",
-    # NOTE: `Rank` is intentionally absent.  Cross-sectional rank
+    # NOTE: cross-sectional ops are intentionally absent.
     # partitions are routed to a pre-compiled CUmodule by
     # `_maybe_external_partition` below; they never become kunir ops.
 }
@@ -250,10 +250,10 @@ def _maybe_external_partition(f: Function, dtype: str) -> Optional[dict]:
     Detection mirrors CodegenCpp's "simple cross-sectional fast path"
     (CodegenCpp.codegen_cpp's `len(f.ops) == 3` check): a partition
     whose only compute op is a supported `SimpleCrossSectionalOp`
-    (currently Rank).  The partitioner places every CrossSectionalOp into its own
+    (currently Rank or Scale).  The partitioner places every CrossSectionalOp into its own
     partition without other compute, so this shape is what we get.
 
-    The `kind` string is `cs_rank_f{32,64}`.  Do not fabricate kinds for
+    The `kind` string is `cs_<op>_f{32,64}`.  Do not fabricate kinds for
     cross-sectional ops unless the C++ runtime has a matching bundled
     external kernel.
     """
@@ -261,7 +261,7 @@ def _maybe_external_partition(f: Function, dtype: str) -> Optional[dict]:
                 if not isinstance(op, (Input, Output))]
     if len(compute) != 1 or not isinstance(compute[0], SimpleCrossSectionalOp):
         return None
-    if not isinstance(compute[0], Rank):
+    if not isinstance(compute[0], (Rank, Scale)):
         return None
     inputs  = [op for op in f.ops if isinstance(op, Input)]
     outputs = [op for op in f.ops if isinstance(op, Output)]

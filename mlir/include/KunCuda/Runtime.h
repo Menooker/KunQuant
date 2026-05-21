@@ -65,14 +65,16 @@ class Executor;
 /// Kernel dispatch kind.  `Jit` kernels live in the cubin produced by
 /// the MLIR pipeline and are launched with the project-wide stock-major
 /// grid (block_x = warps_per_cta * 32, grid_x = ceil(S / block_x)).
-/// `ExtCsRank*` kernels are pre-compiled PTX bundled inside
+/// `ExtCs*` kernels are pre-compiled PTX bundled inside
 /// libKunCudaRuntime; the executor lazy-loads them as a second
 /// CUmodule and launches them with a time-major grid + dynamic shared
 /// memory sized to the cross-section (one CTA per timestep).
 enum class KernelKind : int32_t {
-  Jit          = 0,
-  ExtCsRankF32 = 1,
-  ExtCsRankF64 = 2,
+  Jit           = 0,
+  ExtCsRankF32  = 1,
+  ExtCsRankF64  = 2,
+  ExtCsScaleF32 = 3,
+  ExtCsScaleF64 = 4,
 };
 
 /// Per-kernel element type.  Currently single-precision (f32) and
@@ -91,7 +93,7 @@ inline size_t bytesPerElem(Datatype dt) noexcept {
 /// produce by walking a single lowered llvm.func — no graph topology
 /// reasoning required.
 struct KernelMeta {
-  std::string kernelName;                    ///< symbol in the cubin (Jit) or in the bundled PTX (ExtCsRank*)
+  std::string kernelName;                    ///< symbol in the cubin (Jit) or in the bundled PTX (ExtCs*)
   KernelKind kind = KernelKind::Jit;         ///< picked by the MLIR pass; default is the regular path
   std::vector<std::string> inputNames;       ///< kungpu.input_names, in argv order
   std::vector<std::string> outputNames;      ///< kungpu.output_names, in argv order
@@ -99,7 +101,7 @@ struct KernelMeta {
   /// Drives the time-chunk grid: chunks ≥ 1 need this many extra time
   /// steps before they can start writing reliable outputs, and the
   /// chunk-size heuristic gates the minimum chunk size at K × warmup.
-  /// Always 0 for external (cs_rank) kernels — they don't multi-chunk.
+  /// Always 0 for external cross-sectional kernels — they don't multi-chunk.
   int64_t unreliableCount = 0;
 };
 
@@ -112,10 +114,10 @@ struct ExecutableData {
   std::vector<char> cubin;
   int64_t warpsPerCta = 1;          ///< from kungpu.target_spec (graph-wide).
                                      ///<   Drives JIT kernels' block_x.
-                                     ///<   External cs_rank kernels IGNORE
+                                     ///<   External cross-sectional kernels IGNORE
                                      ///<   this — they auto-tune block_x
                                      ///<   from numStocks (see
-                                     ///<   launchExtCsRankKernel).
+                                     ///<   launchExtCsKernel).
   int64_t vectorSize  = 1;          ///< from kungpu.target_spec (graph-wide)
   Datatype dtype      = Datatype::Float;  ///< element type of every kernel
                                            ///<   I/O.  Graph-wide; verified
@@ -210,7 +212,7 @@ public:
   /// `devMaxSmemBytes` is the device's MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
   /// cached by the caller (`Executor`) so the runtime can validate
   /// `num_stocks * sizeof(T)` against the GPU's smem cap before
-  /// invoking cuLaunchKernel for external cs_rank kernels.  Pass 0 if
+  /// invoking cuLaunchKernel for external cross-sectional kernels.  Pass 0 if
   /// there are no external kernels in the executable (the check is a
   /// no-op in that case).
   ///
@@ -227,11 +229,12 @@ public:
   ///     compute.
   ///   - `smFillFactor` (≥ 0) is the target chunks-on-GPU multiplier:
   ///     JIT uses `num_chunks * stock_tiles ≥ smFillFactor * numSMs`;
-  ///     cs_rank uses `num_time_chunks ≥ smFillFactor * numSMs`.  1.0
+  ///     external cross-sectional kernels use
+  ///     `num_time_chunks ≥ smFillFactor * numSMs`.  1.0
   ///     just fills the GPU; > 1 leaves slack for scheduler latency
   ///     hiding.
   /// `exec` owns the CUDA stream + the cached device attributes
-  /// (`devMaxSmemBytes()`, `numSMs()`).  External (cs_rank) kernels
+  /// (`devMaxSmemBytes()`, `numSMs()`).  External cross-sectional kernels
   /// ignore the multi-chunk params — they keep their own auto-tune
   /// path using the same Executor accessors.
   void launchOnStream(Executor *exec,
@@ -252,10 +255,11 @@ private:
   std::unique_ptr<GraphPlan> plan_;          ///< pImpl — defined in Runtime.cpp
 
   CUmodule cuModule_ = nullptr;
-  /// Module holding the pre-compiled cs_rank PTX.  Loaded at
-  /// construction time iff any kernel has `kind != Jit`; null
+  /// Modules holding pre-compiled cross-sectional PTX.  Loaded at
+  /// construction time iff a matching external kernel is present; null
   /// otherwise.
   CUmodule csRankModule_ = nullptr;
+  CUmodule csScaleModule_ = nullptr;
   std::vector<CUfunction> cuFuncs_;          ///< parallel to data_.kernels
 
   // Lazily allocated intermediate buffers, one CUdeviceptr per slot
@@ -322,7 +326,7 @@ public:
   CUstream stream() const noexcept { return stream_; }
   /// Cached MAX_SHARED_MEMORY_PER_BLOCK_OPTIN of the device this
   /// Executor's CUcontext is bound to, queried once at construction.
-  /// Used to validate cs_rank dynamic-smem requests at launch time
+  /// Used to validate external cross-sectional dynamic-smem requests at launch time
   /// without a per-launch driver call.
   int devMaxSmemBytes() const noexcept { return devMaxSmemBytes_; }
   /// Cached MULTIPROCESSOR_COUNT of the device this Executor's CUcontext

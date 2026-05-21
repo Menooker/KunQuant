@@ -28,9 +28,9 @@
 #include <stdexcept>
 #include <unordered_map>
 
-// Pre-compiled cs_rank PTX, embedded by EmbedFile.cmake.  Exposes
-// `kun_cs_rank_ptx[]` (bytes) and `kun_cs_rank_ptx_len`.
+// Pre-compiled cross-sectional PTX, embedded by EmbedFile.cmake.
 #include "cs_rank_ptx.inc"
+#include "cs_scale_ptx.inc"
 
 namespace kun_cuda {
 
@@ -512,9 +512,9 @@ static ChunkPlan computeChunkPlan(int64_t timeLength, int64_t numStocks,
   return {chunkSize, static_cast<unsigned>(numChunks)};
 }
 
-/// External cs_rank launch.
+/// External cross-sectional launch.
 ///
-/// Block / grid both auto-tuned — cs_rank is cross-sectional, so the
+/// Block / grid both auto-tuned — these kernels are cross-sectional, so the
 /// graph-wide `warps_per_cta` hint doesn't apply.
 ///
 ///   blockX = clamp(round_up(numStocks, 32), 32, 1024)
@@ -524,7 +524,7 @@ static ChunkPlan computeChunkPlan(int64_t timeLength, int64_t numStocks,
 ///
 ///   gridX  = min(timeLength, ceil(smFillFactor * numSMs))
 ///       The kernel does a contiguous time-axis slice per CTA via a
-///       grid-stride loop (see kernels/cs_rank.cu).  For small T the
+///       grid-stride loop (see kernels/cs_*.cu).  For small T the
 ///       min clamps to 1 CTA per timestep (matches the pre-tuning
 ///       launch shape); for large T fewer CTAs each do more time
 ///       steps, reducing launch / scheduling overhead.
@@ -535,26 +535,44 @@ static ChunkPlan computeChunkPlan(int64_t timeLength, int64_t numStocks,
 /// Falls back to (gridX = timeLength, blockX = 32) when the executor
 /// couldn't query `numSMs` from the device — degenerate "one CTA per
 /// timestep, one warp per CTA" still works correctly.
-static void launchExtCsRankKernel(CUfunction fn, KernelKind kind,
-                                    const std::string &kernelName,
-                                    int64_t timeLength, int64_t numStocks,
-                                    int devMaxSmemBytes,
-                                    double smFillFactor, int numSMs,
-                                    void **args, CUstream stream) {
-  size_t elemSize = (kind == KernelKind::ExtCsRankF64) ? 8u : 4u;
-  uint64_t smemBytes64 =
-      static_cast<uint64_t>(numStocks) * static_cast<uint64_t>(elemSize);
+static bool isF64ExternalKind(KernelKind kind) {
+  return kind == KernelKind::ExtCsRankF64 ||
+         kind == KernelKind::ExtCsScaleF64;
+}
+
+static bool isCsRankKind(KernelKind kind) {
+  return kind == KernelKind::ExtCsRankF32 ||
+         kind == KernelKind::ExtCsRankF64;
+}
+
+static bool isCsScaleKind(KernelKind kind) {
+  return kind == KernelKind::ExtCsScaleF32 ||
+         kind == KernelKind::ExtCsScaleF64;
+}
+
+static void launchExtCsKernel(CUfunction fn, KernelKind kind,
+                                const std::string &kernelName,
+                                int64_t timeLength, int64_t numStocks,
+                                int devMaxSmemBytes,
+                                double smFillFactor, int numSMs,
+                                void **args, CUstream stream) {
+  size_t elemSize = isF64ExternalKind(kind) ? 8u : 4u;
+  uint64_t smemElems = static_cast<uint64_t>(numStocks);
+  if (isCsScaleKind(kind))
+    smemElems += 1;
+  uint64_t smemBytes64 = smemElems * static_cast<uint64_t>(elemSize);
 
   if (devMaxSmemBytes <= 0)
     throw std::runtime_error(
-        "kun_cuda::launchOnStream: external cs_rank kernel '" + kernelName +
+        "kun_cuda::launchOnStream: external cross-sectional kernel '" +
+        kernelName +
         "' requires Executor's devMaxSmemBytes to be set; got 0.  "
         "Construct the Executable through Executor::runGraph, or pass "
         "devMaxSmemBytes when calling launchOnStream directly.");
   if (smemBytes64 > static_cast<uint64_t>(devMaxSmemBytes))
     throw std::runtime_error(
-        "kun_cuda::launchOnStream: cs_rank dynamic smem "
-        "(num_stocks=" + std::to_string(numStocks) +
+        "kun_cuda::launchOnStream: cross-sectional dynamic smem "
+        "(elements=" + std::to_string(smemElems) +
         " * sizeof(T)=" + std::to_string(elemSize) + " = " +
         std::to_string(smemBytes64) +
         " bytes) exceeds this GPU's MAX_SHARED_MEMORY_PER_BLOCK_OPTIN (" +
@@ -588,7 +606,7 @@ static void launchExtCsRankKernel(CUfunction fn, KernelKind kind,
   unsigned smemBytes = static_cast<unsigned>(smemBytes64);
   checkCu(cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1,
                            smemBytes, stream, args, nullptr),
-           "cuLaunchKernel(cs_rank)");
+           "cuLaunchKernel(external_cs)");
 }
 
 //===----------------------------------------------------------------------===//
@@ -611,25 +629,35 @@ static void loadJitCubin(const ExecutableData &data, CUmodule &outModule) {
           "' declared but no cubin supplied — this is a compile-side bug");
 }
 
-/// Lazy-load the bundled cs_rank PTX as a second CUmodule iff any
-/// kernel uses it.  The driver JITs PTX → SASS on first load (cached
+/// Lazy-load bundled external cross-sectional PTX modules iff any
+/// kernel uses them.  The driver JITs PTX → SASS on first load (cached
 /// system-wide in ~/.nv/ComputeCache), so this is sub-ms after the
 /// first run on a given GPU.
-static void loadCsRankPtxIfNeeded(const std::vector<KernelMeta> &kernels,
-                                    CUmodule &outModule) {
+static void loadExternalCsPtxIfNeeded(const std::vector<KernelMeta> &kernels,
+                                      CUmodule &csRankModule,
+                                      CUmodule &csScaleModule) {
+  bool needRank = false;
+  bool needScale = false;
   for (const auto &k : kernels) {
-    if (k.kind != KernelKind::Jit) {
-      checkCu(cuModuleLoadData(&outModule, kun_cs_rank_ptx),
-               "cuModuleLoadData(cs_rank.ptx)");
-      return;
-    }
+    needRank |= isCsRankKind(k.kind);
+    needScale |= isCsScaleKind(k.kind);
+    if (needRank && needScale)
+      break;
   }
+
+  if (needRank)
+    checkCu(cuModuleLoadData(&csRankModule, kun_cs_rank_ptx),
+             "cuModuleLoadData(cs_rank.ptx)");
+  if (needScale)
+    checkCu(cuModuleLoadData(&csScaleModule, kun_cs_scale_ptx),
+             "cuModuleLoadData(cs_scale.ptx)");
 }
 
 /// Pick the right CUmodule + symbol name for a kernel and resolve it.
 static CUfunction resolveOneKernelSymbol(const KernelMeta &k,
                                           CUmodule jitModule,
-                                          CUmodule csRankModule) {
+                                          CUmodule csRankModule,
+                                          CUmodule csScaleModule) {
   CUmodule mod = nullptr;
   const char *symbol = nullptr;
   switch (k.kind) {
@@ -644,6 +672,14 @@ static CUfunction resolveOneKernelSymbol(const KernelMeta &k,
     case KernelKind::ExtCsRankF64:
       mod = csRankModule;
       symbol = "kun_cs_rank_f64";
+      break;
+    case KernelKind::ExtCsScaleF32:
+      mod = csScaleModule;
+      symbol = "kun_cs_scale_f32";
+      break;
+    case KernelKind::ExtCsScaleF64:
+      mod = csScaleModule;
+      symbol = "kun_cs_scale_f64";
       break;
   }
   CUfunction fn = nullptr;
@@ -674,17 +710,24 @@ static void optInExternalSmemMax(const std::vector<KernelMeta> &kernels,
            "cuDeviceGetAttribute(MAX_SHARED_MEMORY_PER_BLOCK_OPTIN)");
   for (size_t i = 0; i < funcs.size(); ++i) {
     if (kernels[i].kind == KernelKind::Jit) continue;
+    int staticSmem = 0;
+    checkCu(cuFuncGetAttribute(&staticSmem,
+                                CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,
+                                funcs[i]),
+             "cuFuncGetAttribute(SHARED_SIZE_BYTES)");
+    int dynamicMax = maxOptIn - staticSmem;
+    if (dynamicMax < 0) dynamicMax = 0;
     checkCu(cuFuncSetAttribute(
                 funcs[i],
                 CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                maxOptIn),
+                dynamicMax),
              "cuFuncSetAttribute(MAX_DYNAMIC_SHARED_SIZE_BYTES)");
   }
 }
 
-/// Per-kernel-kind I/O arity check.  External cs_rank kernels have a
+/// Per-kernel-kind I/O arity check.  External cross-sectional kernels have a
 /// fixed signature `(T_in, T_out)` — the kernel signature is set in
-/// stone by `kernels/cs_rank.cu`, so we know the wiring is wrong (not
+/// stone by `kernels/cs_*.cu`, so we know the wiring is wrong (not
 /// just unusual) the moment we see any other shape.  Static property
 /// of the graph, so done at construction.
 static void validateKernelIO(const std::vector<KernelMeta> &kernels,
@@ -701,9 +744,12 @@ static void validateKernelIO(const std::vector<KernelMeta> &kernels,
         break;
       case KernelKind::ExtCsRankF32:
       case KernelKind::ExtCsRankF64:
+      case KernelKind::ExtCsScaleF32:
+      case KernelKind::ExtCsScaleF64:
         if (nIn != 1 || nOut != 1)
           throw std::runtime_error(
-              "kun_cuda::Executable: cs_rank kernel '" + k.kernelName +
+              "kun_cuda::Executable: external cross-sectional kernel '" +
+              k.kernelName +
               "' must have exactly 1 input and 1 output (have " +
               std::to_string(nIn) + " / " + std::to_string(nOut) + ")");
         break;
@@ -767,12 +813,13 @@ Executable::Executable(ExecutableData &&data) : data_(std::move(data)) {
 
   // ── Load cubin(s) + resolve every kernel symbol ──────────────────
   loadJitCubin(data_, cuModule_);
-  loadCsRankPtxIfNeeded(data_.kernels, csRankModule_);
+  loadExternalCsPtxIfNeeded(data_.kernels, csRankModule_, csScaleModule_);
 
   cuFuncs_.resize(data_.kernels.size(), nullptr);
   for (size_t i = 0; i < data_.kernels.size(); ++i) {
     cuFuncs_[i] = resolveOneKernelSymbol(data_.kernels[i],
-                                          cuModule_, csRankModule_);
+                                          cuModule_, csRankModule_,
+                                          csScaleModule_);
   }
 
   // ── Opt external kernels into the device's full dynamic smem cap ──
@@ -787,6 +834,8 @@ Executable::~Executable() {
     cuModuleUnload(cuModule_);
   if (csRankModule_)
     cuModuleUnload(csRankModule_);
+  if (csScaleModule_)
+    cuModuleUnload(csScaleModule_);
 }
 
 void Executable::freeSlotPool() {
@@ -915,18 +964,18 @@ void Executable::launchOnStream(
                        data_.warpsPerCta, data_.vectorSize,
                        plan.numChunks, argPtrs.data(), stream);
     } else {
-      // External cs_rank argv unchanged: (i32 T, i32 S, ptrs...).  These
-      // kernels are cross-sectional, time-major, and don't multi-chunk
-      // along time — the mask / chunk_size / warmup scalars don't apply.
+      // External cross-sectional argv: (i32 T, i32 S, ptrs...).  These
+      // kernels are time-major and don't multi-chunk along time — the
+      // mask / chunk_size / warmup scalars don't apply.
       std::vector<void *> argPtrs;
       argPtrs.reserve(2 + ptrs.size());
       argPtrs.push_back(&timeLenI32);
       argPtrs.push_back(&numStocksI32);
       for (auto &p : ptrs) argPtrs.push_back(&p);
-      launchExtCsRankKernel(cuFuncs_[kIdx], meta.kind, meta.kernelName,
-                              timeLength, numStocks,
-                              devMaxSmemBytes, smFillFactor, numSMs,
-                              argPtrs.data(), stream);
+      launchExtCsKernel(cuFuncs_[kIdx], meta.kind, meta.kernelName,
+                          timeLength, numStocks,
+                          devMaxSmemBytes, smFillFactor, numSMs,
+                          argPtrs.data(), stream);
     }
   }
 }

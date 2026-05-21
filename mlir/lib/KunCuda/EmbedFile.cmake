@@ -42,7 +42,7 @@ string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x
 file(WRITE "${OUTPUT}"
 "// Generated from \"${INPUT}\".  Do not edit by hand.
 static const unsigned char ${SYMBOL}[] = {
-  ${byte_list}
+  ${byte_list},0x00
 };
 static const unsigned int ${SYMBOL}_len = ${n_bytes};
 ")

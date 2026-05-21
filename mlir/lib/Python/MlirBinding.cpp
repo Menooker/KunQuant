@@ -362,7 +362,8 @@ static nb::dict collectOutputs(
 /// Parse one Python `external_kernels=[...]` entry into a KernelMeta.
 /// Expected dict shape:
 ///   {"name": str, "kind": str, "inputs": [str...], "outputs": [str...]}
-/// where `kind` is one of "cs_rank_f32" / "cs_rank_f64".
+/// where `kind` is one of "cs_rank_f32", "cs_rank_f64",
+/// "cs_scale_f32", or "cs_scale_f64".
 static kun_cuda::KernelMeta parseExternalKernel(nb::handle obj) {
   nb::dict d = nb::cast<nb::dict>(obj);
   kun_cuda::KernelMeta km;
@@ -372,10 +373,15 @@ static kun_cuda::KernelMeta parseExternalKernel(nb::handle obj) {
     km.kind = kun_cuda::KernelKind::ExtCsRankF32;
   else if (kind == "cs_rank_f64")
     km.kind = kun_cuda::KernelKind::ExtCsRankF64;
+  else if (kind == "cs_scale_f32")
+    km.kind = kun_cuda::KernelKind::ExtCsScaleF32;
+  else if (kind == "cs_scale_f64")
+    km.kind = kun_cuda::KernelKind::ExtCsScaleF64;
   else
     throw std::runtime_error(
         "KunMLIR.compile: unknown external kernel kind '" + kind +
-        "' (supported: cs_rank_f32, cs_rank_f64)");
+        "' (supported: cs_rank_f32, cs_rank_f64, "
+        "cs_scale_f32, cs_scale_f64)");
   nb::iterable inputs  = nb::cast<nb::iterable>(d["inputs"]);
   nb::iterable outputs = nb::cast<nb::iterable>(d["outputs"]);
   for (nb::handle n : inputs)
