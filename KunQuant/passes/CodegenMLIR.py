@@ -29,11 +29,12 @@ if TYPE_CHECKING:
 from KunQuant.Op import (
     OpBase, Input, Output, ForeachBackWindow, IterValue, WindowedTempOutput,
     WindowLoopIndex, ReductionOp, SimpleCrossSectionalOp, ConstantOp,
-    WindowedTrait,
+    WindowedTrait, Rank,
 )
 from KunQuant.ops.ElewiseOp import (
     Add, Sub, Mul, Div, Max, Min, Abs, Log, Exp, Sqrt, Sign,
     AddConst, SubConst, MulConst, DivConst,
+    GreaterThanConst, LessThanConst,
     GreaterThan, GreaterEqual, LessThan, LessEqual, Equals,
     And, Or, Not, Select,
 )
@@ -63,6 +64,7 @@ _BINARY = {
 # means `v - x`, where for plain SubConst it would mean `x - v`).
 _BINARY_CONST = {
     AddConst: "add", SubConst: "sub", MulConst: "mul", DivConst: "div",
+    GreaterThanConst: "gt", LessThanConst: "lt",
 }
 _UNARY = {
     Abs: "abs", Log: "log", Exp: "exp", Sqrt: "sqrt", Sign: "sign",
@@ -247,19 +249,19 @@ def _maybe_external_partition(f: Function, dtype: str) -> Optional[dict]:
 
     Detection mirrors CodegenCpp's "simple cross-sectional fast path"
     (CodegenCpp.codegen_cpp's `len(f.ops) == 3` check): a partition
-    whose only compute op is a `SimpleCrossSectionalOp` (Rank, Scale,
-    …).  The partitioner places every CrossSectionalOp into its own
+    whose only compute op is a supported `SimpleCrossSectionalOp`
+    (currently Rank).  The partitioner places every CrossSectionalOp into its own
     partition without other compute, so this shape is what we get.
 
-    The `kind` string is `cs_<lowercased class name>_f{32,64}`, e.g.
-    `cs_rank_f32`, `cs_scale_f64`.  The C++ binding maps it to a
-    `KernelKind` enum; unknown kinds raise there with a clear error,
-    so adding a new SimpleCrossSectionalOp on the Python side does
-    not silently succeed without a matching bundled PTX kernel.
+    The `kind` string is `cs_rank_f{32,64}`.  Do not fabricate kinds for
+    cross-sectional ops unless the C++ runtime has a matching bundled
+    external kernel.
     """
     compute = [op for op in f.ops
                 if not isinstance(op, (Input, Output))]
     if len(compute) != 1 or not isinstance(compute[0], SimpleCrossSectionalOp):
+        return None
+    if not isinstance(compute[0], Rank):
         return None
     inputs  = [op for op in f.ops if isinstance(op, Input)]
     outputs = [op for op in f.ops if isinstance(op, Output)]

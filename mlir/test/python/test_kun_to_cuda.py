@@ -112,6 +112,23 @@ def build_func_backref(N: int) -> Function:
     return Function(builder.ops, name="backref_kernel")
 
 
+def build_func_output_backref(N: int, delay: int) -> Function:
+    """raw = WindowedSum(a, N); delayed = BackRef(raw, delay).
+
+    `raw` is also a graph output.  When the runtime slices time, the
+    optimizer must keep a local WindowedTempOutput for the BackRef source
+    rather than reusing the graph output buffer: warmup rows in each chunk
+    are computed but masked from graph-output stores.
+    """
+    builder = Builder()
+    with builder:
+        a = Input("a")
+        raw = WindowedSum(a, N)
+        Output(raw, "raw")
+        Output(BackRef(raw, delay), "delayed")
+    return Function(builder.ops, name="output_backref_kernel")
+
+
 def build_func_fastwindowedsum(N: int) -> Function:
     """ws = FastWindowedSum(a + b, N) — same windowed-sum semantics as
     WindowedSum, but uses the stateful Kahan-corrected algorithm from
@@ -605,6 +622,60 @@ def run_backref_with_mask(target: str, T: int, S: int, N: int,
                                   valid_start=valid_start, atol=1e-5)
 
 
+def run_output_backref_multichunk(target: str, T: int, S: int,
+                                    N: int) -> int:
+    """Regression test for TempWindowElim under time slicing.
+
+    The graph outputs `raw = WindowedSum(a, N)` and also consumes `raw`
+    through `BackRef(raw, 2)`.  With multi-chunk launches, replacing the
+    BackRef's local temp window with the graph output buffer is wrong:
+    chunk warmup rows are intentionally not stored to graph outputs, and
+    peer chunks are not globally synchronized inside one kernel launch.
+    """
+    delay = 2
+    print(f"=== output-backed BackRef regression: raw=WindowedSum(a, N={N}), "
+           f"delayed=raw[t-{delay}] ===")
+    f = build_func_output_backref(N, delay)
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+
+    exe = compile_func(f, _KCFG_TS, ccfg)
+    print(f"  kernels={exe.kernel_names}  num_buffers={exe.num_buffers}  "
+           f"peak_intermediate_slots={exe.peak_intermediate_slots}")
+
+    import cupy as cp
+    rng = np.random.default_rng(17)
+    a_h = rng.standard_normal((T, S), dtype=np.float32)
+    raw_out = cp.zeros((T, S), dtype=cp.float32)
+    delayed_out = cp.zeros((T, S), dtype=cp.float32)
+
+    executor = KunMLIR.Executor()
+    executor.runGraph(exe,
+                       inputs={"a": cp.asarray(a_h)},
+                       outputs={"raw": raw_out, "delayed": delayed_out})
+    raw_h = cp.asnumpy(raw_out)
+    delayed_h = cp.asnumpy(delayed_out)
+
+    cumsum = np.cumsum(a_h, axis=0, dtype=np.float64)
+    raw_expected = np.empty((T, S), dtype=np.float32)
+    raw_expected[:N - 1] = np.nan
+    raw_expected[N - 1] = cumsum[N - 1]
+    if T > N:
+        raw_expected[N:] = (cumsum[N:] - cumsum[:-N]).astype(np.float32)
+
+    delayed_expected = np.empty((T, S), dtype=np.float32)
+    delayed_expected[:N - 1 + delay] = np.nan
+    delayed_expected[N - 1 + delay:] = raw_expected[N - 1:T - delay]
+
+    rc = 0
+    rc |= _compare_post_warmup(raw_h, raw_expected,
+                                  valid_start=N - 1,
+                                  atol=max(1e-3, 5e-7 * N))
+    rc |= _compare_post_warmup(delayed_h, delayed_expected,
+                                  valid_start=N - 1 + delay,
+                                  atol=max(1e-3, 5e-7 * N))
+    return rc
+
+
 def run_library(target: str, T: int, S: int) -> int:
     """Exercise the multi-Function `compileit` shape and `Library.getModule`,
     plus the auto-allocated-output path on `Executor.runGraph` (omitting
@@ -704,6 +775,9 @@ def main() -> int:
     # stateless BackRef and stateful WindowedSum / fast_windowed_sum.
     rc |= run_backref_with_mask(args.target, args.time_length, args.num_stocks,
                                   args.window, mask=3)
+    print()
+    rc |= run_output_backref_multichunk(args.target, args.time_length,
+                                          args.num_stocks, args.window)
     print()
     rc |= test_windowed(windowed_exe, args.time_length, args.num_stocks,
                           args.window, mask=3)

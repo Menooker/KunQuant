@@ -147,17 +147,22 @@ def _gpu_pass_options(kcfg: KunCompilerConfig) -> dict:
 
     `blocking_len` is needed by some decompose paths (it's also the
     skip-list / naive cost-model knob).  `kcfg.options` flows through
-    verbatim — including `no_fast_stat`, `opt_reduce`, `fast_log`,
-    all of which the GPU lowering now supports.
+    first — including `no_fast_stat`, `opt_reduce`, `fast_log`, all of
+    which the GPU lowering now supports.
 
     `no_skip_list=True` is forced unconditionally and overrides any
     user-provided value: the kunir codegen has no lowering for
     `SkipList*` ops, so the naive `ForeachBackWindow + Reduce*` path
     is the only one that lowers on GPU.
+
+    `may_slice_time=True` is the safe GPU default because the runtime can
+    split a single graph launch into multiple time chunks.  Users who
+    guarantee single-chunk launches may explicitly set it to False.
     """
     opts: dict = {"blocking_len": _resolve_vector_size(kcfg)}
     if kcfg.options:
         opts.update(kcfg.options)
+    opts.setdefault("may_slice_time", True)
     opts["no_skip_list"] = True
     # Pipeline lowering doesn't know about ExpMovingAvg or the
     # WindowedLinearRegression* family — turn on the Accumulator-based

@@ -10,3 +10,4 @@ dist/*
 *.pyd
 *.dll
 *.lib
+.codex

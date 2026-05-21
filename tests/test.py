@@ -213,6 +213,77 @@ v6 = ReduceAdd@(v5)
 v7 = Output@{name:r30}(v4)
 v8 = Output@{name:r20}(v6)''')
 
+    # case 6, when time slicing is allowed, keep a local temp window
+    # instead of reading history from the output buffer.
+    builder = Builder()
+    with builder:
+        inp = Input("a")
+        sq = Mul(inp, inp)
+        wto = WindowedTempOutput(sq, 10)
+        v1 = ReduceAdd(ForeachBackWindow(wto, 10))
+        Output(sq, "xport")
+        Output(v1, "reduced")
+    f = Function(builder.ops)
+    temp_window_elim(f, {"may_slice_time": True})
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = Mul@(v0,v0)
+v2 = WindowedTempOutput@{window:10}(v1)
+v3 = ForeachBackWindow@{window:10}(v2)
+v4 = ReduceAdd@(v3)
+v5 = Output@{name:xport}(v1)
+v6 = Output@{name:reduced}(v4)''')
+
+    # case 7, may_slice_time still allows Input and larger-temp-window
+    # replacement; only Output replacement is disabled.
+    builder = Builder()
+    with builder:
+        inp = Input("a")
+        wto = WindowedTempOutput(inp, 10)
+        v1 = ReduceAdd(ForeachBackWindow(wto, 10))
+        Output(v1)
+    f = Function(builder.ops)
+    temp_window_elim(f, {"may_slice_time": True})
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = ForeachBackWindow@{window:10}(v0)
+v2 = ReduceAdd@(v1)
+v3 = Output@{name:}(v2)''')
+
+    builder = Builder()
+    with builder:
+        inp = Input("a")
+        sq = Mul(inp, inp)
+        wto10 = WindowedTempOutput(sq, 10)
+        wto15 = WindowedTempOutput(sq, 15)
+        v1 = ReduceAdd(ForeachBackWindow(wto10, 10))
+        v2 = ReduceAdd(ForeachBackWindow(wto15, 10))
+        Output(sq, "xport")
+        Output(v1, "r10")
+        Output(v2, "r15")
+    f = Function(builder.ops)
+    temp_window_elim(f, {"may_slice_time": True})
+    for op in f.ops:
+        if isinstance(op, ForeachBackWindow):
+            if isinstance(op.inputs[0], Output):
+                raise RuntimeError("may_slice_time replaced temp with Output")
+            if not isinstance(op.inputs[0], WindowedTempOutput):
+                raise RuntimeError("larger temp window replacement failed")
+
+    # case 8, if no windowed op consumes the temp window, it can be
+    # replaced by its input even with may_slice_time enabled.
+    builder = Builder()
+    with builder:
+        inp = Input("a")
+        sq = Mul(inp, inp)
+        wto = WindowedTempOutput(sq, 10)
+        v1 = AddConst(wto, 1)
+        Output(v1, "out")
+    f = Function(builder.ops)
+    temp_window_elim(f, {"may_slice_time": True})
+    expect_output(f, '''v0 = Input@{name:a}()
+v1 = Mul@(v0,v0)
+v2 = AddConst@{value:1}(v1)
+v3 = Output@{name:out}(v2)''')
+
 def check_window():
     # case 1, temp window on input
     builder = Builder()

@@ -491,6 +491,11 @@ NB_MODULE(KunMLIR, m) {
       .def_prop_ro("output_names",  &kun_cuda::Executable::graphOutputs,
             "Graph-level output names — match this against the keys of the "
             "args dict you pass to launch().")
+      .def("getOutputNames",
+            [](const kun_cuda::Executable &e) {
+              return e.graphOutputs();
+            },
+            "CPU-runtime-compatible alias for `output_names`.")
       .def_prop_ro("warps_per_cta", &kun_cuda::Executable::warpsPerCta)
       .def_prop_ro("vector_size",   &kun_cuda::Executable::vectorSize)
       .def_prop_ro("num_kernels",

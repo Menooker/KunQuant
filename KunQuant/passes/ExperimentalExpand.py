@@ -25,16 +25,19 @@ does support:
 
 * ``SetInfOrNanToValue(a, value)`` → ``Select(isnan(a - a), value, a)``
   (mirrors the C++ implementation; ``a - a`` is NaN for both NaN and ±Inf).
+
+* ``ReduceDecayLinear(v, window)`` → ``ReduceAdd(v * weight)`` where
+  ``weight = (WindowLoopIndex + 1) / (window * (window + 1) / 2)``.
 """
 
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional, Tuple, Type
 
 from KunQuant.Op import (
     OpBase, Builder, ConstantOp, ForeachBackWindow, IterValue,
     WindowedTempOutput, WindowLoopIndex,
 )
 from KunQuant.ops.ElewiseOp import Select, Equals, Not, SetInfOrNanToValue
-from KunQuant.ops.ReduceOp import ReduceAdd
+from KunQuant.ops.ReduceOp import ReduceAdd, ReduceDecayLinear
 from KunQuant.ops.MiscOp import (
     FastWindowedSum, Accumulator, SetAccumulator,
     ExpMovingAvg, WindowedLinearRegression,
@@ -150,30 +153,38 @@ def _expand_linreg(op: WindowedLinearRegression) -> List[OpBase]:
 
 # ── Consumer formulas (one per Impl op) ─────────────────────────────
 
-def _expand_lr_slope(impl: WindowedLinearRegressionSlopeImpl,
-                     state: List[OpBase]) -> OpBase:
-    return state[_LR_SLOPE]
+def _expand_lr_slope(op: OpBase,
+                     state: Dict[OpBase, List[OpBase]]) -> OpBase:
+    return state[op.inputs[0]][_LR_SLOPE]
 
 
-def _expand_lr_rsquare(impl: WindowedLinearRegressionRSqaureImpl,
-                       state: List[OpBase], window: int) -> OpBase:
+def _expand_lr_rsquare(op: OpBase,
+                       state: Dict[OpBase, List[OpBase]]) -> OpBase:
+    lin_op = op.inputs[0]
+    lr_state = state[lin_op]
     # SS_reg = slope² * (window*sum_xx - sum_x²) / window = slope² * denom / window
     # SS_tot = sum_yy - sum_y²/window
     # R²     = SS_reg / SS_tot
-    n     = float(window)
+    n     = float(lin_op.attrs["window"])
     denom = (n * n) * (n - 1.0) * (n + 1.0) / 12.0
-    slope = state[_LR_SLOPE]
+    slope = lr_state[_LR_SLOPE]
     ss_reg = (slope * slope) * (denom / n)
-    ss_tot = state[_LR_SUM_YY] - (state[_LR_SUM_Y] * state[_LR_SUM_Y]) / n
+    ss_tot = (
+        lr_state[_LR_SUM_YY] -
+        (lr_state[_LR_SUM_Y] * lr_state[_LR_SUM_Y]) / n)
     return ss_reg / ss_tot
 
 
-def _expand_lr_resi(impl: WindowedLinearRegressionResiImpl,
-                    state: List[OpBase], window: int) -> OpBase:
+def _expand_lr_resi(op: OpBase,
+                    state: Dict[OpBase, List[OpBase]]) -> OpBase:
+    lin_op = op.inputs[0]
+    lr_state = state[lin_op]
     # residual at the newest window position (x = window-1):
     #   v_t - (slope * (window-1) + intercept)
-    pred = state[_LR_SLOPE] * float(window - 1) + state[_LR_INTERCEPT]
-    return state[_LR_V] - pred
+    pred = (
+        lr_state[_LR_SLOPE] * float(lin_op.attrs["window"] - 1) +
+        lr_state[_LR_INTERCEPT])
+    return lr_state[_LR_V] - pred
 
 
 # ── SetInfOrNanToValue expansion ────────────────────────────────────
@@ -187,6 +198,46 @@ def _expand_set_inf_or_nan(op: SetInfOrNanToValue) -> OpBase:
     diff = a - a
     mask = Not(Equals(diff, diff))
     return Select(mask, ConstantOp(op.attrs["value"]), a)
+
+
+# ── DecayLinear reduction expansion ─────────────────────────────────
+
+def _expand_decay_linear(op: ReduceDecayLinear) -> OpBase:
+    if len(op.inputs) != 1:
+        raise RuntimeError(
+            f"experimental_expand: ReduceDecayLinear expects one input "
+            f"(op = {op})")
+    window = int(op.attrs["window"])
+    denom = (1.0 + window) * window / 2.0
+    loop = op.get_loop()
+    with loop:
+        idx = WindowLoopIndex(loop)
+        weight = (idx + 1.0) * (1.0 / denom)
+        contrib = op.inputs[0] * weight
+    return ReduceAdd(contrib)
+
+
+# ── Dispatch table helpers ──────────────────────────────────────────
+
+ExpandFunc = Callable[[OpBase, Dict[OpBase, List[OpBase]]], OpBase]
+ExpandRule = Tuple[Type[OpBase], ExpandFunc]
+
+
+_EXPAND_RULES: List[ExpandRule] = [
+    (ExpMovingAvg, lambda op, state: _expand_ema(op)),
+    (WindowedLinearRegressionSlopeImpl, _expand_lr_slope),
+    (WindowedLinearRegressionRSqaureImpl, _expand_lr_rsquare),
+    (WindowedLinearRegressionResiImpl, _expand_lr_resi),
+    (SetInfOrNanToValue, lambda op, state: _expand_set_inf_or_nan(op)),
+    (ReduceDecayLinear, lambda op, state: _expand_decay_linear(op)),
+]
+
+
+def _find_expand_rule(op: OpBase) -> Optional[ExpandFunc]:
+    for op_type, expand in _EXPAND_RULES:
+        if isinstance(op, op_type):
+            return expand
+    return None
 
 
 # ── Pass driver ─────────────────────────────────────────────────────
@@ -203,15 +254,6 @@ def _experimental_expand_impl(
     for op in ops:
         op.replace_inputs(replace_map)
 
-        if isinstance(op, ExpMovingAvg):
-            b = Builder(op.get_parent())
-            with b:
-                new_val = _expand_ema(op)
-            out.extend(b.ops)
-            replace_map[op] = new_val
-            changed = True
-            continue
-
         if isinstance(op, WindowedLinearRegression):
             b = Builder(op.get_parent())
             with b:
@@ -226,42 +268,11 @@ def _experimental_expand_impl(
             changed = True
             continue
 
-        if isinstance(op, WindowedLinearRegressionSlopeImpl):
-            lin_op = op.inputs[0]
+        expand = _find_expand_rule(op)
+        if expand is not None:
             b = Builder(op.get_parent())
             with b:
-                new_val = _expand_lr_slope(op, state[lin_op])
-            out.extend(b.ops)
-            replace_map[op] = new_val
-            changed = True
-            continue
-
-        if isinstance(op, WindowedLinearRegressionRSqaureImpl):
-            lin_op = op.inputs[0]
-            window = lin_op.attrs["window"]
-            b = Builder(op.get_parent())
-            with b:
-                new_val = _expand_lr_rsquare(op, state[lin_op], window)
-            out.extend(b.ops)
-            replace_map[op] = new_val
-            changed = True
-            continue
-
-        if isinstance(op, WindowedLinearRegressionResiImpl):
-            lin_op = op.inputs[0]
-            window = lin_op.attrs["window"]
-            b = Builder(op.get_parent())
-            with b:
-                new_val = _expand_lr_resi(op, state[lin_op], window)
-            out.extend(b.ops)
-            replace_map[op] = new_val
-            changed = True
-            continue
-
-        if isinstance(op, SetInfOrNanToValue):
-            b = Builder(op.get_parent())
-            with b:
-                new_val = _expand_set_inf_or_nan(op)
+                new_val = expand(op, state)
             out.extend(b.ops)
             replace_map[op] = new_val
             changed = True
