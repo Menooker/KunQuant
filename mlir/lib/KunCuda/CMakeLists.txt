@@ -93,7 +93,10 @@ foreach(_cu IN LISTS _kun_cu_sources)
   kun_add_bundled_ptx_kernel("${_cu}")
 endforeach()
 
-add_library(KunCudaRuntime SHARED Runtime.cpp ${_kun_ptx_embed_includes})
+add_library(KunCudaRuntime SHARED
+    Runtime.cpp
+    RuntimeCudaGraph.cpp
+    ${_kun_ptx_embed_includes})
 
 # Project-wide compile flags set -fvisibility=hidden + inlines-hidden to
 # minimise the size of MLIR static libs.  This shared runtime needs to

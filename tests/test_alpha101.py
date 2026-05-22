@@ -20,6 +20,7 @@ _argp = argparse.ArgumentParser(add_help=False)
 _argp.add_argument("action", nargs="?")
 _argp.add_argument("--gpu-arch", default="")
 _argp.add_argument("--benchmode", action="store_true")
+_argp.add_argument("--use-cuda-graph", action="store_true")
 _argp.add_argument("--time", type=int, default=260)
 _argp.add_argument("--num-stocks", type=int, default=64)
 _argp.add_argument("--num-threads", type=int, default=4)
@@ -29,6 +30,7 @@ action = _args.action or ("run_gpu" if _args.gpu_arch else "avx2")
 GPU_ARCH = _args.gpu_arch or ("sm_80" if action == "run_gpu" else "")
 GPU_MODE = bool(GPU_ARCH)
 BENCHMODE = _args.benchmode
+USE_CUDA_GRAPH = _args.use_cuda_graph
 TIME = _args.time
 NUM_STOCKS = _args.num_stocks
 NUM_THREADS = _args.num_threads
@@ -179,8 +181,11 @@ def run_graph(executor, benchmode, modu, inputs, cur_time, length, outputs=None,
     if not benchmode:
         gpu_inputs = {k: cp.asarray(v) for k, v in inputs.items()}
     ret = executor.runGraph(modu, gpu_inputs, cur_time=cur_time,
-                            length=length)
+                            length=length,
+                            use_cuda_graph=USE_CUDA_GRAPH)
     if benchmode:
+        if USE_CUDA_GRAPH:
+            executor.synchronize()
         return ret
     executor.synchronize()
 

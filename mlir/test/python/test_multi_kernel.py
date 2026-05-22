@@ -50,6 +50,7 @@ def main() -> int:
     ap.add_argument("--target", default="sm_120")
     ap.add_argument("-T", "--time-length", type=int, default=64)
     ap.add_argument("-S", "--num-stocks", type=int, default=2048)
+    ap.add_argument("--use-cuda-graph", action="store_true")
     args = ap.parse_args()
 
     from KunQuant.jit import KunMLIR
@@ -108,7 +109,9 @@ def main() -> int:
     print()
     print(f"=== launch ({T} × {S}) — default stream ===")
     print(f"  executor.stream = {executor.stream}  (0 ↔ CUDA default)")
-    executor.runGraph(exe, {"a": a, "b": b, "c": c, "out": out})
+    executor.runGraph(exe, {"a": a, "b": b, "c": c},
+                      outputs={"out": out},
+                      use_cuda_graph=args.use_cuda_graph)
     out_h = cp.asnumpy(out)
 
     expected = (a_h + b_h) * c_h
@@ -137,7 +140,9 @@ def main() -> int:
     print(f"  executor.stream = {hex(executor2.stream)}")
     assert executor2.stream == cp_stream.ptr, \
         (executor2.stream, cp_stream.ptr)
-    executor2.runGraph(exe, {"a": a2, "b": b2, "c": c2, "out": out2})
+    executor2.runGraph(exe, {"a": a2, "b": b2, "c": c2},
+                       outputs={"out": out2},
+                       use_cuda_graph=args.use_cuda_graph)
     # Sync is REQUIRED here: cp_stream is non-blocking, so cp.asnumpy's
     # D2H memcpy on cupy's default stream wouldn't otherwise wait for
     # our kernels.

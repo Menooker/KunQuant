@@ -54,6 +54,10 @@ namespace kun_cuda {
 /// producer maps, etc.  Fully defined in Runtime.cpp.
 struct GraphPlan;
 
+/// Internal: CUDA Graph mode state.  Kept behind a pointer because normal
+/// launch mode does not need any graph objects.
+struct CudaGraphLaunchState;
+
 /// Forward-declared so `Executable::launchOnStream` can take an
 /// `Executor *` argument; the full definition lives below.
 class Executor;
@@ -83,6 +87,14 @@ enum class KernelKind : int32_t {
 enum class Datatype : int32_t {
   Float  = 0,   ///< f32 — 4 bytes/elem
   Double = 1,   ///< f64 — 8 bytes/elem
+};
+
+/// Runtime launch backend.  Normal queues kernels one by one on the stream.
+/// CudaGraph builds a CUDA Graph node DAG and uses graph memory allocation
+/// nodes for intermediate buffers.
+enum class LaunchMode : int32_t {
+  Normal    = 0,
+  CudaGraph = 1,
 };
 
 inline size_t bytesPerElem(Datatype dt) noexcept {
@@ -201,8 +213,10 @@ public:
   ///
   /// `args` keys must equal `graphInputs ++ graphOutputs` (order
   /// doesn't matter; the runtime hashes them into the buffer table).
-  /// Intermediate buffers are owned by the executable and reused across
-  /// launches with matching `(timeLength, numStocks)`.
+  /// In normal mode, intermediate buffers are owned by the executable and
+  /// reused across launches with matching `(timeLength, numStocks)`.  In CUDA
+  /// Graph mode, intermediates are graph allocation nodes with free nodes after
+  /// their last consumers.
   ///
   /// Grid configuration (per kernel — identical because warps_per_cta
   /// and vector_size are graph-wide):
@@ -242,7 +256,8 @@ public:
                        const std::vector<std::pair<std::string, uintptr_t>> &args,
                        int64_t mask = 0,
                        int minChunkWarmupFactor = 4,
-                       double smFillFactor = 1.5);
+                       double smFillFactor = 1.5,
+                       LaunchMode mode = LaunchMode::Normal);
 
 private:
   /// Allocate (or re-allocate, if shape changed) the intermediate slot
@@ -250,9 +265,18 @@ private:
   void ensureSlotPool(int64_t timeLength, int64_t numStocks);
   /// Free all slot allocations.  Called from dtor and on shape change.
   void freeSlotPool();
+  void launchCudaGraphOnStream(
+      Executor *exec,
+      int64_t timeLength, int64_t numStocks,
+      const std::vector<std::pair<std::string, uintptr_t>> &args,
+      int64_t mask,
+      int minChunkWarmupFactor,
+      double smFillFactor);
+  void resetCudaGraphState() noexcept;
 
   ExecutableData data_;
   std::unique_ptr<GraphPlan> plan_;          ///< pImpl — defined in Runtime.cpp
+  std::unique_ptr<CudaGraphLaunchState> cudaGraphState_;
 
   CUmodule cuModule_ = nullptr;
   /// Modules holding pre-compiled cross-sectional PTX.  Loaded at
@@ -317,7 +341,8 @@ public:
                 const std::vector<std::pair<std::string, uintptr_t>> &args,
                 int64_t mask = 0,
                 int minChunkWarmupFactor = 4,
-                double smFillFactor = 1.5);
+                double smFillFactor = 1.5,
+                LaunchMode mode = LaunchMode::Normal);
 
   /// Block until all queued work on this stream completes.
   void synchronize();

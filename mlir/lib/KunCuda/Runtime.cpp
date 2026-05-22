@@ -11,13 +11,14 @@
 //   topoSort             — Kahn's algorithm; rejects cycles
 //   planSlots            — refcount + LIFO free pool over the topo order
 //
-// All helpers live in this file's anonymous namespace.  Future
-// CUDA-graph support reuses the same plan: `kernelInputBufs` +
-// `producerKernel` are exactly the dep edges cuGraph needs.
+// The shared launch helpers live behind RuntimeUtil.h so the traditional
+// launcher and RuntimeCudaGraph.cpp use the same validation, buffer-pointer
+// resolution, chunk planning, and kernel argument construction.
 //
 //===----------------------------------------------------------------------===//
 
 #include "KunCuda/Runtime.h"
+#include "RuntimeUtil.h"
 
 #include <cuda.h>
 
@@ -27,51 +28,13 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 // Pre-compiled cross-sectional PTX, embedded by EmbedFile.cmake.
 #include "cs_rank_ptx.inc"
 #include "cs_scale_ptx.inc"
 
 namespace kun_cuda {
-
-//===----------------------------------------------------------------------===//
-// GraphPlan — pImpl payload, hidden from the public header
-//===----------------------------------------------------------------------===//
-
-/// Runtime-resolved schedule + memory plan.  All buffer references here
-/// are integer indices into the flat buffer table.  Storing
-/// `producerKernel` makes it cheap to re-derive kernel-to-kernel
-/// dependency edges (needed for future cuGraph support: kernel K's deps
-/// = {producerKernel[b] for b in kernelInputBufs[K], filtered to ≥ 0}).
-struct GraphPlan {
-  int numBuffers       = 0;
-  int numGraphInputs   = 0;
-  int numGraphOutputs  = 0;
-
-  // Name → index for the user-facing args dict.  Other lookups happen
-  // by integer indexing.
-  std::unordered_map<std::string, int> graphInputIdx;
-  std::unordered_map<std::string, int> graphOutputIdx;
-
-  // Per-kernel I/O resolved to buffer indices.  Parallel to ExecutableData::kernels.
-  std::vector<std::vector<int>> kernelInputBufs;
-  std::vector<std::vector<int>> kernelOutputBufs;
-
-  // producerKernel[bufIdx] = kernel that writes the buffer, or -1 if
-  // the buffer is a graph input.
-  std::vector<int> producerKernel;
-
-  // Topo order — a single valid linearization for the v0 single-stream
-  // launcher.
-  std::vector<int> launchOrder;
-
-  // Slot assignment: one entry per buffer index.  -1 if the buffer is a
-  // graph input/output; otherwise a slot index in [0, peakIntermediateSlots).
-  std::vector<int> intermediateBufToSlot;
-  int peakIntermediateSlots = 0;
-};
-
-namespace {
 
 //===----------------------------------------------------------------------===//
 // CUDA driver helpers
@@ -94,6 +57,8 @@ std::string joinNames(const std::vector<std::string> &v) {
   }
   return r;
 }
+
+namespace {
 
 //===----------------------------------------------------------------------===//
 // Plan-building helpers — small POD intermediates so each helper is
@@ -353,20 +318,125 @@ SlotPlan planSlots(const std::vector<int> &launchOrder,
   return plan;
 }
 
+} // namespace
+
 //===----------------------------------------------------------------------===//
 // Launch helpers — pure functions used by launchOnStream below.
 //===----------------------------------------------------------------------===//
 
-/// Translate the user-supplied {name → device_ptr} args dict into a
-/// flat buffer-index → pointer array, plug in the executable-owned
-/// intermediate-slot pointers, and verify every graph_input /
-/// graph_output the plan expects was provided.  Throws on unknown or
-/// missing names.
-static std::vector<uintptr_t> resolveBufferPointers(
+KernelLaunchDesc::KernelLaunchDesc(
+    int kernelIndex, KernelKind kind, CUfunction fn, bool isKernelNode,
+    int32_t timeLenI32, int32_t numStocksI32, int32_t maskI32,
+    int32_t chunkSizeI32, int32_t warmupI32,
+    std::vector<CUdeviceptr> ptrs)
+    : kernelIndex(kernelIndex),
+      kind(kind),
+      isKernelNode(isKernelNode),
+      timeLenI32(timeLenI32),
+      numStocksI32(numStocksI32),
+      maskI32(maskI32),
+      chunkSizeI32(chunkSizeI32),
+      warmupI32(warmupI32),
+      ptrs_(std::move(ptrs)) {
+  params = {};
+  params.func = fn;
+  params.gridDimX = 1;
+  params.gridDimY = 1;
+  params.gridDimZ = 1;
+  params.blockDimX = 1;
+  params.blockDimY = 1;
+  params.blockDimZ = 1;
+  params.sharedMemBytes = 0;
+  rebuildKernelParamPointers();
+}
+
+KernelLaunchDesc::KernelLaunchDesc(KernelLaunchDesc &&other) noexcept
+    : kernelIndex(other.kernelIndex),
+      kind(other.kind),
+      isKernelNode(other.isKernelNode),
+      timeLenI32(other.timeLenI32),
+      numStocksI32(other.numStocksI32),
+      maskI32(other.maskI32),
+      chunkSizeI32(other.chunkSizeI32),
+      warmupI32(other.warmupI32),
+      params(other.params),
+      ptrs_(std::move(other.ptrs_)) {
+  rebuildKernelParamPointers();
+}
+
+KernelLaunchDesc &
+KernelLaunchDesc::operator=(KernelLaunchDesc &&other) noexcept {
+  if (this == &other)
+    return *this;
+  kernelIndex = other.kernelIndex;
+  kind = other.kind;
+  isKernelNode = other.isKernelNode;
+  timeLenI32 = other.timeLenI32;
+  numStocksI32 = other.numStocksI32;
+  maskI32 = other.maskI32;
+  chunkSizeI32 = other.chunkSizeI32;
+  warmupI32 = other.warmupI32;
+  params = other.params;
+  ptrs_ = std::move(other.ptrs_);
+  rebuildKernelParamPointers();
+  return *this;
+}
+
+void KernelLaunchDesc::rebuildKernelParamPointers() {
+  argPtrs_.clear();
+  params.kernelParams = nullptr;
+  params.extra = nullptr;
+  if (!isKernelNode)
+    return;
+
+  if (kind == KernelKind::Jit) {
+    argPtrs_.reserve(5 + ptrs_.size());
+    argPtrs_.push_back(&timeLenI32);
+    argPtrs_.push_back(&numStocksI32);
+    argPtrs_.push_back(&maskI32);
+    argPtrs_.push_back(&chunkSizeI32);
+    argPtrs_.push_back(&warmupI32);
+  } else {
+    argPtrs_.reserve(2 + ptrs_.size());
+    argPtrs_.push_back(&timeLenI32);
+    argPtrs_.push_back(&numStocksI32);
+  }
+  for (auto &p : ptrs_)
+    argPtrs_.push_back(&p);
+  params.kernelParams = argPtrs_.data();
+}
+
+int firstIntermediateBuffer(const GraphPlan &plan) noexcept {
+  return plan.numGraphInputs + plan.numGraphOutputs;
+}
+
+void validateLaunchInputs(const ExecutableData &data,
+                          int64_t timeLength, int64_t numStocks,
+                          int64_t mask) {
+  if (timeLength > std::numeric_limits<int32_t>::max() ||
+      numStocks  > std::numeric_limits<int32_t>::max() ||
+      timeLength < 0 || numStocks < 0)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: time_length / num_stocks out of i32 "
+        "range (kernel signature uses i32, i32)");
+  if (mask < 0 || (timeLength > 0 && mask >= timeLength))
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: mask must be in [0, time_length), got "
+        + std::to_string(mask) + " for time_length="
+        + std::to_string(timeLength));
+  if (data.warpsPerCta <= 0)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: warps_per_cta is " +
+        std::to_string(data.warpsPerCta));
+}
+
+/// Translate the user-supplied {name → device_ptr} args dict into a flat
+/// buffer-index → pointer array for graph inputs/outputs.  Intermediate slots
+/// are left as 0 and filled by the caller.
+std::vector<uintptr_t> resolveExternalBufferPointers(
     const GraphPlan &plan,
     const ExecutableData &data,
-    const std::vector<std::pair<std::string, uintptr_t>> &args,
-    const std::vector<uintptr_t> &slotBufs) {
+    const std::vector<std::pair<std::string, uintptr_t>> &args) {
   std::vector<uintptr_t> bufPtrs(plan.numBuffers, 0);
   std::vector<bool>      filled(plan.numBuffers, false);
 
@@ -398,35 +468,53 @@ static std::vector<uintptr_t> resolveBufferPointers(
         "kun_cuda::launchOnStream: missing argument '" + missing + "'");
   }
 
+  return bufPtrs;
+}
+
+/// Translate the user-supplied {name → device_ptr} args dict into a
+/// flat buffer-index → pointer array, plug in the executable-owned
+/// intermediate-slot pointers, and verify every graph_input /
+/// graph_output the plan expects was provided.  Throws on unknown or
+/// missing names.
+std::vector<uintptr_t> resolveBufferPointers(
+    const GraphPlan &plan,
+    const ExecutableData &data,
+    const std::vector<std::pair<std::string, uintptr_t>> &args,
+    const std::vector<uintptr_t> &slotBufs) {
+  std::vector<uintptr_t> bufPtrs =
+      resolveExternalBufferPointers(plan, data, args);
+
   // Intermediates: index into the pre-allocated slot pool.
-  for (int i = plan.numGraphInputs + plan.numGraphOutputs;
-        i < plan.numBuffers; ++i) {
+  for (int i = firstIntermediateBuffer(plan); i < plan.numBuffers; ++i) {
     int slot = plan.intermediateBufToSlot[i];
     bufPtrs[i] = slotBufs[slot];
   }
   return bufPtrs;
 }
 
-/// Stock-major × time-chunk launch: block_x = warps_per_cta*32,
-/// grid_x = ceil(numStocks / (block_x * vector_size)),
-/// grid_y = numChunks, no dynamic smem.
-static void launchJitKernel(CUfunction fn,
-                              int64_t numStocks,
-                              int64_t warpsPerCta, int64_t vectorSize,
-                              unsigned numChunks,
-                              void **args, CUstream stream) {
-  unsigned blockX = static_cast<unsigned>(warpsPerCta * 32);
+static void resetLaunchShape(KernelLaunchDesc &desc) {
+  desc.params.gridDimX = 1;
+  desc.params.gridDimY = 1;
+  desc.params.gridDimZ = 1;
+  desc.params.blockDimX = 1;
+  desc.params.blockDimY = 1;
+  desc.params.blockDimZ = 1;
+  desc.params.sharedMemBytes = 0;
+}
+
+static void computeJitLaunchShape(KernelLaunchDesc &desc,
+                                  int64_t numStocks,
+                                  int64_t warpsPerCta,
+                                  int64_t vectorSize,
+                                  unsigned numChunks) {
+  desc.params.blockDimX = static_cast<unsigned>(warpsPerCta * 32);
   uint64_t stocksPerBlock =
-      static_cast<uint64_t>(blockX) * static_cast<uint64_t>(vectorSize);
-  unsigned gridX = static_cast<unsigned>(
+      static_cast<uint64_t>(desc.params.blockDimX) *
+      static_cast<uint64_t>(vectorSize);
+  desc.params.gridDimX = static_cast<unsigned>(
       (static_cast<uint64_t>(numStocks) + stocksPerBlock - 1) /
       stocksPerBlock);
-  // sharedMemBytes = 0 — JIT'd kernels declare static smem via
-  // llvm.mlir.global addr_space=3; the dynamic-smem launch parameter
-  // does not apply.
-  checkCu(cuLaunchKernel(fn, gridX, numChunks, 1, blockX, 1, 1,
-                           /*sharedMemBytes=*/0, stream, args, nullptr),
-           "cuLaunchKernel");
+  desc.params.gridDimY = numChunks;
 }
 
 /// Chunk plan for a single JIT kernel.  `chunkSize` is the time-axis
@@ -454,15 +542,11 @@ static void launchJitKernel(CUfunction fn,
 /// When both unreliable == 0 and mask == 0, the only cap is T itself.
 /// When numSMs == 0 (Executor couldn't query the device) or
 /// smFillFactor ≤ 0, fall back to single-chunk.
-struct ChunkPlan {
-  int64_t chunkSize;
-  unsigned numChunks;
-};
-static ChunkPlan computeChunkPlan(int64_t timeLength, int64_t numStocks,
-                                     int64_t warpsPerCta, int64_t vectorSize,
-                                     int64_t unreliableCount, int64_t mask,
-                                     int minChunkWarmupFactor,
-                                     double smFillFactor, int numSMs) {
+ChunkPlan computeChunkPlan(int64_t timeLength, int64_t numStocks,
+                           int64_t warpsPerCta, int64_t vectorSize,
+                           int64_t unreliableCount, int64_t mask,
+                           int minChunkWarmupFactor,
+                           double smFillFactor, int numSMs) {
   if (timeLength <= 0)
     return {timeLength, 1u};
   if (numSMs <= 0 || smFillFactor <= 0.0)
@@ -550,12 +634,14 @@ static bool isCsScaleKind(KernelKind kind) {
          kind == KernelKind::ExtCsScaleF64;
 }
 
-static void launchExtCsKernel(CUfunction fn, KernelKind kind,
-                                const std::string &kernelName,
-                                int64_t timeLength, int64_t numStocks,
-                                int devMaxSmemBytes,
-                                double smFillFactor, int numSMs,
-                                void **args, CUstream stream) {
+static void computeExtCsLaunchShape(KernelLaunchDesc &desc,
+                                    KernelKind kind,
+                                    const std::string &kernelName,
+                                    int64_t timeLength,
+                                    int64_t numStocks,
+                                    int devMaxSmemBytes,
+                                    double smFillFactor,
+                                    int numSMs) {
   size_t elemSize = isF64ExternalKind(kind) ? 8u : 4u;
   uint64_t smemElems = static_cast<uint64_t>(numStocks);
   if (isCsScaleKind(kind))
@@ -587,32 +673,179 @@ static void launchExtCsKernel(CUfunction fn, KernelKind kind,
   int64_t blockX64 =
       ((std::max<int64_t>(numStocks, 1) + kWarp - 1) / kWarp) * kWarp;
   if (blockX64 > kMaxBlock) blockX64 = kMaxBlock;
-  unsigned blockX = static_cast<unsigned>(blockX64);
+  desc.params.blockDimX = static_cast<unsigned>(blockX64);
 
   // Target gridX = sm_fill_factor * numSMs (capped at timeLength so we
   // never launch idle CTAs).  numSMs == 0 (device query failed) →
   // gridX = timeLength, one CTA per timestep.
-  unsigned gridX;
   if (numSMs > 0 && smFillFactor > 0.0) {
     int64_t target = static_cast<int64_t>(
         std::ceil(smFillFactor * static_cast<double>(numSMs)));
     if (target < 1) target = 1;
     if (target > timeLength) target = timeLength;
-    gridX = static_cast<unsigned>(target);
+    desc.params.gridDimX = static_cast<unsigned>(target);
   } else {
-    gridX = static_cast<unsigned>(timeLength);
+    desc.params.gridDimX = static_cast<unsigned>(timeLength);
+  }
+  desc.params.sharedMemBytes = static_cast<unsigned>(smemBytes64);
+}
+
+static std::pair<bool, bool>
+updateKernelArgPtrs(std::vector<CUdeviceptr> &ptrs,
+                    const std::vector<int> &ins,
+                    const std::vector<int> &outs,
+                    const std::vector<uintptr_t> &bufPtrs) {
+  const size_t numPtrs = ins.size() + outs.size();
+  const bool sizeChanged = ptrs.size() != numPtrs;
+  bool changed = sizeChanged;
+  if (!changed) {
+    size_t argIdx = 0;
+    for (int b : ins) {
+      if (ptrs[argIdx++] != static_cast<CUdeviceptr>(bufPtrs[b])) {
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) {
+      for (int b : outs) {
+        if (ptrs[argIdx++] != static_cast<CUdeviceptr>(bufPtrs[b])) {
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  if (!changed)
+    return {};
+
+  ptrs.resize(numPtrs);
+  size_t argIdx = 0;
+  for (int b : ins)
+    ptrs[argIdx++] = static_cast<CUdeviceptr>(bufPtrs[b]);
+  for (int b : outs)
+    ptrs[argIdx++] = static_cast<CUdeviceptr>(bufPtrs[b]);
+  return {true, sizeChanged};
+}
+
+bool KernelLaunchDesc::updateBuffer(
+    const GraphPlan &plan,
+    int kIdx,
+    const std::vector<uintptr_t> &bufPtrs) {
+  const auto &ins = plan.kernelInputBufs[kIdx];
+  const auto &outs = plan.kernelOutputBufs[kIdx];
+  const size_t numPtrs = ins.size() + outs.size();
+  if (ptrs_.size() != numPtrs)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream(cuda_graph): kernel buffer argument count "
+        "changed without graph rebuild");
+  auto [changed, reallocated] =
+      updateKernelArgPtrs(ptrs_, ins, outs, bufPtrs);
+  (void)reallocated;
+  return changed;
+}
+
+void KernelLaunchDesc::update(
+    const GraphPlan &plan,
+    const ExecutableData &data,
+    const std::vector<CUfunction> &cuFuncs,
+    int kIdx,
+    const CudaGraphLaunchParams &launch) {
+  const auto &ins  = plan.kernelInputBufs[kIdx];
+  const auto &outs = plan.kernelOutputBufs[kIdx];
+  const auto &meta = data.kernels[kIdx];
+
+  kernelIndex = kIdx;
+  kind = meta.kind;
+  isKernelNode = meta.kind == KernelKind::Jit || launch.timeLength > 0;
+  timeLenI32 = static_cast<int32_t>(launch.timeLength);
+  numStocksI32 = static_cast<int32_t>(launch.numStocks);
+  maskI32 = static_cast<int32_t>(launch.mask);
+  params.func = cuFuncs[kIdx];
+  auto [changed, reallocated] =
+      updateKernelArgPtrs(ptrs_, ins, outs, launch.bufPtrs);
+  (void)changed;
+
+  unsigned numChunks = 1;
+  chunkSizeI32 = 0;
+  warmupI32 = 0;
+  if (meta.kind == KernelKind::Jit) {
+    ChunkPlan cp = computeChunkPlan(
+        launch.timeLength, launch.numStocks, data.warpsPerCta,
+        data.vectorSize, meta.unreliableCount, launch.mask,
+        launch.minChunkWarmupFactor, launch.smFillFactor, launch.numSMs);
+    numChunks = cp.numChunks;
+    chunkSizeI32 = static_cast<int32_t>(cp.chunkSize);
+    warmupI32 = static_cast<int32_t>(
+        std::max<int64_t>(meta.unreliableCount, 0));
   }
 
-  unsigned smemBytes = static_cast<unsigned>(smemBytes64);
-  checkCu(cuLaunchKernel(fn, gridX, 1, 1, blockX, 1, 1,
-                           smemBytes, stream, args, nullptr),
-           "cuLaunchKernel(external_cs)");
+  resetLaunchShape(*this);
+  if (meta.kind == KernelKind::Jit) {
+    computeJitLaunchShape(*this, launch.numStocks, data.warpsPerCta,
+                          data.vectorSize, numChunks);
+  } else if (isKernelNode) {
+    computeExtCsLaunchShape(*this, meta.kind, meta.kernelName,
+                            launch.timeLength, launch.numStocks,
+                            launch.devMaxSmemBytes,
+                            launch.smFillFactor, launch.numSMs);
+  }
+
+  if (reallocated)
+    rebuildKernelParamPointers();
+}
+
+static std::vector<KernelLaunchDesc> buildKernelLaunchDescs(
+    const GraphPlan &plan,
+    const ExecutableData &data,
+    const std::vector<CUfunction> &cuFuncs,
+    int64_t timeLength, int64_t numStocks,
+    const std::vector<uintptr_t> &bufPtrs,
+    int64_t mask,
+    int minChunkWarmupFactor,
+    double smFillFactor,
+    int devMaxSmemBytes,
+    int numSMs) {
+  CudaGraphLaunchParams launch;
+  launch.timeLength = timeLength;
+  launch.numStocks = numStocks;
+  launch.mask = mask;
+  launch.minChunkWarmupFactor = minChunkWarmupFactor;
+  launch.smFillFactor = smFillFactor;
+  launch.devMaxSmemBytes = devMaxSmemBytes;
+  launch.numSMs = numSMs;
+  launch.bufPtrs = bufPtrs;
+
+  std::vector<KernelLaunchDesc> descs;
+  descs.reserve(plan.launchOrder.size());
+  for (int kIdx : plan.launchOrder) {
+    KernelLaunchDesc desc;
+    desc.update(plan, data, cuFuncs, kIdx, launch);
+    descs.emplace_back(std::move(desc));
+  }
+  return descs;
+}
+
+void launchKernelDesc(const KernelLaunchDesc &desc, CUstream stream) {
+  if (!desc.isKernelNode)
+    return;
+  const char *what = desc.kind == KernelKind::Jit
+                         ? "cuLaunchKernel"
+                         : "cuLaunchKernel(external_cs)";
+  const CUDA_KERNEL_NODE_PARAMS &p = desc.params;
+  checkCu(cuLaunchKernel(p.func,
+                         p.gridDimX, p.gridDimY, p.gridDimZ,
+                         p.blockDimX, p.blockDimY, p.blockDimZ,
+                         p.sharedMemBytes, stream,
+                         p.kernelParams, p.extra),
+          what);
 }
 
 //===----------------------------------------------------------------------===//
 // Kernel-module / kernel-symbol helpers — read ExecutableData, mutate
 // the CUmodule and CUfunction handles the ctor is populating.
 //===----------------------------------------------------------------------===//
+
+namespace {
 
 /// Load the JIT'd cubin if non-empty; otherwise sanity-check that no
 /// kernel actually needs it (every `kind == Jit` requires a cubin).
@@ -829,6 +1062,7 @@ Executable::Executable(ExecutableData &&data) : data_(std::move(data)) {
 Executable::~Executable() {
   // Best-effort cleanup; we deliberately don't propagate driver errors
   // out of a destructor.
+  resetCudaGraphState();
   freeSlotPool();
   if (cuModule_)
     cuModuleUnload(cuModule_);
@@ -887,29 +1121,23 @@ void Executable::launchOnStream(
     const std::vector<std::pair<std::string, uintptr_t>> &args,
     int64_t mask,
     int minChunkWarmupFactor,
-    double smFillFactor) {
+    double smFillFactor,
+    LaunchMode mode) {
   if (!exec)
     throw std::runtime_error(
         "kun_cuda::launchOnStream: Executor pointer is null");
+
+  validateLaunchInputs(data_, timeLength, numStocks, mask);
+
+  if (mode == LaunchMode::CudaGraph) {
+    launchCudaGraphOnStream(exec, timeLength, numStocks, args,
+                            mask, minChunkWarmupFactor, smFillFactor);
+    return;
+  }
+
   CUstream stream      = exec->stream();
   int devMaxSmemBytes  = exec->devMaxSmemBytes();
   int numSMs           = exec->numSMs();
-  // ── Shape sanity (kernel signature is i32 across the board) ─────
-  if (timeLength > std::numeric_limits<int32_t>::max() ||
-      numStocks  > std::numeric_limits<int32_t>::max() ||
-      timeLength < 0 || numStocks < 0)
-    throw std::runtime_error(
-        "kun_cuda::launchOnStream: time_length / num_stocks out of i32 "
-        "range (kernel signature uses i32, i32)");
-  if (mask < 0 || (timeLength > 0 && mask >= timeLength))
-    throw std::runtime_error(
-        "kun_cuda::launchOnStream: mask must be in [0, time_length), got "
-        + std::to_string(mask) + " for time_length="
-        + std::to_string(timeLength));
-  if (data_.warpsPerCta <= 0)
-    throw std::runtime_error(
-        "kun_cuda::launchOnStream: warps_per_cta is " +
-        std::to_string(data_.warpsPerCta));
 
   // ── Grow / reuse the intermediate slot pool for this shape ───────
   ensureSlotPool(timeLength, numStocks);
@@ -918,66 +1146,13 @@ void Executable::launchOnStream(
   const std::vector<uintptr_t> bufPtrs =
       resolveBufferPointers(*plan_, data_, args, slotBufs_);
 
-  // ── Per-launch i32 scalars.  time_length / num_stocks / mask are
-  //    shared across every kernel; chunk_size / warmup vary per kernel
-  //    (chunk_size is derived from per-kernel unreliableCount). ──────
-  int32_t timeLenI32   = static_cast<int32_t>(timeLength);
-  int32_t numStocksI32 = static_cast<int32_t>(numStocks);
-  int32_t maskI32      = static_cast<int32_t>(mask);
-
-  for (int kIdx : plan_->launchOrder) {
-    const auto &ins  = plan_->kernelInputBufs[kIdx];
-    const auto &outs = plan_->kernelOutputBufs[kIdx];
-    const auto &meta = data_.kernels[kIdx];
-
-    std::vector<CUdeviceptr> ptrs;
-    ptrs.reserve(ins.size() + outs.size());
-    for (int b : ins)  ptrs.push_back(static_cast<CUdeviceptr>(bufPtrs[b]));
-    for (int b : outs) ptrs.push_back(static_cast<CUdeviceptr>(bufPtrs[b]));
-
-    if (meta.kind == KernelKind::Jit) {
-      // JIT argv: (i32 T, i32 S, i32 mask, i32 chunk_size, i32 warmup,
-      //            ptrs...).  Chunk plan is per-kernel because each
-      //            kernel has its own unreliableCount.
-      ChunkPlan plan = computeChunkPlan(
-          timeLength, numStocks, data_.warpsPerCta, data_.vectorSize,
-          meta.unreliableCount, mask, minChunkWarmupFactor,
-          smFillFactor, numSMs);
-      int32_t chunkSizeI32 = static_cast<int32_t>(plan.chunkSize);
-      // -1 sentinel (whole-time) means single chunk; the kernel's
-      // chunk-0 branch never reads the warmup arg in that case, but we
-      // still clamp to 0 so a stray load never observes a negative
-      // value in any future path.
-      int32_t warmupI32    = static_cast<int32_t>(
-          std::max<int64_t>(meta.unreliableCount, 0));
-
-      std::vector<void *> argPtrs;
-      argPtrs.reserve(5 + ptrs.size());
-      argPtrs.push_back(&timeLenI32);
-      argPtrs.push_back(&numStocksI32);
-      argPtrs.push_back(&maskI32);
-      argPtrs.push_back(&chunkSizeI32);
-      argPtrs.push_back(&warmupI32);
-      for (auto &p : ptrs) argPtrs.push_back(&p);
-
-      launchJitKernel(cuFuncs_[kIdx], numStocks,
-                       data_.warpsPerCta, data_.vectorSize,
-                       plan.numChunks, argPtrs.data(), stream);
-    } else {
-      // External cross-sectional argv: (i32 T, i32 S, ptrs...).  These
-      // kernels are time-major and don't multi-chunk along time — the
-      // mask / chunk_size / warmup scalars don't apply.
-      std::vector<void *> argPtrs;
-      argPtrs.reserve(2 + ptrs.size());
-      argPtrs.push_back(&timeLenI32);
-      argPtrs.push_back(&numStocksI32);
-      for (auto &p : ptrs) argPtrs.push_back(&p);
-      launchExtCsKernel(cuFuncs_[kIdx], meta.kind, meta.kernelName,
-                          timeLength, numStocks,
-                          devMaxSmemBytes, smFillFactor, numSMs,
-                          argPtrs.data(), stream);
-    }
-  }
+  std::vector<KernelLaunchDesc> descs =
+      buildKernelLaunchDescs(*plan_, data_, cuFuncs_,
+                             timeLength, numStocks, bufPtrs,
+                             mask, minChunkWarmupFactor, smFillFactor,
+                             devMaxSmemBytes, numSMs);
+  for (const auto &desc : descs)
+    launchKernelDesc(desc, stream);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1013,9 +1188,10 @@ Executor::~Executor() = default;
 void Executor::runGraph(
     Executable &exe, int64_t timeLength, int64_t numStocks,
     const std::vector<std::pair<std::string, uintptr_t>> &args,
-    int64_t mask, int minChunkWarmupFactor, double smFillFactor) {
+    int64_t mask, int minChunkWarmupFactor, double smFillFactor,
+    LaunchMode mode) {
   exe.launchOnStream(this, timeLength, numStocks, args,
-                      mask, minChunkWarmupFactor, smFillFactor);
+                      mask, minChunkWarmupFactor, smFillFactor, mode);
 }
 
 void Executor::synchronize() {

@@ -570,7 +570,8 @@ NB_MODULE(KunMLIR, m) {
           [](kun_cuda::Executor &e, kun_cuda::Executable &exe,
               nb::dict pyInputs, int64_t cur_time, int64_t length,
               nb::object pyOutputs, int64_t mask,
-              int minChunkWarmupFactor, double smFillFactor) -> nb::dict {
+              int minChunkWarmupFactor, double smFillFactor,
+              bool useCudaGraph) -> nb::dict {
             if (cur_time != 0)
               throw std::runtime_error(
                   "runGraph: cur_time != 0 not supported on GPU");
@@ -610,7 +611,9 @@ NB_MODULE(KunMLIR, m) {
                                             in.numStocks, streamArg, args);
 
             e.runGraph(exe, timeLength, in.numStocks, args,
-                        mask, minChunkWarmupFactor, smFillFactor);
+                        mask, minChunkWarmupFactor, smFillFactor,
+                        useCudaGraph ? kun_cuda::LaunchMode::CudaGraph
+                                     : kun_cuda::LaunchMode::Normal);
             return ret;
           },
           nb::arg("exe"), nb::arg("inputs"),
@@ -619,6 +622,7 @@ NB_MODULE(KunMLIR, m) {
           nb::arg("mask") = 0,
           nb::arg("min_chunk_warmup_factor") = 4,
           nb::arg("sm_fill_factor") = 1.5,
+          nb::arg("use_cuda_graph") = false,
           "Queue every kernel in `exe` onto this executor's stream.\n"
           "**Asynchronous** — call `.synchronize()` (or otherwise wait\n"
           "on the stream) before reading results back to host.\n"
@@ -651,6 +655,9 @@ NB_MODULE(KunMLIR, m) {
           "`sm_fill_factor` is the target `num_chunks * stock_tiles / "
           "numSMs`.  1.0 just fills the GPU; > 1 leaves scheduler "
           "slack.  Default 1.5.\n"
+          "`use_cuda_graph=True` launches through a CUDA Graph node DAG "
+          "with graph allocation/free nodes for intermediate buffers. "
+          "Default false keeps the existing sequential launch path.\n"
           "\n"
           "Named to match the CPU executor API "
           "(`KunRunner.runGraph(executor, mod, inputs, cur_time, length)`).")
