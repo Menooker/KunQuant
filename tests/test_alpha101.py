@@ -19,11 +19,19 @@ isx86 = cpu_arch != "aarch64"
 _argp = argparse.ArgumentParser(add_help=False)
 _argp.add_argument("action", nargs="?")
 _argp.add_argument("--gpu-arch", default="")
+_argp.add_argument("--benchmode", action="store_true")
+_argp.add_argument("--time", type=int, default=260)
+_argp.add_argument("--num-stocks", type=int, default=64)
+_argp.add_argument("--num-threads", type=int, default=4)
+
 _args, _ = _argp.parse_known_args()
 action = _args.action or ("run_gpu" if _args.gpu_arch else "avx2")
 GPU_ARCH = _args.gpu_arch or ("sm_80" if action == "run_gpu" else "")
 GPU_MODE = bool(GPU_ARCH)
-
+BENCHMODE = _args.benchmode
+TIME = _args.time
+NUM_STOCKS = _args.num_stocks
+NUM_THREADS = _args.num_threads
 if GPU_MODE:
     import cupy as cp
     from KunQuant.jit import KunMLIR as _kr_mlir
@@ -160,16 +168,20 @@ def create_single_thread_executor():
 def create_multi_thread_executor(n):
     return _kr_mlir.Executor() if GPU_MODE else kr.createMultiThreadExecutor(n)
 
-
-def run_graph(executor, modu, inputs, cur_time, length, outputs=None, **kwargs):
+gpu_inputs = None
+def run_graph(executor, benchmode, modu, inputs, cur_time, length, outputs=None, **kwargs):
     if not GPU_MODE:
         return kr.runGraph(executor, modu, inputs, cur_time, length,
                            outputs if outputs is not None else {}, **kwargs)
     if cur_time != 0:
         raise RuntimeError("GPU alpha101 test only supports cur_time=0")
-    gpu_inputs = {k: cp.asarray(v) for k, v in inputs.items()}
+    global gpu_inputs
+    if not benchmode:
+        gpu_inputs = {k: cp.asarray(v) for k, v in inputs.items()}
     ret = executor.runGraph(modu, gpu_inputs, cur_time=cur_time,
                             length=length)
+    if benchmode:
+        return ret
     executor.synchronize()
 
     out_np = {}
@@ -369,18 +381,17 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
     # blocked = TS_STs(inp)
     
     if not ischeck:
-        out = run_graph(executor, modu, my_input, start_time,
+        out = run_graph(executor, False, modu, my_input, start_time,
                         num_time-start_time, outbuffers)
         start = time.time()
         for _ in range(20):
-            out = run_graph(executor, modu, my_input, start_time,
-                            num_time-start_time, outbuffers,
-                            skip_check=True)
+            out = run_graph(executor, True, modu, my_input, start_time,
+                            num_time-start_time, outbuffers)
         end = time.time()
         tdiff = (end-start)/20
     else:
         start = time.time()
-        out = run_graph(executor, modu, my_input, start_time,
+        out = run_graph(executor, False, modu, my_input, start_time,
                         num_time-start_time, outbuffers,
                         num_stocks=num_stock)
         end = time.time()
@@ -453,18 +464,19 @@ def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, isc
     # print(ref.alpha001())
     # blocked = TS_STs(inp)
     if not ischeck:
-        out = run_graph(executor, modu, my_input, start_time,
+        out = run_graph(executor, False, modu, my_input, start_time,
                         num_time-start_time, outbuffers)
         start = time.time()
         for _ in range(20):
-            out = run_graph(executor, modu, my_input, start_time,
-                            num_time-start_time, outbuffers,
-                            skip_check=True)
+            out = run_graph(executor, True, modu, my_input, start_time,
+                            num_time-start_time, outbuffers)
+        if GPU_MODE:
+            executor.synchronize()
         end = time.time()
         tdiff = (end-start)/20
     else:
         start = time.time()
-        out = run_graph(executor, modu, my_input, start_time,
+        out = run_graph(executor, False, modu, my_input, start_time,
                         num_time-start_time, outbuffers)
         end = time.time()
         tdiff = end-start
@@ -482,7 +494,7 @@ def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, isc
 def main(is64: bool, is_check: bool):
     modu = lib.getModule("alpha_101" if not is64 else "alpha_101_double")
     start_window = modu.getOutputUnreliableCount()
-    num_stock = 64
+    num_stock = NUM_STOCKS
     done = True
     testfunc = test64 if is64 else test
     blocking_num = 1 if GPU_MODE else modu.blocking_len
@@ -490,15 +502,15 @@ def main(is64: bool, is_check: bool):
     blocking = 0 if is64 or GPU_MODE else blocking_num
     def compute():
         nonlocal done
-        num_time = 260
+        num_time = TIME
         my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, blocking, "float64" if is64 else "float32")
-        executor = create_single_thread_executor()
-        done = done & testfunc(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
-        done = done & testfunc(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
         if not GPU_MODE:
-            executor = create_multi_thread_executor(4)
+            executor = create_single_thread_executor()
             done = done & testfunc(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
-    num_stock = 64
+            if not BENCHMODE:
+                done = done & testfunc(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
+        executor = create_multi_thread_executor(NUM_THREADS)
+        done = done & testfunc(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
     compute()
     # skip benchmarking on unaligned mode
     if not is_check:
@@ -542,15 +554,15 @@ else:
     lib = do_compile(action, False, None)
 
 print("Check f64 batch")
-main(True, True)
+main(True, not BENCHMODE)
 print("======================================")
 print("Check f32 batch")
-main(False, True)
-if not GPU_MODE:
+main(False, not BENCHMODE)
+if not GPU_MODE and not BENCHMODE:
     print("======================================")
     print("Check f32 stream")
     streammain(64)
-if not GPU_MODE and action != "run_avx512" and isx86:
+if not GPU_MODE and action != "run_avx512" and isx86 and not BENCHMODE:
     print("======================================")
     print("Check f32 stream unaligned")
     streammain(63)
