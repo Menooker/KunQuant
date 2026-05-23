@@ -24,15 +24,18 @@ jobs:
             const content = fs.readFileSync('mlir/llvm_commit.txt', 'utf8');
             const commit = content.split(/\r?\n/).find(l => !/^\s*#/.test(l) && l.trim() !== '') || '';
             if (!commit) throw new Error('No commit found in mlir/llvm_commit.txt');
-            return commit;
+            core.setOutput('commit', commit.trim());
+            return commit.trim();
 
       - name: Checkout llvm-project at commit
         uses: actions/checkout@v4
         with:
           repository: llvm/llvm-project
-          ref: ${{ steps.read_commit.outputs.result }}
+          # treat the value as a tag name and fetch tags so shallow fetch can find it
+          ref: refs/tags/${{ steps.read_commit.outputs.commit }}
           path: llvm-project
-          fetch-depth: 1  # shallow clone, only the specified ref
+          fetch-depth: 1
+          fetch-tags: true
 
       - name: Install build dependencies
         run: |
@@ -49,7 +52,8 @@ jobs:
             -DLLVM_ENABLE_PROJECTS="mlir" \
             -DLLVM_TARGETS_TO_BUILD="NVPTX" \
             -DCMAKE_BUILD_TYPE=MinSizeRel \
-            -DCMAKE_INSTALL_PREFIX=install
+            -DLLVM_BUILD_TOOLS=OFF \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/build-static/install
 
       - name: Configure (dynamic)
         if: matrix.link == 'dynamic'
@@ -58,11 +62,12 @@ jobs:
             -DLLVM_ENABLE_PROJECTS="mlir" \
             -DLLVM_TARGETS_TO_BUILD="NVPTX" \
             -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DLLVM_BUILD_TOOLS=OFF \
             -DMLIR_BUILD_LLVM_DYLIB=ON \
             -DMLIR_LINK_LLVM_DYLIB=ON \
             -DLLVM_BUILD_LLVM_DYLIB=ON \
             -DLLVM_LINK_LLVM_DYLIB=ON \
-            -DCMAKE_INSTALL_PREFIX=install
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/build-dynamic/install
 
       - name: Build and install
         run: |
@@ -71,7 +76,7 @@ jobs:
       - name: Create archive of install
         run: |
           mkdir -p artifacts
-          COMMIT=${{ steps.read_commit.outputs.result }}
+          COMMIT=${{ steps.read_commit.outputs.commit }}
           tar -C build-${{ matrix.link }} -czf artifacts/llvm-mlir-install-${{ matrix.link }}-${COMMIT}.tar.gz install
           echo "Created artifacts/llvm-mlir-install-${{ matrix.link }}-${COMMIT}.tar.gz"
 
@@ -110,30 +115,13 @@ jobs:
             const content = fs.readFileSync('mlir/llvm_commit.txt', 'utf8');
             const commit = content.split(/\r?\n/).find(l => !/^\s*#/.test(l) && l.trim() !== '') || '';
             if (!commit) throw new Error('No commit found in mlir/llvm_commit.txt');
+            core.setOutput('commit', commit);
             return commit;
-
-      - name: Create GitHub Release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: Release
+        uses: softprops/action-gh-release@v3
         with:
-          tag_name: llvm-mlir-${{ steps.read_commit_publish.outputs.result }}
-          release_name: LLVM-MLIR ${{ steps.read_commit_publish.outputs.result }}
-          body: "Automated build artifacts for LLVM+MLIR"
-          draft: false
-          prerelease: false
-
-      - name: Upload static asset to release
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/llvm-mlir-install-static-${{ steps.read_commit_publish.outputs.result }}.tar.gz
-          asset_name: llvm-mlir-install-static-${{ steps.read_commit_publish.outputs.result }}.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload dynamic asset to release
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: artifacts/llvm-mlir-install-dynamic-${{ steps.read_commit_publish.outputs.result }}.tar.gz
-          asset_name: llvm-mlir-install-dynamic-${{ steps.read_commit_publish.outputs.result }}.tar.gz
-          asset_content_type: application/gzip
+          tag_name: llvm-mlir-${{ steps.read_commit_publish.outputs.commit }}
+          name: LLVM-MLIR prebuilt ${{ steps.read_commit_publish.outputs.commit }}
+          files: |
+            artifacts/llvm-mlir-install-static-${{ steps.read_commit_publish.outputs.commit }}.tar.gz
+            artifacts/llvm-mlir-install-dynamic-${{ steps.read_commit_publish.outputs.commit }}.tar.gz
