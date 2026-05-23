@@ -1,0 +1,139 @@
+name: Build LLVM+MLIR (static & dynamic)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: Build (static & dynamic matrix)
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        link: [static, dynamic]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read LLVM commit from file
+        id: read_commit
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const content = fs.readFileSync('mlir/llvm_commit.txt', 'utf8');
+            const commit = content.split(/\r?\n/).find(l => !/^\s*#/.test(l) && l.trim() !== '') || '';
+            if (!commit) throw new Error('No commit found in mlir/llvm_commit.txt');
+            return commit;
+
+      - name: Checkout llvm-project at commit
+        uses: actions/checkout@v4
+        with:
+          repository: llvm/llvm-project
+          ref: ${{ steps.read_commit.outputs.result }}
+          path: llvm-project
+          fetch-depth: 1  # shallow clone, only the specified ref
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build git python3 ca-certificates pkg-config curl unzip
+
+      - name: Configure, build and install
+        run: echo "Using workflow steps for configure/build/install"
+
+      - name: Configure (static)
+        if: matrix.link == 'static'
+        run: |
+          cmake -S llvm-project/llvm -B build-static -G Ninja \
+            -DLLVM_ENABLE_PROJECTS="mlir" \
+            -DLLVM_TARGETS_TO_BUILD="NVPTX" \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_INSTALL_PREFIX=install
+
+      - name: Configure (dynamic)
+        if: matrix.link == 'dynamic'
+        run: |
+          cmake -S llvm-project/llvm -B build-dynamic -G Ninja \
+            -DLLVM_ENABLE_PROJECTS="mlir" \
+            -DLLVM_TARGETS_TO_BUILD="NVPTX" \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DMLIR_BUILD_LLVM_DYLIB=ON \
+            -DMLIR_LINK_LLVM_DYLIB=ON \
+            -DLLVM_BUILD_LLVM_DYLIB=ON \
+            -DLLVM_LINK_LLVM_DYLIB=ON \
+            -DCMAKE_INSTALL_PREFIX=install
+
+      - name: Build and install
+        run: |
+          cmake --build build-${{ matrix.link }} -j"$(nproc)" --target install
+
+      - name: Create archive of install
+        run: |
+          mkdir -p artifacts
+          COMMIT=${{ steps.read_commit.outputs.result }}
+          tar -C build-${{ matrix.link }} -czf artifacts/llvm-mlir-install-${{ matrix.link }}-${COMMIT}.tar.gz install
+          echo "Created artifacts/llvm-mlir-install-${{ matrix.link }}-${COMMIT}.tar.gz"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-mlir-install-${{ matrix.link }}
+          path: artifacts/llvm-mlir-install-${{ matrix.link }}-*.tar.gz
+
+  publish:
+    name: Publish release with artifacts
+    runs-on: ubuntu-22.04
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download static artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-mlir-install-static
+          path: artifacts
+
+      - name: Download dynamic artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: llvm-mlir-install-dynamic
+          path: artifacts
+
+      - name: Read LLVM commit from file
+        id: read_commit_publish
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const content = fs.readFileSync('mlir/llvm_commit.txt', 'utf8');
+            const commit = content.split(/\r?\n/).find(l => !/^\s*#/.test(l) && l.trim() !== '') || '';
+            if (!commit) throw new Error('No commit found in mlir/llvm_commit.txt');
+            return commit;
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: llvm-mlir-${{ steps.read_commit_publish.outputs.result }}
+          release_name: LLVM-MLIR ${{ steps.read_commit_publish.outputs.result }}
+          body: "Automated build artifacts for LLVM+MLIR"
+          draft: false
+          prerelease: false
+
+      - name: Upload static asset to release
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/llvm-mlir-install-static-${{ steps.read_commit_publish.outputs.result }}.tar.gz
+          asset_name: llvm-mlir-install-static-${{ steps.read_commit_publish.outputs.result }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload dynamic asset to release
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: artifacts/llvm-mlir-install-dynamic-${{ steps.read_commit_publish.outputs.result }}.tar.gz
+          asset_name: llvm-mlir-install-dynamic-${{ steps.read_commit_publish.outputs.result }}.tar.gz
+          asset_content_type: application/gzip
