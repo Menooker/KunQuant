@@ -118,10 +118,11 @@ LogicalResult SelectOp::verify() {
   return success();
 }
 
+// OpaqueProperties -> PropertyRef
 // Result type: ts<true_value.elem, 1>.
 LogicalResult SelectOp::inferReturnTypes(
     MLIRContext *ctx, std::optional<Location>, ValueRange operands,
-    DictionaryAttr, PropertyRef, RegionRange,
+    DictionaryAttr, OpaqueProperties , RegionRange,
     SmallVectorImpl<Type> &inferred) {
   auto trueTy = llvm::cast<TsType>(operands[1].getType());
   inferred.push_back(TsType::get(ctx, trueTy.getElementType(), 1));

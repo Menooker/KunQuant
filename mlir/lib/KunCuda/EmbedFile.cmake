@@ -21,6 +21,8 @@ if(PTX_VERSION)
   file(READ "${INPUT}" text_content)
   string(REGEX REPLACE "\\.version[ \\t]+[0-9.]+" ".version ${PTX_VERSION}"
                        text_content "${text_content}")
+  string(REGEX REPLACE "\\.target[ \\t]+sm_[0-9]+" ".target sm_${SM_VERSION}"
+                       text_content "${text_content}")
   set(_patched "${OUTPUT}.raw.ptx")
   file(WRITE "${_patched}" "${text_content}")
   file(READ "${_patched}" hex_content HEX)

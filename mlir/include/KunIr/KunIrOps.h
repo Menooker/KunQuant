@@ -31,7 +31,7 @@ public:
   static mlir::LogicalResult inferReturnTypes(
       mlir::MLIRContext *ctx, std::optional<mlir::Location>,
       mlir::ValueRange operands, mlir::DictionaryAttr,
-      mlir::PropertyRef, mlir::RegionRange,
+      mlir::OpaqueProperties , mlir::RegionRange,
       llvm::SmallVectorImpl<mlir::Type> &inferred) {
     auto inputTy = llvm::cast<::kunir::TsType>(operands[0].getType());
     inferred.push_back(
@@ -50,7 +50,7 @@ public:
   static mlir::LogicalResult inferReturnTypes(
       mlir::MLIRContext *ctx, std::optional<mlir::Location>,
       mlir::ValueRange, mlir::DictionaryAttr,
-      mlir::PropertyRef, mlir::RegionRange,
+      mlir::OpaqueProperties , mlir::RegionRange,
       llvm::SmallVectorImpl<mlir::Type> &inferred) {
     inferred.push_back(
         ::kunir::TsType::get(ctx, mlir::IntegerType::get(ctx, 1), 1));

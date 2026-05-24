@@ -169,7 +169,9 @@ static LogicalResult convertFuncSignature(kunir::FuncOp fn) {
       b, loc, fn.getSymName(), FunctionType::get(ctx, newArgTypes, {}));
   // Mark as a kernel (sets the op-level `kernel` attribute) so that
   // convert-gpu-to-nvvm tags the resulting llvm.func with `nvvm.kernel`.
-  newFunc.setKernelAttr(UnitAttr::get(ctx));
+  // newFunc.setKernelAttr(UnitAttr::get(ctx));
+  newFunc->setAttr(gpu::GPUDialect::getKernelFuncAttrName(),
+                            UnitAttr::get(ctx));
   setFuncTargetSpec (newFunc, fn.getTargetSpecAttr());
   setFuncInputNames (newFunc, fn.getInputNames());
   setFuncOutputNames(newFunc, fn.getOutputNames());
