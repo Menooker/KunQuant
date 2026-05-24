@@ -53,6 +53,8 @@ jobs:
             -DLLVM_TARGETS_TO_BUILD="NVPTX" \
             -DCMAKE_BUILD_TYPE=MinSizeRel \
             -DLLVM_BUILD_TOOLS=OFF \
+            -DLLVM_BUILD_TESTS=ON \
+            -DLLVM_INSTALL_UTILS=ON \
             -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/build-static/install
 
       - name: Configure (dynamic)
@@ -63,10 +65,12 @@ jobs:
             -DLLVM_TARGETS_TO_BUILD="NVPTX" \
             -DCMAKE_BUILD_TYPE=MinSizeRel \
             -DLLVM_BUILD_TOOLS=OFF \
-            -DMLIR_BUILD_LLVM_DYLIB=ON \
-            -DMLIR_LINK_LLVM_DYLIB=ON \
+            -DMLIR_BUILD_MLIR_DYLIB=ON \
+            -DMLIR_LINK_MLIR_DYLIB=ON \
             -DLLVM_BUILD_LLVM_DYLIB=ON \
             -DLLVM_LINK_LLVM_DYLIB=ON \
+            -DLLVM_BUILD_TESTS=ON \
+            -DLLVM_INSTALL_UTILS=ON \
             -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/build-dynamic/install
 
       - name: Build and install
