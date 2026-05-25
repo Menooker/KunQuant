@@ -12,6 +12,7 @@
 #include <cuda.h>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -44,6 +45,27 @@ struct GraphPlan {
   // allocation node per logical intermediate instead.
   std::vector<int> intermediateBufToSlot;
   int peakIntermediateSlots = 0;
+};
+
+// Context-local immutable runtime state shared by cloned Executables.
+// Per-Executable mutable state (intermediate slot buffers and CUDA Graph
+// launch cache) intentionally stays on Executable.
+struct LoadedExecutable {
+  explicit LoadedExecutable(std::shared_ptr<const ExecutableData> data);
+  ~LoadedExecutable() noexcept;
+
+  LoadedExecutable(const LoadedExecutable &) = delete;
+  LoadedExecutable &operator=(const LoadedExecutable &) = delete;
+  LoadedExecutable(LoadedExecutable &&) = delete;
+  LoadedExecutable &operator=(LoadedExecutable &&) = delete;
+
+  std::shared_ptr<const ExecutableData> data;
+  GraphPlan plan;
+
+  CUmodule cuModule = nullptr;
+  CUmodule csRankModule = nullptr;
+  CUmodule csScaleModule = nullptr;
+  std::vector<CUfunction> cuFuncs;  ///< parallel to data->kernels
 };
 
 struct ChunkPlan {

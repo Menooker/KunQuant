@@ -416,17 +416,17 @@ pyCompile(PyModule &pm,
   opts.optLevel    = optLevel;
   opts.toolkitPath = toolkitPath;
 
-  kun_cuda::ExecutableData data;
-  if (failed(kungpu::compileKunIrToExecutable(pm.module.get(), opts, data)))
+  auto data = std::make_shared<kun_cuda::ExecutableData>();
+  if (failed(kungpu::compileKunIrToExecutable(pm.module.get(), opts, *data)))
     throw std::runtime_error("KunMLIR.compile failed");
 
   // Append external (pre-compiled, runtime-dispatched) kernels.  The
   // MLIR pipeline never saw them; they're fabricated here from the
   // descriptor list the Python frontend collected.
   for (nb::handle obj : externalKernels)
-    data.kernels.push_back(parseExternalKernel(obj));
+    data->kernels.push_back(parseExternalKernel(obj));
 
-  if (data.kernels.empty())
+  if (data->kernels.empty())
     throw std::runtime_error(
         "KunMLIR.compile: no kernels (neither MLIR-emitted nor "
         "external) — refusing to build an empty Executable");
@@ -437,24 +437,24 @@ pyCompile(PyModule &pm,
   // kernels they fix warpsPerCta via their kungpu.target_spec, and we
   // trust that over the parameter (and ignore the parameter).
   bool anyJit = false;
-  for (const auto &k : data.kernels)
+  for (const auto &k : data->kernels)
     if (k.kind == kun_cuda::KernelKind::Jit) { anyJit = true; break; }
   if (!anyJit) {
     if (warpsPerCta <= 0)
       throw std::runtime_error(
           "KunMLIR.compile: warps_per_cta must be positive when every "
           "kernel is external; got " + std::to_string(warpsPerCta));
-    data.warpsPerCta = warpsPerCta;
+    data->warpsPerCta = warpsPerCta;
   }
 
   // Graph topology is a runtime concern — fill it in here, just before
   // handing off to Executable's ctor (which validates + plans).
-  data.graphInputs  = graphInputs;
-  data.graphOutputs = graphOutputs;
+  data->graphInputs  = graphInputs;
+  data->graphOutputs = graphOutputs;
   for (auto item : outputUnreliable) {
     auto name = nb::cast<std::string>(item.first);
     auto val  = nb::cast<int64_t>(item.second);
-    data.outputUnreliable[name] = val;
+    data->outputUnreliable[name] = val;
   }
   return std::make_unique<kun_cuda::Executable>(std::move(data));
 }
@@ -529,6 +529,12 @@ NB_MODULE(KunMLIR, m) {
               const auto &b = e.data().cubin;
               return nb::bytes(b.data(), b.size());
             })
+      .def("clone",
+            [](const kun_cuda::Executable &e) {
+              return e.clone();
+            },
+            "Return a new Executable with independent launch state while "
+            "sharing immutable compile data and loaded CUDA modules.")
       .def("getOutputUnreliableCount",
             &kun_cuda::Executable::outputUnreliable,
             nb::rv_policy::reference_internal,

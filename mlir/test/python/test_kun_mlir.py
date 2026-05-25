@@ -93,6 +93,11 @@ def main() -> int:
     assert exe.warps_per_cta == 4
     assert exe.vector_size   == 1
 
+    clone = exe.clone()
+    assert clone.kernel_names == exe.kernel_names
+    assert clone.input_names  == exe.input_names
+    assert clone.output_names == exe.output_names
+
     # Run the kernel for two num_stocks values:
     #  - one that's a multiple of (warps_per_cta * 32 * vector_size) — no
     #    tail block;
@@ -101,9 +106,10 @@ def main() -> int:
     block_x = exe.warps_per_cta * 32 * exe.vector_size
     rng = np.random.default_rng(0)
     rc = 0
-    for label, S in [("aligned", args.num_stocks),
-                      ("unaligned (tail block)",
-                       args.num_stocks + (block_x // 2 + 7))]:
+    for run_exe, label, S in [
+            (exe, "aligned", args.num_stocks),
+            (clone, "unaligned clone (tail block)",
+             args.num_stocks + (block_x // 2 + 7))]:
         T = args.time_length
         print()
         is_aligned = (S % block_x == 0)
@@ -116,7 +122,7 @@ def main() -> int:
         b   = cp.asarray(b_h)
         out = cp.zeros((T, S), dtype=cp.float32)
         executor = KunMLIR.Executor()
-        executor.runGraph(exe,
+        executor.runGraph(run_exe,
                           inputs={"a": a, "b": b},
                           outputs={"sum": out})
         # No explicit synchronize: default-stream Executor + cupy's

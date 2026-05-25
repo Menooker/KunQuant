@@ -341,16 +341,18 @@ void Executable::launchCudaGraphOnStream(
     ensureNoInFlight(*cudaGraphState_, "rebuilding");
     resetCudaGraphState();
     cudaGraphState_ = std::make_unique<CudaGraphLaunchState>();
-    buildCudaGraphState(*plan_, data_, cuFuncs_, *cudaGraphState_,
+    buildCudaGraphState(loaded_->plan, *data_, loaded_->cuFuncs,
+                        *cudaGraphState_,
                         exec, timeLength, numStocks, args,
                         mask, minChunkWarmupFactor, smFillFactor);
   } else {
     ensureNoInFlight(*cudaGraphState_, "updating");
     CudaGraphLaunchParams launch = makeLaunchParams(
-        *plan_, data_, *cudaGraphState_, exec, timeLength, numStocks, args,
+        loaded_->plan, *data_, *cudaGraphState_, exec, timeLength, numStocks, args,
         mask, minChunkWarmupFactor, smFillFactor);
     if (!sameLaunchParams(*cudaGraphState_->cachedLaunchParams, launch)) {
-      updateCudaGraphKernelParams(*plan_, data_, cuFuncs_, *cudaGraphState_,
+      updateCudaGraphKernelParams(loaded_->plan, *data_, loaded_->cuFuncs,
+                                  *cudaGraphState_,
                                   *cudaGraphState_->cachedLaunchParams,
                                   launch);
       cudaGraphState_->cachedLaunchParams = std::move(launch);

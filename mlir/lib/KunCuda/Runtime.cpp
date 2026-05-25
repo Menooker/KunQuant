@@ -996,7 +996,13 @@ static void validateKernelIO(const std::vector<KernelMeta> &kernels,
 // Executable
 //===----------------------------------------------------------------------===//
 
-Executable::Executable(ExecutableData &&data) : data_(std::move(data)) {
+LoadedExecutable::LoadedExecutable(std::shared_ptr<const ExecutableData> dataIn)
+    : data(std::move(dataIn)) {
+  if (!data)
+    throw std::runtime_error(
+        "kun_cuda::LoadedExecutable: ExecutableData pointer is null");
+  const ExecutableData &d = *data;
+
   // Require a primary context to already exist on the calling thread —
   // the caller's job to set one up (e.g. by allocating any device memory
   // through cupy / cudaMalloc).
@@ -1004,59 +1010,99 @@ Executable::Executable(ExecutableData &&data) : data_(std::move(data)) {
   checkCu(cuCtxGetCurrent(&cur), "cuCtxGetCurrent");
   if (!cur)
     throw std::runtime_error(
-        "kun_cuda::Executable: no current CUDA context.  Initialise the "
+        "kun_cuda::LoadedExecutable: no current CUDA context.  Initialise the "
         "driver first (e.g. allocate any device memory via cupy or "
         "cudaMalloc) before constructing an Executable.");
-  if (data_.kernels.empty())
+  if (d.kernels.empty())
     throw std::runtime_error(
         "kun_cuda::Executable: ExecutableData has no kernels");
-  if (data_.graphInputs.empty())
+  if (d.graphInputs.empty())
     throw std::runtime_error(
         "kun_cuda::Executable: graph_inputs must be non-empty");
-  if (data_.graphOutputs.empty())
+  if (d.graphOutputs.empty())
     throw std::runtime_error(
         "kun_cuda::Executable: graph_outputs must be non-empty");
 
   // ── Build the runtime plan ───────────────────────────────────────
-  BufTable tbl  = buildBufferIndices(data_.graphInputs, data_.graphOutputs,
-                                       data_.kernels);
-  KernelIO kio  = resolveKernelIO(data_.kernels, tbl);
-  validateGraph(data_.kernels, data_.graphOutputs, tbl, kio);
-  std::vector<int> order = topoSort(kio, static_cast<int>(data_.kernels.size()));
+  BufTable tbl  = buildBufferIndices(d.graphInputs, d.graphOutputs,
+                                       d.kernels);
+  KernelIO kio  = resolveKernelIO(d.kernels, tbl);
+  validateGraph(d.kernels, d.graphOutputs, tbl, kio);
+  std::vector<int> order = topoSort(kio, static_cast<int>(d.kernels.size()));
   SlotPlan slots = planSlots(order, tbl, kio);
 
-  plan_ = std::make_unique<GraphPlan>();
-  plan_->numBuffers          = tbl.numBuffers;
-  plan_->numGraphInputs      = tbl.numGraphInputs;
-  plan_->numGraphOutputs     = tbl.numGraphOutputs;
-  plan_->graphInputIdx       = std::move(tbl.graphInputIdx);
-  plan_->graphOutputIdx      = std::move(tbl.graphOutputIdx);
-  plan_->kernelInputBufs     = std::move(kio.kernelInputBufs);
-  plan_->kernelOutputBufs    = std::move(kio.kernelOutputBufs);
-  plan_->producerKernel      = std::move(kio.producerKernel);
-  plan_->launchOrder         = std::move(order);
-  plan_->intermediateBufToSlot = std::move(slots.intermediateBufToSlot);
-  plan_->peakIntermediateSlots = slots.peakIntermediateSlots;
+  plan.numBuffers          = tbl.numBuffers;
+  plan.numGraphInputs      = tbl.numGraphInputs;
+  plan.numGraphOutputs     = tbl.numGraphOutputs;
+  plan.graphInputIdx       = std::move(tbl.graphInputIdx);
+  plan.graphOutputIdx      = std::move(tbl.graphOutputIdx);
+  plan.kernelInputBufs     = std::move(kio.kernelInputBufs);
+  plan.kernelOutputBufs    = std::move(kio.kernelOutputBufs);
+  plan.producerKernel      = std::move(kio.producerKernel);
+  plan.launchOrder         = std::move(order);
+  plan.intermediateBufToSlot = std::move(slots.intermediateBufToSlot);
+  plan.peakIntermediateSlots = slots.peakIntermediateSlots;
 
   // ── Per-kernel I/O arity validation ──────────────────────────────
   // Catches mis-wired external kernels (which have a fixed signature)
   // at construction time, well before the launch path.
-  validateKernelIO(data_.kernels,
-                    plan_->kernelInputBufs, plan_->kernelOutputBufs);
+  validateKernelIO(d.kernels, plan.kernelInputBufs, plan.kernelOutputBufs);
 
   // ── Load cubin(s) + resolve every kernel symbol ──────────────────
-  loadJitCubin(data_, cuModule_);
-  loadExternalCsPtxIfNeeded(data_.kernels, csRankModule_, csScaleModule_);
+  try {
+    loadJitCubin(d, cuModule);
+    loadExternalCsPtxIfNeeded(d.kernels, csRankModule, csScaleModule);
 
-  cuFuncs_.resize(data_.kernels.size(), nullptr);
-  for (size_t i = 0; i < data_.kernels.size(); ++i) {
-    cuFuncs_[i] = resolveOneKernelSymbol(data_.kernels[i],
-                                          cuModule_, csRankModule_,
-                                          csScaleModule_);
+    cuFuncs.resize(d.kernels.size(), nullptr);
+    for (size_t i = 0; i < d.kernels.size(); ++i) {
+      cuFuncs[i] = resolveOneKernelSymbol(d.kernels[i],
+                                          cuModule, csRankModule,
+                                          csScaleModule);
+    }
+
+    // ── Opt external kernels into the device's full dynamic smem cap ──
+    optInExternalSmemMax(d.kernels, cuFuncs);
+  } catch (...) {
+    if (cuModule)
+      cuModuleUnload(cuModule);
+    if (csRankModule)
+      cuModuleUnload(csRankModule);
+    if (csScaleModule)
+      cuModuleUnload(csScaleModule);
+    cuModule = nullptr;
+    csRankModule = nullptr;
+    csScaleModule = nullptr;
+    throw;
   }
+}
 
-  // ── Opt external kernels into the device's full dynamic smem cap ──
-  optInExternalSmemMax(data_.kernels, cuFuncs_);
+LoadedExecutable::~LoadedExecutable() noexcept {
+  if (cuModule)
+    cuModuleUnload(cuModule);
+  if (csRankModule)
+    cuModuleUnload(csRankModule);
+  if (csScaleModule)
+    cuModuleUnload(csScaleModule);
+}
+
+Executable::Executable(std::shared_ptr<const ExecutableData> data)
+    : data_(std::move(data)),
+      loaded_(std::make_shared<LoadedExecutable>(data_)) {}
+
+Executable::Executable(std::shared_ptr<const ExecutableData> data,
+                       std::shared_ptr<LoadedExecutable> loaded)
+    : data_(std::move(data)), loaded_(std::move(loaded)) {
+  if (!data_)
+    throw std::runtime_error(
+        "kun_cuda::Executable: ExecutableData pointer is null");
+  if (!loaded_)
+    throw std::runtime_error(
+        "kun_cuda::Executable: LoadedExecutable pointer is null");
+}
+
+std::unique_ptr<Executable> Executable::clone() const {
+  return std::unique_ptr<Executable>(
+      new Executable(data_, loaded_));
 }
 
 Executable::~Executable() {
@@ -1064,12 +1110,6 @@ Executable::~Executable() {
   // out of a destructor.
   resetCudaGraphState();
   freeSlotPool();
-  if (cuModule_)
-    cuModuleUnload(cuModule_);
-  if (csRankModule_)
-    cuModuleUnload(csRankModule_);
-  if (csScaleModule_)
-    cuModuleUnload(csScaleModule_);
 }
 
 void Executable::freeSlotPool() {
@@ -1082,19 +1122,19 @@ void Executable::freeSlotPool() {
 
 void Executable::ensureSlotPool(int64_t timeLength, int64_t numStocks) {
   if (timeLength == cachedT_ && numStocks == cachedS_ &&
-      static_cast<int>(slotBufs_.size()) == plan_->peakIntermediateSlots)
+      static_cast<int>(slotBufs_.size()) == loaded_->plan.peakIntermediateSlots)
     return;
   freeSlotPool();
-  if (plan_->peakIntermediateSlots == 0) {
+  if (loaded_->plan.peakIntermediateSlots == 0) {
     cachedT_ = timeLength;
     cachedS_ = numStocks;
     return;
   }
   size_t bytesPerSlot = static_cast<size_t>(timeLength) *
                           static_cast<size_t>(numStocks) *
-                          bytesPerElem(data_.dtype);
-  slotBufs_.resize(plan_->peakIntermediateSlots, 0);
-  for (int i = 0; i < plan_->peakIntermediateSlots; ++i) {
+                          bytesPerElem(data_->dtype);
+  slotBufs_.resize(loaded_->plan.peakIntermediateSlots, 0);
+  for (int i = 0; i < loaded_->plan.peakIntermediateSlots; ++i) {
     CUdeviceptr p = 0;
     checkCu(cuMemAlloc(&p, bytesPerSlot), "cuMemAlloc(intermediate slot)");
     slotBufs_[i] = static_cast<uintptr_t>(p);
@@ -1108,11 +1148,11 @@ void Executable::ensureSlotPool(int64_t timeLength, int64_t numStocks) {
 //===----------------------------------------------------------------------===//
 
 const std::vector<int> &Executable::launchOrder() const noexcept {
-  return plan_->launchOrder;
+  return loaded_->plan.launchOrder;
 }
-int Executable::numBuffers() const noexcept { return plan_->numBuffers; }
+int Executable::numBuffers() const noexcept { return loaded_->plan.numBuffers; }
 int Executable::peakIntermediateSlots() const noexcept {
-  return plan_->peakIntermediateSlots;
+  return loaded_->plan.peakIntermediateSlots;
 }
 
 void Executable::launchOnStream(
@@ -1127,7 +1167,7 @@ void Executable::launchOnStream(
     throw std::runtime_error(
         "kun_cuda::launchOnStream: Executor pointer is null");
 
-  validateLaunchInputs(data_, timeLength, numStocks, mask);
+  validateLaunchInputs(*data_, timeLength, numStocks, mask);
 
   if (mode == LaunchMode::CudaGraph) {
     launchCudaGraphOnStream(exec, timeLength, numStocks, args,
@@ -1144,10 +1184,10 @@ void Executable::launchOnStream(
 
   // ── Map user args + slot pool into a flat buffer-index → ptr ─────
   const std::vector<uintptr_t> bufPtrs =
-      resolveBufferPointers(*plan_, data_, args, slotBufs_);
+      resolveBufferPointers(loaded_->plan, *data_, args, slotBufs_);
 
   std::vector<KernelLaunchDesc> descs =
-      buildKernelLaunchDescs(*plan_, data_, cuFuncs_,
+      buildKernelLaunchDescs(loaded_->plan, *data_, loaded_->cuFuncs,
                              timeLength, numStocks, bufPtrs,
                              mask, minChunkWarmupFactor, smFillFactor,
                              devMaxSmemBytes, numSMs);

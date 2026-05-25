@@ -54,6 +54,11 @@ namespace kun_cuda {
 /// producer maps, etc.  Fully defined in Runtime.cpp.
 struct GraphPlan;
 
+/// Internal: context-local loaded CUDA modules, CUfunctions, and resolved
+/// graph plan.  Shared by cloned Executables; fully defined in the private
+/// runtime implementation.
+struct LoadedExecutable;
+
 /// Internal: CUDA Graph mode state.  Kept behind a pointer because normal
 /// launch mode does not need any graph objects.
 struct CudaGraphLaunchState;
@@ -166,13 +171,15 @@ struct ExecutableData {
 ///   6. cuModuleLoadData + cuModuleGetFunction × N on the calling
 ///      thread's primary CUDA context (which must already exist).
 ///
-/// Destruction calls `cuModuleUnload` and frees the slot pool.
+/// Destruction frees only this Executable's per-launch slot pool / CUDA graph
+/// state.  CUDA modules live in a shared LoadedExecutable and are unloaded
+/// when the last Executable sharing it is destroyed.
 class Executable {
 public:
   /// Throws std::runtime_error on driver errors, missing CUDA context,
-  /// or graph-validation failures.  Takes an rvalue — caller `std::move`s
-  /// the data in.
-  explicit Executable(ExecutableData &&data);
+  /// or graph-validation failures.  `ExecutableData` is immutable after
+  /// compile and may be shared by multiple Executables.
+  explicit Executable(std::shared_ptr<const ExecutableData> data);
   ~Executable();
 
   // Non-copyable, non-movable — wrap in unique_ptr / shared_ptr if you
@@ -183,16 +190,23 @@ public:
   Executable &operator=(Executable &&)      = delete;
 
   // ── Accessors (compile-time data) ─────────────────────────────────
-  const ExecutableData &data() const noexcept { return data_; }
-  const std::vector<std::string> &graphInputs()  const noexcept { return data_.graphInputs; }
-  const std::vector<std::string> &graphOutputs() const noexcept { return data_.graphOutputs; }
-  int64_t warpsPerCta() const noexcept { return data_.warpsPerCta; }
-  int64_t vectorSize()  const noexcept { return data_.vectorSize; }
-  Datatype dtype()      const noexcept { return data_.dtype; }
-  size_t  numKernels()  const noexcept { return data_.kernels.size(); }
-  const std::map<std::string, int64_t> &outputUnreliable() const noexcept {
-    return data_.outputUnreliable;
+  const ExecutableData &data() const noexcept { return *data_; }
+  std::shared_ptr<const ExecutableData> dataPtr() const noexcept {
+    return data_;
   }
+  const std::vector<std::string> &graphInputs()  const noexcept { return data_->graphInputs; }
+  const std::vector<std::string> &graphOutputs() const noexcept { return data_->graphOutputs; }
+  int64_t warpsPerCta() const noexcept { return data_->warpsPerCta; }
+  int64_t vectorSize()  const noexcept { return data_->vectorSize; }
+  Datatype dtype()      const noexcept { return data_->dtype; }
+  size_t  numKernels()  const noexcept { return data_->kernels.size(); }
+  const std::map<std::string, int64_t> &outputUnreliable() const noexcept {
+    return data_->outputUnreliable;
+  }
+
+  /// Create a new Executable with independent mutable launch state while
+  /// sharing immutable ExecutableData and loaded CUDA modules / functions.
+  std::unique_ptr<Executable> clone() const;
 
   // ── Accessors (runtime-resolved plan) ─────────────────────────────
   // Defined out-of-line so the header doesn't need GraphPlan's layout.
@@ -274,17 +288,12 @@ private:
       double smFillFactor);
   void resetCudaGraphState() noexcept;
 
-  ExecutableData data_;
-  std::unique_ptr<GraphPlan> plan_;          ///< pImpl — defined in Runtime.cpp
-  std::unique_ptr<CudaGraphLaunchState> cudaGraphState_;
+  Executable(std::shared_ptr<const ExecutableData> data,
+             std::shared_ptr<LoadedExecutable> loaded);
 
-  CUmodule cuModule_ = nullptr;
-  /// Modules holding pre-compiled cross-sectional PTX.  Loaded at
-  /// construction time iff a matching external kernel is present; null
-  /// otherwise.
-  CUmodule csRankModule_ = nullptr;
-  CUmodule csScaleModule_ = nullptr;
-  std::vector<CUfunction> cuFuncs_;          ///< parallel to data_.kernels
+  std::shared_ptr<const ExecutableData> data_;
+  std::shared_ptr<LoadedExecutable> loaded_;
+  std::unique_ptr<CudaGraphLaunchState> cudaGraphState_;
 
   // Lazily allocated intermediate buffers, one CUdeviceptr per slot
   // (stored as uintptr_t to keep the header CUDA-free).
