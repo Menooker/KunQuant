@@ -121,7 +121,7 @@ jobs:
       with:
         python-version: '3.12'
         cache: 'pip'
-    - name: Install CUDA 13.2 and build dependencies
+    - name: Install build dependencies
       run: |
         set -eux
         sudo apt-get update
@@ -136,6 +136,16 @@ jobs:
           ninja-build \
           pkg-config \
           zlib1g-dev
+    - name: Cache CUDA 13.2 toolkit
+      id: cache-cuda
+      uses: actions/cache@v4
+      with:
+        path: .cache/cuda-13.2
+        key: ${{ runner.os }}-${{ runner.arch }}-cuda-toolkit-13.2-v1
+    - name: Install CUDA 13.2
+      if: steps.cache-cuda.outputs.cache-hit != 'true'
+      run: |
+        set -eux
         curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin \
           -o /tmp/cuda-ubuntu2404.pin
         sudo install -m 0644 /tmp/cuda-ubuntu2404.pin /etc/apt/preferences.d/cuda-repository-pin-600
@@ -146,6 +156,15 @@ jobs:
           | sudo tee /etc/apt/sources.list.d/cuda-ubuntu2404-x86_64.list
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends cuda-toolkit-13-2
+        mkdir -p .cache
+        sudo tar -C /usr/local -cf "$RUNNER_TEMP/cuda-13.2.tar" cuda-13.2
+        tar -C .cache -xf "$RUNNER_TEMP/cuda-13.2.tar"
+    - name: Prepare CUDA 13.2
+      run: |
+        set -eux
+        if [ ! -d /usr/local/cuda-13.2 ]; then
+          sudo ln -s "$GITHUB_WORKSPACE/.cache/cuda-13.2" /usr/local/cuda-13.2
+        fi
         sudo ln -sf libcuda.so /usr/local/cuda-13.2/lib64/stubs/libcuda.so.1
         /usr/local/cuda-13.2/bin/nvcc --version
     - name: Install Python dependencies
