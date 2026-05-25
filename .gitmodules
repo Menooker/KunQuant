@@ -1,3 +1,6 @@
 [submodule "3rdparty/nanobind"]
 	path = 3rdparty/nanobind
 	url = https://github.com/wjakob/nanobind
+[submodule "3rdparty/nlohmann_json"]
+	path = 3rdparty/nlohmann_json
+	url = https://github.com/nlohmann/json

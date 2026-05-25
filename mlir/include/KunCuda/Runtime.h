@@ -35,9 +35,9 @@
 #pragma once
 
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -150,7 +150,16 @@ struct ExecutableData {
   /// leading time steps of each Output buffer to skip.  Populated by
   /// the Python frontend (which has the pre-partition `infer_window`
   /// snapshot); empty when not supplied.
-  std::map<std::string, int64_t> outputUnreliable;
+  std::unordered_map<std::string, int64_t> outputUnreliable;
+
+  /// Write this artifact as `<dir>/<name>.json` plus `<dir>/<name>.cubin`.
+  /// The JSON metadata stores only the sibling cubin filename, never an
+  /// arbitrary cubin path.
+  void saveToFiles(const std::string &dir, const std::string &name) const;
+
+  /// Load `<dir>/<name>.json` and `<dir>/<name>.cubin` into a new data object.
+  static std::shared_ptr<ExecutableData>
+  loadFromFiles(const std::string &dir, const std::string &name);
 };
 
 //===----------------------------------------------------------------------===//
@@ -200,7 +209,8 @@ public:
   int64_t vectorSize()  const noexcept { return data_->vectorSize; }
   Datatype dtype()      const noexcept { return data_->dtype; }
   size_t  numKernels()  const noexcept { return data_->kernels.size(); }
-  const std::map<std::string, int64_t> &outputUnreliable() const noexcept {
+  const std::unordered_map<std::string, int64_t> &
+  outputUnreliable() const noexcept {
     return data_->outputUnreliable;
   }
 

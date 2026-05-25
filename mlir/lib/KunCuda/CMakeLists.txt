@@ -1,7 +1,5 @@
-# libKunCudaRuntime.so — pure CUDA runtime, decoupled from the MLIR
-# compiler library and the Python binding.  Holds the ExecutableData
-# struct, the Executable class (cuModuleLoadData / cuLaunchKernel) and
-# nothing else.
+# libKunCudaRuntime.so — CUDA runtime, decoupled from the MLIR compiler
+# library and the Python binding.
 
 # ── Locate the CUDA toolkit ──────────────────────────────────────────
 # Standard CMake CUDA discovery.  Honours, in order:
@@ -95,6 +93,7 @@ foreach(_cu IN LISTS _kun_cu_sources)
 endforeach()
 
 add_library(KunCudaRuntime SHARED
+    ExecutableData.cpp
     Runtime.cpp
     RuntimeCudaGraph.cpp
     ${_kun_ptx_embed_includes})
@@ -119,6 +118,11 @@ target_include_directories(KunCudaRuntime PUBLIC
 # Runtime.cpp #include's the generated <kernel>_ptx.inc files.
 target_include_directories(KunCudaRuntime PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}")
+
+# ExecutableData.cpp uses nlohmann/json for artifact metadata.  This is a
+# header-only third-party dependency kept private to the runtime library.
+target_include_directories(KunCudaRuntime SYSTEM PRIVATE
+    "${PROJECT_SOURCE_DIR}/3rdparty/nlohmann_json/include")
 
 # CUDA Driver API.  `CUDA::cuda_driver` is FindCUDAToolkit's imported
 # target wrapping `lib64/stubs/libcuda.so` with the right INCLUDE

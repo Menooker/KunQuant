@@ -16,8 +16,8 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
-#include <nanobind/stl/map.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/stl/unique_ptr.h>
 
@@ -459,6 +459,12 @@ pyCompile(PyModule &pm,
   return std::make_unique<kun_cuda::Executable>(std::move(data));
 }
 
+static std::unique_ptr<kun_cuda::Executable>
+pyLoadExecutable(const std::string &dir, const std::string &name) {
+  return std::make_unique<kun_cuda::Executable>(
+      kun_cuda::ExecutableData::loadFromFiles(dir, name));
+}
+
 } // namespace
 
 NB_MODULE(KunMLIR, m) {
@@ -491,6 +497,10 @@ NB_MODULE(KunMLIR, m) {
          "compile path goes straight to cubin.");
 
   nb::class_<kun_cuda::Executable>(m, "Executable")
+      .def_static("load_from_files", &pyLoadExecutable,
+            nb::arg("dir"), nb::arg("name"),
+            "Load an Executable from `<dir>/<name>.json` and "
+            "`<dir>/<name>.cubin`.")
       .def_prop_ro("input_names",   &kun_cuda::Executable::graphInputs,
             "Graph-level input names — match this against the keys of the "
             "args dict you pass to launch().")
@@ -535,6 +545,13 @@ NB_MODULE(KunMLIR, m) {
             },
             "Return a new Executable with independent launch state while "
             "sharing immutable compile data and loaded CUDA modules.")
+      .def("save_to_files",
+            [](const kun_cuda::Executable &e, const std::string &dir,
+               const std::string &name) {
+              e.data().saveToFiles(dir, name);
+            },
+            nb::arg("dir"), nb::arg("name"),
+            "Write `<dir>/<name>.json` and `<dir>/<name>.cubin`.")
       .def("getOutputUnreliableCount",
             &kun_cuda::Executable::outputUnreliable,
             nb::rv_policy::reference_internal,

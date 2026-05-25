@@ -10,8 +10,11 @@ Usage:
 
 from __future__ import annotations
 import argparse
+import json
 import sys
+import tempfile
 import textwrap
+from pathlib import Path
 
 
 SAMPLE_KUNIR = textwrap.dedent("""
@@ -98,7 +101,24 @@ def main() -> int:
     assert clone.input_names  == exe.input_names
     assert clone.output_names == exe.output_names
 
-    # Run the kernel for two num_stocks values:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        exe.save_to_files(tmpdir, "addsum")
+        metadata_path = Path(tmpdir) / "addsum.json"
+        cubin_path = Path(tmpdir) / "addsum.cubin"
+        assert metadata_path.exists()
+        assert cubin_path.exists()
+        with metadata_path.open("r", encoding="utf-8") as f:
+            metadata = json.load(f)
+        assert metadata["format"] == "kun_cuda_executable_data"
+        assert metadata["version"] == 1
+        assert metadata["cubin"] == "addsum.cubin"
+        loaded = KunMLIR.Executable.load_from_files(tmpdir, "addsum")
+    assert loaded.kernel_names == exe.kernel_names
+    assert loaded.input_names  == exe.input_names
+    assert loaded.output_names == exe.output_names
+
+    # Run original, cloned, and file-loaded executables over two num_stocks
+    # values:
     #  - one that's a multiple of (warps_per_cta * 32 * vector_size) — no
     #    tail block;
     #  - one that isn't — exercises the active-thread guard inserted by
@@ -109,7 +129,8 @@ def main() -> int:
     for run_exe, label, S in [
             (exe, "aligned", args.num_stocks),
             (clone, "unaligned clone (tail block)",
-             args.num_stocks + (block_x // 2 + 7))]:
+             args.num_stocks + (block_x // 2 + 7)),
+            (loaded, "loaded from files", args.num_stocks)]:
         T = args.time_length
         print()
         is_aligned = (S % block_x == 0)
