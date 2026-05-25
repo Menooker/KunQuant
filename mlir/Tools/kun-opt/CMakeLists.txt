@@ -14,7 +14,9 @@ target_link_libraries(kun-opt PRIVATE
   MLIRKunIrDialect
   MLIRKunGpuDialect
   MLIRKunIrToKunGpu
+)
 
+mlir_target_link_libraries(kun-opt PRIVATE
   # MLIR opt infrastructure
   MLIROptLib
 

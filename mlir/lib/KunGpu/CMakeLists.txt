@@ -15,6 +15,10 @@ add_mlir_dialect_library(MLIRKunGpuDialect
   MLIRKunIrOpsIncGen
 
   LINK_LIBS PUBLIC
+  MLIRKunIrDialect
+)
+
+mlir_target_link_libraries(MLIRKunGpuDialect PUBLIC
   MLIRIR
   MLIRPass
   MLIRFuncDialect
@@ -25,7 +29,6 @@ add_mlir_dialect_library(MLIRKunGpuDialect
   MLIRTransforms
   MLIRTransformUtils
   MLIRSideEffectInterfaces
-  MLIRKunIrDialect
   MLIRSCFToControlFlow
   MLIRControlFlowToLLVM
   MLIRArithToLLVM

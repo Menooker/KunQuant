@@ -14,8 +14,9 @@ add_mlir_dialect_library(MLIRKunIrDialect
   MLIRKunIrOpsIncGen
   MLIRKunIrInterfacesIncGen
   MLIRKunIrAttrsIncGen
+)
 
-  LINK_LIBS PUBLIC
+mlir_target_link_libraries(MLIRKunIrDialect PUBLIC
   MLIRIR
   MLIRFuncDialect
   MLIRSideEffectInterfaces
@@ -37,6 +38,9 @@ add_mlir_library(MLIRKunIrToKunGpu
   LINK_LIBS PUBLIC
   MLIRKunIrDialect
   MLIRKunGpuDialect
+)
+
+mlir_target_link_libraries(MLIRKunIrToKunGpu PUBLIC
   MLIRFuncDialect
   MLIRArithDialect
   MLIRMathDialect

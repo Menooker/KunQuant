@@ -44,6 +44,13 @@ target_link_libraries(KunMLIR PRIVATE
   MLIRKunGpuDialect
   MLIRKunIrToKunGpu
 
+  # Runtime side — owns cuda.h + libcuda; we just hand it ExecutableData
+  # and call launch().
+  KunCudaRuntime
+)
+
+mlir_target_link_libraries(KunMLIR PRIVATE
+  # Compiler side
   MLIRIR
   MLIRParser
   MLIRPass
@@ -74,8 +81,4 @@ target_link_libraries(KunMLIR PRIVATE
   # PtxBackend.cpp) + the NVVM target serializer it dispatches to.
   MLIRGPUTransforms
   MLIRNVVMTarget
-
-  # Runtime side — owns cuda.h + libcuda; we just hand it ExecutableData
-  # and call launch().
-  KunCudaRuntime
 )
