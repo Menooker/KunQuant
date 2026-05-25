@@ -116,8 +116,19 @@ add_custom_target(TestingTargets DEPENDS KunCApiTest KunTest KunRunner)
 option(KUN_BUILD_MLIR "Build MLIR backend with kunir/kungpu dialects" OFF)
 if(KUN_BUILD_MLIR)
   find_package(MLIR REQUIRED CONFIG)
+  find_package(CUDAToolkit REQUIRED)
   message(STATUS "Using MLIRConfig.cmake in: ${MLIR_DIR}")
   message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+
+  if(NOT CMAKE_CUDA_COMPILER)
+    set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}" CACHE FILEPATH
+        "nvcc used by CMake's CUDA-language support.")
+  endif()
+  get_filename_component(KUN_CUDA_TOOLKIT_ROOT
+                         "${CUDAToolkit_BIN_DIR}" DIRECTORY)
+  message(STATUS
+      "KunQuant MLIR CUDA toolkit = ${KUN_CUDA_TOOLKIT_ROOT} "
+      "(version ${CUDAToolkit_VERSION})")
 
   set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/bin)
   set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/lib)

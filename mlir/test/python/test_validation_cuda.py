@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# RUN: %python %s
+# REQUIRES: cuda-device
 """Negative tests for the KunMLIR launch-time validation path.
 
 The runtime consumes every input/output via DLPack (the protocol
@@ -257,10 +259,12 @@ def run_smem_cap_tests(target):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--target", default="sm_120")
+    ap.add_argument("--target", default=None)
     args = ap.parse_args()
 
     import cupy as cp
+    from KunQuant.jit.env import get_cuda_compute_capability
+    args.target = args.target or get_cuda_compute_capability()
     cp.cuda.Device(0).use()
     _ = cp.zeros((1,), dtype=cp.float32)
 

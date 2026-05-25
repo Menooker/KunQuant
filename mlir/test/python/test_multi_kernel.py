@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# RUN: %python %s
+# RUN: %python %s --use-cuda-graph
+# REQUIRES: cuda-device
 """End-to-end test for the v0 multi-kernel pipeline.
 
 Builds a graph with two kernels chained through one intermediate buffer:
@@ -47,16 +50,20 @@ gpu.module @kungpu_kernels {
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--target", default="sm_120")
+    ap.add_argument("--target", default=None)
     ap.add_argument("-T", "--time-length", type=int, default=64)
     ap.add_argument("-S", "--num-stocks", type=int, default=2048)
     ap.add_argument("--use-cuda-graph", action="store_true")
     args = ap.parse_args()
 
     from KunQuant.jit import KunMLIR
-    import cupy as cp
     from KunQuant.jit.cuda import find_cuda_toolkit
+    from KunQuant.jit.env import get_cuda_compute_capability
 
+    args.target = args.target or get_cuda_compute_capability()
+    toolkit = find_cuda_toolkit()
+
+    import cupy as cp
     cp.cuda.Device(0).use()
     _ = cp.zeros((1,), dtype=cp.float32)
 
@@ -66,7 +73,7 @@ def main() -> int:
                             graph_inputs=["a", "b", "c"],
                             graph_outputs=["out"],
                             gpu_arch=args.target, opt_level=3,
-                            toolkit_path=find_cuda_toolkit())
+                            toolkit_path=toolkit)
 
     print(f"  kernel_names           = {exe.kernel_names}")
     print(f"  num_kernels            = {exe.num_kernels}")

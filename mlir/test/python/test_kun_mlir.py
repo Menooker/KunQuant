@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
+# RUN: %python %s
 """End-to-end test for the `KunMLIR` Python bindings.
 
   parse → to_string → lower_to_ptx (debug only) → compile → launch
 
 Usage:
     PATH=$CUDA_BIN:$PATH PYTHONPATH=<build>/mlir/lib/Python \
-        kun python test_kun_mlir.py [--target sm_120]
+        kun python test_kun_mlir.py [--target sm_xx]
 """
 
 from __future__ import annotations
@@ -33,21 +34,18 @@ gpu.module @kungpu_kernels {
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--target", default="sm_120",
+    ap.add_argument("--target", default=None,
                      help="GPU compute capability (e.g. sm_120, sm_90, sm_80)")
     ap.add_argument("-T", "--time-length", type=int, default=64)
     ap.add_argument("-S", "--num-stocks", type=int, default=2048)
     args = ap.parse_args()
 
     from KunQuant.jit import KunMLIR
-    import cupy as cp
     import numpy as np
     from KunQuant.jit.cuda import find_cuda_toolkit
+    from utils import resolve_cuda_compute_capability
 
-    # Force-initialise the CUDA driver + create the primary context now,
-    # so subsequent KunMLIR.compile() / Executor.runGraph() find one.
-    cp.cuda.Device(0).use()
-    _ = cp.zeros((1,), dtype=cp.float32)
+    args.target, has_cuda_device = resolve_cuda_compute_capability(args.target)
 
     print(f"=== parse + to_string ===")
     mod = KunMLIR.parse(SAMPLE_KUNIR)
@@ -67,6 +65,18 @@ def main() -> int:
                                   toolkit_path=toolkit)
     assert "test_addsum" in ptx
     print(f"ok — produced {len(ptx)} bytes of PTX text")
+
+    if not has_cuda_device:
+        print()
+        print("skip — no CUDA device is visible; skipping Executable "
+              "construction and runGraph checks")
+        return 0
+
+    import cupy as cp
+    # Force-initialise the CUDA driver + create the primary context now,
+    # so subsequent KunMLIR.compile() / Executor.runGraph() find one.
+    cp.cuda.Device(0).use()
+    _ = cp.zeros((1,), dtype=cp.float32)
 
     print()
     print(f"=== compile (all-in-one) ===")

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# RUN: %python %s
+# REQUIRES: cuda-device
 """End-to-end test for the KunQuant Python-IR → MLIR → CUDA path.
 
 Builds a KunQuant Function with the high-level Op API, runs the same
@@ -740,7 +742,7 @@ def run_library(target: str, T: int, S: int) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--target", default="sm_120")
+    ap.add_argument("--target", default=None)
     # Defaults sized to comfortably trigger multi-chunk: T=128 with
     # warmup=5 (N) gives `cap_warmup = 128/(4*5) = 6` chunks; S=1024
     # gives `stock_tiles = 1024/(4*32) = 8`, so even on a small GPU
@@ -751,6 +753,8 @@ def main() -> int:
     args = ap.parse_args()
 
     import cupy as cp
+    from KunQuant.jit.env import get_cuda_compute_capability
+    args.target = args.target or get_cuda_compute_capability()
     cp.cuda.Device(0).use()
     _ = cp.zeros((1,), dtype=cp.float32)
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# RUN: %python %s
+# REQUIRES: cuda-device
 """End-to-end test for the windowed_temp lowering across both placements
 the memory-planning pass can choose:
 
@@ -89,7 +91,6 @@ def run_one(N: int, expected_placement: str, target: str,
               warps_per_cta: int = 4, smem_size: int = 49152,
               T: int = 64, S: int = 2048) -> int:
     from KunQuant.jit import KunMLIR
-    import cupy as cp
     from KunQuant.jit.cuda import find_cuda_toolkit
 
     print(f"=== N = {N}  ({expected_placement} temp buffer) ===")
@@ -97,6 +98,7 @@ def run_one(N: int, expected_placement: str, target: str,
 
     ir = build_ir(N, warps_per_cta=warps_per_cta, smem_size=smem_size)
     mod = KunMLIR.parse(ir)
+
     exe = KunMLIR.compile(mod,
                             graph_inputs=["a", "b"],
                             graph_outputs=["out"],
@@ -105,6 +107,7 @@ def run_one(N: int, expected_placement: str, target: str,
     print(f"  kernels={exe.kernel_names}  warps_per_cta={exe.warps_per_cta}  "
            f"vector_size={exe.vector_size}  cubin={len(exe.cubin)} bytes")
 
+    import cupy as cp
     # Random input.  T must be > N so we have at least one valid window.
     if T <= N:
         T = N + 32
@@ -143,10 +146,13 @@ def run_one(N: int, expected_placement: str, target: str,
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--target", default="sm_120")
+    ap.add_argument("--target", default=None)
     ap.add_argument("-T", "--time-length", type=int, default=64)
     ap.add_argument("-S", "--num-stocks", type=int, default=2048)
     args = ap.parse_args()
+
+    from KunQuant.jit.env import get_cuda_compute_capability
+    args.target = args.target or get_cuda_compute_capability()
 
     import cupy as cp
     cp.cuda.Device(0).use()

@@ -6,5 +6,9 @@ config.llvm_tools_dir = lit_config.substitute("@LLVM_TOOLS_BINARY_DIR@")
 config.mlir_tools_dir = lit_config.substitute("@MLIR_TOOLS_DIR@")
 config.kun_opt = lit_config.substitute("@KUN_OPT_BINARY@")
 config.obj_root = "@CMAKE_CURRENT_BINARY_DIR@"
+config.project_source_dir = lit_config.substitute("@PROJECT_SOURCE_DIR@")
+config.python_executable = lit_config.substitute("@PYTHON_EXECUTABLE@")
+config.llvm_lib_dir = lit_config.substitute("@LLVM_LIBRARY_DIRS@")
+config.cuda_toolkit_root = lit_config.substitute("@KUN_CUDA_TOOLKIT_ROOT@")
 
 lit_config.load_config(config, "@CMAKE_CURRENT_SOURCE_DIR@/lit.cfg.py")

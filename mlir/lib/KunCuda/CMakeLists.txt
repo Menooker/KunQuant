@@ -1,22 +1,9 @@
 # libKunCudaRuntime.so — CUDA runtime, decoupled from the MLIR compiler
 # library and the Python binding.
 
-# ── Locate the CUDA toolkit ──────────────────────────────────────────
-# Standard CMake CUDA discovery.  Honours, in order:
-#   1. -DCUDAToolkit_ROOT=<path> on the cmake command line
-#   2. $CUDAToolkit_ROOT, $CUDA_PATH, $CUDA_HOME env vars
-#   3. Standard install locations (/usr/local/cuda, …)
-# See the CMake docs for FindCUDAToolkit — same module the rest of the
-# ecosystem uses, no custom validation needed.
-#
-# We then point CMake's CUDA-language support at the same nvcc the
-# find_package result exposed, so `enable_language(CUDA)` doesn't pick
-# up a different toolkit off PATH.
-find_package(CUDAToolkit REQUIRED)
-if(NOT CMAKE_CUDA_COMPILER)
-  set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}" CACHE FILEPATH
-      "nvcc used by CMake's CUDA-language support.")
-endif()
+# ── CUDA language setup ──────────────────────────────────────────────
+# The root CMakeLists discovers CUDAToolkit once when KUN_BUILD_MLIR is
+# enabled.  Reuse its CMAKE_CUDA_COMPILER / CUDA::cuda_driver target here.
 enable_language(CUDA)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
@@ -25,11 +12,6 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 # covers every NVIDIA GPU CUDA 13 still supports.  Later GPUs run
 # the PTX via driver-JIT (cached system-wide in ~/.nv/ComputeCache).
 set(CMAKE_CUDA_ARCHITECTURES 75)
-
-get_filename_component(_kun_toolkit_root "${CUDAToolkit_BIN_DIR}" DIRECTORY)
-message(STATUS
-    "KunCudaRuntime: CUDA toolkit = ${_kun_toolkit_root} "
-    "(version ${CUDAToolkit_VERSION})")
 
 # ── Recipe: compile `.cu` → `.ptx` → embed as a C array ──────────────
 # Drop a new `kernels/<name>.cu` and the foreach below picks it up —

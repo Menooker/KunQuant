@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# RUN: %python %s
+# REQUIRES: cuda-device
 """End-to-end test for the cs_rank GPU dispatch path.
 
 Cross-sectional rank (`KunQuant.Op.Rank`) is special on the GPU: it
@@ -222,12 +224,14 @@ def _run_cs_rank_mixed(target: str, T: int, S: int, *, seed: int) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--target", default="sm_120")
+    ap.add_argument("--target", default=None)
     ap.add_argument("-T", "--time-length", type=int, default=8)
     ap.add_argument("-S", "--num-stocks", type=int, default=257)
     args = ap.parse_args()
 
     import cupy as cp
+    from KunQuant.jit.env import get_cuda_compute_capability
+    args.target = args.target or get_cuda_compute_capability()
     cp.cuda.Device(0).use()
     _ = cp.zeros((1,), dtype=cp.float32)
 
