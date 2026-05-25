@@ -85,14 +85,13 @@ add_library(KunCudaRuntime SHARED
 # export its public class methods so downstream .so's (KunMLIR, host
 # runners, …) can resolve them at load time.
 #
-# We also put the .so next to the KunMLIR Python module, mirroring the
-# existing project pattern (INSTALL_RPATH=$ORIGIN at the top level): all
-# co-distributed shared libs live in one directory and find each other
-# as siblings.
+# We also put the .so next to the KunMLIR Python module
+# (INSTALL_RPATH=$ORIGIN at the top level): all co-distributed shared libs
+# live in one directory and find each other as siblings.
 set_target_properties(KunCudaRuntime PROPERTIES
     CXX_VISIBILITY_PRESET default
     VISIBILITY_INLINES_HIDDEN OFF
-    LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/KunQuant/jit")
+    LIBRARY_OUTPUT_DIRECTORY "${KUN_MLIR_PYTHON_PACKAGE_DIR}")
 
 target_include_directories(KunCudaRuntime PUBLIC
     "${PROJECT_SOURCE_DIR}/mlir/include")

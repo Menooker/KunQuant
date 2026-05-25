@@ -17,7 +17,7 @@ def prepend_env(name, entries):
     config.environment[name] = os.pathsep.join(entries)
 
 # Python GPU tests import the in-tree KunQuant package and load the freshly
-# built extension module from KunQuant/jit.
+# built KunQuant-MLIR extension module from KunQuantMLIR/.
 prepend_env("PYTHONPATH", [config.project_source_dir])
 
 # KunMLIR.abi3.so links against the downloaded LLVM/MLIR shared libraries.

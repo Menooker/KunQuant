@@ -18,14 +18,12 @@ nanobind_add_module(KunMLIR STABLE_ABI
   PyModule.cpp
 )
 
-# Drop the .so directly into the source tree's KunQuant/jit/ so it
-# imports as `KunQuant.jit.KunMLIR` (alongside cuda.py) without any
-# PYTHONPATH gymnastics.  libKunCudaRuntime.so is co-located there too
-# (see mlir/lib/KunCuda/CMakeLists.txt) so the $ORIGIN rpath resolves
-# the sibling at load time — same pattern KunRunner ↔ KunRuntime use
-# under KunQuant/runner/.
+# Drop the .so directly into the KunQuant-MLIR Python package.  The
+# libKunCudaRuntime.so runtime is co-located there too (see
+# mlir/lib/KunCuda/CMakeLists.txt) so the $ORIGIN rpath resolves the sibling
+# at load time.
 set_target_properties(KunMLIR PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/KunQuant/jit")
+    LIBRARY_OUTPUT_DIRECTORY "${KUN_MLIR_PYTHON_PACKAGE_DIR}")
 
 target_link_libraries(KunMLIR PRIVATE
   # cuda.h + libcuda stub — the binding's runGraph wrapper calls

@@ -11,3 +11,5 @@ dist/*
 *.dll
 *.lib
 .codex
+python/kunquant_mlir/build/*
+python/kunquant_mlir/KunQuant_MLIR.egg-info/*

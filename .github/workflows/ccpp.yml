@@ -199,6 +199,7 @@ jobs:
       run: |
         cmake -S . -B build/mlir-ci -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
+          -DKUN_BUILD_CPU_RUNNER=OFF \
           -DKUN_BUILD_MLIR=ON \
           -DLLVM_DIR="$LLVM_PREFIX/lib/cmake/llvm" \
           -DMLIR_DIR="$LLVM_PREFIX/lib/cmake/mlir" \
@@ -212,3 +213,17 @@ jobs:
         CUDA_PATH: /usr/local/cuda-13.2
         CUDA_HOME: /usr/local/cuda-13.2
       run: cmake --build build/mlir-ci --target check-kun-mlir --parallel 4
+    - name: Check KunQuant-MLIR imports
+      env:
+        CUDA_PATH: /usr/local/cuda-13.2
+        CUDA_HOME: /usr/local/cuda-13.2
+      run: |
+        export LD_LIBRARY_PATH="$LLVM_PREFIX/lib:/usr/local/cuda-13.2/lib64/stubs:${LD_LIBRARY_PATH:-}"
+        python - <<'PY'
+        import KunQuantMLIR.KunMLIR as direct
+        from KunQuant.jit import KunMLIR as compat
+        import KunQuant.jit.KunMLIR as submodule
+        assert direct.__file__ == compat.__file__ == submodule.__file__
+        assert "/KunQuantMLIR/" in direct.__file__
+        print(direct.__file__)
+        PY
