@@ -16,6 +16,7 @@ configure_lit_site_cfg(
 
 set(KUN_MLIR_TEST_DEPENDS
   kun-opt
+  KunMLIR
   FileCheck
 )
 

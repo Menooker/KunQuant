@@ -111,3 +111,85 @@ jobs:
       working-directory: ./
       run: |
         python ./tests/test_alpha158.py --inputs ./input.npz --ref ./alpha158.npz --action run_avx2
+  cuda-mlir:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+    - name: Install CUDA 13.2 and build dependencies
+      run: |
+        set -eux
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential \
+          ca-certificates \
+          cmake \
+          curl \
+          git \
+          libxml2-dev \
+          libzstd-dev \
+          ninja-build \
+          pkg-config \
+          zlib1g-dev
+        curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404.pin \
+          -o /tmp/cuda-ubuntu2404.pin
+        sudo install -m 0644 /tmp/cuda-ubuntu2404.pin /etc/apt/preferences.d/cuda-repository-pin-600
+        curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-ubuntu2404-keyring.gpg \
+          -o /tmp/cuda-archive-keyring.gpg
+        sudo install -m 0644 /tmp/cuda-archive-keyring.gpg /usr/share/keyrings/cuda-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/ /" \
+          | sudo tee /etc/apt/sources.list.d/cuda-ubuntu2404-x86_64.list
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends cuda-toolkit-13-2
+        sudo ln -sf libcuda.so /usr/local/cuda-13.2/lib64/stubs/libcuda.so.1
+        /usr/local/cuda-13.2/bin/nvcc --version
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install numpy==1.26.4 lit cupy-cuda13x
+        lit --version
+    - name: Read LLVM tag
+      id: llvm_tag
+      run: |
+        tag="$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' mlir/llvm_commit.txt | head -n1 | tr -d '[:space:]')"
+        test -n "$tag"
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        echo "LLVM tag: $tag"
+    - name: Download prebuilt LLVM/MLIR
+      env:
+        LLVM_TAG: ${{ steps.llvm_tag.outputs.tag }}
+      run: |
+        set -eux
+        mkdir -p "$RUNNER_TEMP/llvm-mlir"
+        curl -fL --retry 3 \
+          "https://github.com/Menooker/KunQuant/releases/download/llvm-mlir-${LLVM_TAG}/llvm-mlir-install-static-${LLVM_TAG}.tar.gz" \
+          -o "$RUNNER_TEMP/llvm-mlir.tar.gz"
+        tar -xzf "$RUNNER_TEMP/llvm-mlir.tar.gz" -C "$RUNNER_TEMP/llvm-mlir" --strip-components=1
+        test -f "$RUNNER_TEMP/llvm-mlir/lib/cmake/mlir/MLIRConfig.cmake"
+        test -f "$RUNNER_TEMP/llvm-mlir/lib/cmake/llvm/LLVMConfig.cmake"
+        echo "LLVM_PREFIX=$RUNNER_TEMP/llvm-mlir" >> "$GITHUB_ENV"
+    - name: Configure MLIR backend
+      env:
+        CUDA_PATH: /usr/local/cuda-13.2
+        CUDA_HOME: /usr/local/cuda-13.2
+      run: |
+        cmake -S . -B build/mlir-ci -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DKUN_BUILD_MLIR=ON \
+          -DLLVM_DIR="$LLVM_PREFIX/lib/cmake/llvm" \
+          -DMLIR_DIR="$LLVM_PREFIX/lib/cmake/mlir" \
+          -DCUDAToolkit_ROOT=/usr/local/cuda-13.2 \
+          -DCMAKE_CUDA_COMPILER=/usr/local/cuda-13.2/bin/nvcc \
+          -DPython_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')" \
+          -DPYTHON_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')" \
+          -DLLVM_EXTERNAL_LIT="$(command -v lit)"
+    - name: Run KunQuant MLIR tests
+      env:
+        CUDA_PATH: /usr/local/cuda-13.2
+        CUDA_HOME: /usr/local/cuda-13.2
+      run: cmake --build build/mlir-ci --target check-kun-mlir --parallel 4
