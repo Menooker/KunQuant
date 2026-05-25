@@ -27,6 +27,11 @@ import sys
 
 import numpy as np
 
+from KunQuant.Driver import KunCompilerConfig
+
+
+_KCFG_TS = KunCompilerConfig(input_layout="TS", output_layout="TS")
+
 
 # ── Fixture helpers ──────────────────────────────────────────────────
 
@@ -35,25 +40,25 @@ def _build_elemwise_exe(cfg):
     from KunQuant.Op import Builder, Input, Output
     from KunQuant.ops import Add
     from KunQuant.Stage import Function
-    from KunQuant.jit.cuda import compileit
+    from KunQuant.jit.cuda import compile_func
     b = Builder()
     with b:
         a = Input("a"); bb = Input("b")
         Output(Add(a, bb), "out")
     f = Function(b.ops, name="addk")
-    return compileit(f, cfg)
+    return compile_func(f, _KCFG_TS, cfg)
 
 
 def _build_cs_rank_exe(cfg):
     """cs_rank(a) → r.  Used for the smem-cap test."""
     from KunQuant.Op import Builder, Input, Output, Rank
     from KunQuant.Stage import Function
-    from KunQuant.jit.cuda import compileit
+    from KunQuant.jit.cuda import compile_func
     b = Builder()
     with b:
         Output(Rank(Input("a")), "r")
     f = Function(b.ops, name="csr")
-    return compileit(f, cfg)
+    return compile_func(f, _KCFG_TS, cfg)
 
 
 def _expect_fail(label, fn, needle):
@@ -92,7 +97,9 @@ def run_validation_tests(target):
     # 1. Object implementing neither CAI nor DLPack (a plain int)
     rc |= _expect_fail(
         "object without __dlpack__ rejected",
-        lambda: ex.runGraph(exe, {"a": 0xdeadbeef, "b": b, "out": out}),
+        lambda: ex.runGraph(exe,
+                            inputs={"a": 0xdeadbeef, "b": b},
+                            outputs={"out": out}),
         "does not implement __dlpack__")
 
     # 2. Host numpy array — numpy is a CPU-only producer; it refuses
@@ -102,29 +109,37 @@ def run_validation_tests(target):
     #    GPU launch.
     rc |= _expect_fail(
         "host numpy array rejected (CPU producer)",
-        lambda: ex.runGraph(exe, {"a": np.zeros((T, S), dtype=np.float32),
-                                    "b": b, "out": out}),
+        lambda: ex.runGraph(exe,
+                            inputs={"a": np.zeros((T, S), dtype=np.float32),
+                                    "b": b},
+                            outputs={"out": out}),
         "stream")
 
     # 3. Wrong dtype: float64
     rc |= _expect_fail(
         "f64 dtype rejected",
-        lambda: ex.runGraph(exe, {"a": cp.zeros((T, S), dtype=cp.float64),
-                                    "b": b, "out": out}),
-        "need float32")
+        lambda: ex.runGraph(exe,
+                            inputs={"a": cp.zeros((T, S), dtype=cp.float64),
+                                    "b": b},
+                            outputs={"out": out}),
+        "kernel expects float32")
 
     # 4. Wrong ndim: 1-D
     rc |= _expect_fail(
         "1-D array rejected",
-        lambda: ex.runGraph(exe, {"a": cp.zeros((T*S,), dtype=cp.float32),
-                                    "b": b, "out": out}),
+        lambda: ex.runGraph(exe,
+                            inputs={"a": cp.zeros((T*S,), dtype=cp.float32),
+                                    "b": b},
+                            outputs={"out": out}),
         "must be 2-D")
 
     # 5. Wrong ndim: 3-D
     rc |= _expect_fail(
         "3-D array rejected",
-        lambda: ex.runGraph(exe, {"a": cp.zeros((T, S, 1), dtype=cp.float32),
-                                    "b": b, "out": out}),
+        lambda: ex.runGraph(exe,
+                            inputs={"a": cp.zeros((T, S, 1), dtype=cp.float32),
+                                    "b": b},
+                            outputs={"out": out}),
         "must be 2-D")
 
     # 6. Non-contiguous strided view (transpose).  (T, S) and (S, T) are
@@ -134,29 +149,37 @@ def run_validation_tests(target):
     out_t = cp.zeros((S, T), dtype=cp.float32)
     rc |= _expect_fail(
         "non-contiguous transposed view rejected",
-        lambda: ex.runGraph(exe, {"a": a_t, "b": b_t, "out": out_t}),
+        lambda: ex.runGraph(exe,
+                            inputs={"a": a_t, "b": b_t},
+                            outputs={"out": out_t}),
         "not C-contiguous")
 
-    # 7. Missing graph_output
+    # 7. Missing graph input.  Outputs may be omitted by design: the
+    #    binding auto-allocates them and returns the buffer dict.
     rc |= _expect_fail(
-        "missing graph_output rejected",
-        lambda: ex.runGraph(exe, {"a": a, "b": b}),    # no 'out'
-        "missing argument 'out'")
+        "missing graph_input rejected",
+        lambda: ex.runGraph(exe,
+                            inputs={"a": a},
+                            outputs={"out": out}),
+        "missing input 'b'")
 
     # 8. Shape mismatch between args
     rc |= _expect_fail(
         "shape mismatch rejected",
-        lambda: ex.runGraph(exe, {"a": a,
-                                    "b": cp.zeros((T, S+1), dtype=cp.float32),
-                                    "out": out}),
-        "shape mismatch")
+        lambda: ex.runGraph(exe,
+                            inputs={"a": a,
+                                    "b": cp.zeros((T, S+1), dtype=cp.float32)},
+                            outputs={"out": out}),
+        "expected")
 
     # 9. Unknown kwarg (the hot-path skip kicks in for size == ordered,
     #    so add a real extra to trip the strict check).
     rc |= _expect_fail(
         "unknown argument rejected",
-        lambda: ex.runGraph(exe, {"a": a, "b": b, "out": out, "bogus": a}),
-        "unexpected argument 'bogus'")
+        lambda: ex.runGraph(exe,
+                            inputs={"a": a, "b": b, "bogus": a},
+                            outputs={"out": out}),
+        "unexpected input 'bogus'")
 
     # 10. DLPack-only producer — wrap a cupy ndarray and hide every
     #     attribute except __dlpack__ / __dlpack_device__.  Verifies the
@@ -172,7 +195,9 @@ def run_validation_tests(target):
 
     print("  dlpack-only producer happy path ...", end=" ", flush=True)
     try:
-        ex.runGraph(exe, {"a": DLOnly(a), "b": DLOnly(b), "out": DLOnly(out)})
+        ex.runGraph(exe,
+                    inputs={"a": DLOnly(a), "b": DLOnly(b)},
+                    outputs={"out": DLOnly(out)})
         ex.synchronize()
         print("ok")
     except Exception as e:
@@ -210,7 +235,7 @@ def run_smem_cap_tests(target):
     out = cp.zeros((T, too_many), dtype=cp.float32)
     rc |= _expect_fail(
         "smem cap exceeded → clear error",
-        lambda: ex.runGraph(exe, {"a": a, "r": out}),
+        lambda: ex.runGraph(exe, inputs={"a": a}, outputs={"r": out}),
         "MAX_SHARED_MEMORY_PER_BLOCK_OPTIN")
 
     # At-cap case must still launch (off-by-one regression guard).
@@ -219,7 +244,7 @@ def run_smem_cap_tests(target):
     out2 = cp.zeros((T, at_limit), dtype=cp.float32)
     print(f"  at-cap launch (num_stocks={at_limit}) ...", end=" ", flush=True)
     try:
-        ex.runGraph(exe, {"a": a2, "r": out2})
+        ex.runGraph(exe, inputs={"a": a2}, outputs={"r": out2})
         ex.synchronize()
         print("ok")
     except Exception as e:

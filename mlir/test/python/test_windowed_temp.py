@@ -116,7 +116,9 @@ def run_one(N: int, expected_placement: str, target: str,
     out = cp.zeros((T, S), dtype=cp.float32)
 
     executor = KunMLIR.Executor()
-    executor.runGraph(exe, {"a": a, "b": b, "out": out})
+    executor.runGraph(exe,
+                      inputs={"a": a, "b": b},
+                      outputs={"out": out})
     out_h = cp.asnumpy(out)            # implicitly waits via stream 0
 
     expected = reference_sum_window(a_h, b_h, N)

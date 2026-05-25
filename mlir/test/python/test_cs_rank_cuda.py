@@ -32,9 +32,10 @@ import numpy as np
 
 from KunQuant.Op import Builder, Input, Output, Rank
 from KunQuant.ops import Add
+from KunQuant.Driver import KunCompilerConfig
 from KunQuant.Stage import Function
 from KunQuant.jit import KunMLIR
-from KunQuant.jit.cuda import compileit, CudaCompilerConfig, to_mlir
+from KunQuant.jit.cuda import compile_func, CudaCompilerConfig, to_mlir
 
 
 # ── CPU reference (matches cpp/Kun/Rank.hpp's equal_range formula) ──
@@ -116,13 +117,14 @@ def _run_cs_rank_only(target: str, dtype_token: str, T: int, S: int,
            f"nan={with_nan} ties={with_ties} ===")
 
     f = _build_cs_rank_only()
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4,
+    kcfg = KunCompilerConfig(input_layout="TS", output_layout="TS",
                               dtype=dtype_token)
-    mod = to_mlir(_build_cs_rank_only(), cfg)
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    mod = to_mlir(_build_cs_rank_only(), kcfg, ccfg)
     print("--- mlir ---")
     print(mod.to_string())
 
-    exe = compileit(f, cfg)
+    exe = compile_func(f, kcfg, ccfg)
     print(f"  kernel_names={exe.kernel_names}  "
           f"num_buffers={exe.num_buffers}  "
           f"peak_intermediate_slots={exe.peak_intermediate_slots}")
@@ -143,7 +145,7 @@ def _run_cs_rank_only(target: str, dtype_token: str, T: int, S: int,
     a_d = cp.asarray(a_h)
     out_d = cp.zeros((T, S), dtype=np_dt)
     ex = KunMLIR.Executor()
-    ex.runGraph(exe, {'a': a_d, 'r': out_d})
+    ex.runGraph(exe, inputs={'a': a_d}, outputs={'r': out_d})
     ex.synchronize()
     out_h = cp.asnumpy(out_d)
 
@@ -175,13 +177,14 @@ def _run_cs_rank_mixed(target: str, T: int, S: int, *, seed: int) -> int:
 
     print(f"=== cs_rank-mixed (float32) T={T} S={S} ===")
     f = _build_cs_rank_mixed()
-    cfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4,
+    kcfg = KunCompilerConfig(input_layout="TS", output_layout="TS",
                               dtype='float', partition_factor=1)
-    mod = to_mlir(_build_cs_rank_mixed(), cfg)
+    ccfg = CudaCompilerConfig(gpu_arch=target, warps_per_cta=4)
+    mod = to_mlir(_build_cs_rank_mixed(), kcfg, ccfg)
     print("--- mlir ---")
     print(mod.to_string())
 
-    exe = compileit(f, cfg)
+    exe = compile_func(f, kcfg, ccfg)
     print(f"  kernel_names={exe.kernel_names}  "
           f"num_kernels={exe.num_kernels}  "
           f"num_buffers={exe.num_buffers}  "
@@ -198,9 +201,9 @@ def _run_cs_rank_mixed(target: str, T: int, S: int, *, seed: int) -> int:
     out_d = cp.zeros((T, S), dtype=cp.float32)
 
     ex = KunMLIR.Executor()
-    ex.runGraph(exe, {'a': cp.asarray(a_h),
-                       'b': cp.asarray(b_h),
-                       'out': out_d})
+    ex.runGraph(exe,
+                inputs={'a': cp.asarray(a_h), 'b': cp.asarray(b_h)},
+                outputs={'out': out_d})
     ex.synchronize()
     out_h = cp.asnumpy(out_d)
 

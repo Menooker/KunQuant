@@ -116,7 +116,9 @@ def main() -> int:
         b   = cp.asarray(b_h)
         out = cp.zeros((T, S), dtype=cp.float32)
         executor = KunMLIR.Executor()
-        executor.runGraph(exe, {"a": a, "b": b, "sum": out})
+        executor.runGraph(exe,
+                          inputs={"a": a, "b": b},
+                          outputs={"sum": out})
         # No explicit synchronize: default-stream Executor + cupy's
         # default stream → cp.asnumpy's D2H memcpy goes on the same
         # stream and waits for our kernels.  See test_multi_kernel.py

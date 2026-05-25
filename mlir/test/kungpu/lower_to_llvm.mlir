@@ -107,9 +107,7 @@ kunir.func @test_time_bounds(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
 // ── Per-function chunk write_start cache, lazily inserted at entry ────
 // All chunk arithmetic stays in i32 (64-bit ops are slow on GPU); only
 // the final write_start gets an index_cast for comparing against the
-// index-typed scf.for IV.  Mask cast (separate, used for t-mask subi
-// inside the loop) hoists to entry too.
-// CHECK:       %[[MASK:.*]] = arith.index_cast %[[MASK_I32]] : i32 to index
+// index-typed scf.for IV.
 // CHECK:       %[[CY_IDX:.*]] = gpu.block_id y
 // CHECK:       %[[CY:.*]] = arith.index_cast %[[CY_IDX]] : index to i32
 // CHECK:       %[[CYC0:.*]] = arith.constant 0 : i32
@@ -159,12 +157,11 @@ kunir.func @test_time_bounds(%in: !kunir.ts<f32, inf>, %out: !kunir.ts<f32, 1>)
 // CHECK:         %[[GEP:.*]] = llvm.getelementptr %[[IN]][%[[LIN]]] {{.*}} -> !llvm.ptr, f32
 // CHECK:         %[[V:.*]] = llvm.load %[[GEP]] : !llvm.ptr -> f32
 //
-// ── ts.put on global %out: gated by t ≥ write_start, output index t-mask ──
+// ── ts.put on global %out: gated by t ≥ write_start, output index t ──
 // CHECK:         %[[DOW:.*]] = arith.cmpi sge, %[[T]], %[[WSTART]] : index
 // CHECK:         scf.if %[[DOW]] {
-// CHECK:           %[[TOUT:.*]] = arith.subi %[[T]], %[[MASK]] : index
 // CHECK:           %[[NS64B:.*]] = arith.extsi %[[NS]] : i32 to i64
-// CHECK:           %[[T64:.*]] = arith.index_cast %[[TOUT]] : index to i64
+// CHECK:           %[[T64:.*]] = arith.index_cast %[[T]] : index to i64
 // CHECK:           %[[ROW2:.*]] = arith.muli %[[T64]], %[[NS64B]] : i64
 // CHECK:           %[[LIN2:.*]] = arith.addi %[[ROW2]],
 // CHECK:           %[[GEP2:.*]] = llvm.getelementptr %[[OUT]][%[[LIN2]]]

@@ -5,7 +5,9 @@
 // mask / chunk_size / warmup) are prepended later by convert-kungpu-to-llvm.
 // CHECK-SAME: !kunir.ts<f32, inf>
 // CHECK-SAME: !kunir.ts<f32, inf>
-// CHECK-SAME: !kunir.ts<f32, 1>
+// Graph output buffers are full TS arrays; the per-op result window has
+// already been materialized into the loop body.
+// CHECK-SAME: !kunir.ts<f32, inf>
 // CHECK-NOT: -> !kunir.ts
 kunir.func @test_binary_lower(%a: !kunir.ts<f32, inf>, %b: !kunir.ts<f32, inf>)
     inputs {%a = "a", %b = "b"}
@@ -104,7 +106,7 @@ kunir.func @test_computed_reduce(%x: !kunir.ts<f32, inf>, %y: !kunir.ts<f32, inf
 }
 
 // CHECK-LABEL: kunir.func @test_multi_reduce
-// CHECK-SAME: (%[[IN:.*]]: !kunir.ts<f64, inf>, %[[OUT0:.*]]: !kunir.ts<f64, 1>, %[[OUT1:.*]]: !kunir.ts<f64, 1>)
+// CHECK-SAME: (%[[IN:.*]]: !kunir.ts<f64, inf>, %[[OUT0:.*]]: !kunir.ts<f64, inf>, %[[OUT1:.*]]: !kunir.ts<f64, inf>)
 kunir.func @test_multi_reduce(%input: !kunir.ts<f64, inf>)
     inputs {%input = "input"}
     outputs {"sum", "maxval"}
@@ -121,8 +123,8 @@ kunir.func @test_multi_reduce(%input: !kunir.ts<f64, inf>)
   // CHECK:          arith.addf
   // CHECK:          arith.maximumf
   // CHECK:          scf.yield {{.*}}, {{.*}} : f64, f64
-  // CHECK:        kungpu.ts.put %[[OUT0]], %[[R]]#0 : <f64, 1>, f64
-  // CHECK:        kungpu.ts.put %[[OUT1]], %[[R]]#1 : <f64, 1>, f64
+  // CHECK:        kungpu.ts.put %[[OUT0]], %[[R]]#0 : <f64, inf>, f64
+  // CHECK:        kungpu.ts.put %[[OUT1]], %[[R]]#1 : <f64, inf>, f64
   %w = kunir.windowed_output %input [length = 10] : !kunir.ts<f64, inf> -> !kunir.ts<f64, 10>
   %sum, %max = kunir.for_each_back_window
       (%w : !kunir.ts<f64, 10>) [window = 10]
