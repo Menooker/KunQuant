@@ -38,7 +38,11 @@ if GPU_MODE:
     import cupy as cp
     from KunQuant.jit import KunMLIR as _kr_mlir
     from KunQuant.jit import cuda as _cuda_jit
-
+    from KunQuantMLIR.OverlapRunner import OverlapRunner
+    if BENCHMODE:
+        cuda_stream = cp.cuda.Stream(non_blocking=True)
+    else:
+        cuda_stream = None
     cp.cuda.Device(0).use()
     cp.zeros((1,), dtype=cp.float32)
 
@@ -164,40 +168,47 @@ def get_output_layout(modu):
 
 
 def create_single_thread_executor():
-    return _kr_mlir.Executor() if GPU_MODE else kr.createSingleThreadExecutor()
+    return _kr_mlir.Executor(cuda_stream) if GPU_MODE else kr.createSingleThreadExecutor()
 
 
 def create_multi_thread_executor(n):
-    return _kr_mlir.Executor() if GPU_MODE else kr.createMultiThreadExecutor(n)
+    return _kr_mlir.Executor(cuda_stream) if GPU_MODE else kr.createMultiThreadExecutor(n)
 
-gpu_inputs = None
-gpu_outputs = None
-def run_graph(executor, benchmode, modu, inputs, cur_time, length, outputs=None, **kwargs):
+GPU_OVERLAP_SLOTS = 3
+
+def warmup_gpu_overlap_runner(overlap_runner, modu, inputs,
+                              cur_time, length, **kwargs):
+    last = None
+    for _ in range(GPU_OVERLAP_SLOTS):
+        last = run_graph(overlap_runner.executor, True, modu, inputs,
+                         cur_time, length, None,
+                         overlap_runner=overlap_runner, **kwargs)
+    return last.wait() if last is not None else None
+
+def run_graph(executor, benchmode, modu, inputs, cur_time, length, outputs=None,
+              overlap_runner=None, **kwargs):
     if not GPU_MODE:
         return kr.runGraph(executor, modu, inputs, cur_time, length,
                            outputs if outputs is not None else {}, **kwargs)
     if cur_time != 0:
         raise RuntimeError("GPU alpha101 test only supports cur_time=0")
-    global gpu_inputs
-    global gpu_outputs
-    if not benchmode or gpu_inputs is None:
-        gpu_inputs = {k: cp.asarray(v) for k, v in inputs.items()}
-    else:
-        for k, v in inputs.items():
-            gpu_inputs[k].set(v)
-    ret = executor.runGraph(modu, gpu_inputs, outputs=gpu_outputs, cur_time=cur_time,
-                            length=length,
-                            use_cuda_graph=USE_CUDA_GRAPH)
+    kwargs.pop("skip_check", None)
+    kwargs.pop("num_stocks", None)
     if benchmode:
-        gpu_outputs = ret
-        out_np = {}
-        for k, v in ret.items():
-            arr = v if isinstance(v, cp.ndarray) else cp.from_dlpack(v)
-            ret[k] = arr
-            host = cp.asnumpy(arr, blocking=False)
-            out_np[k] = host
-        executor.synchronize()
-        return out_np
+        if overlap_runner is None:
+            raise RuntimeError("GPU benchmark mode requires overlap_runner")
+        return overlap_runner.submit(
+            inputs,
+            cur_time=cur_time,
+            length=length,
+            use_cuda_graph=USE_CUDA_GRAPH,
+            **kwargs,
+        )
+    gpu_inputs = {k: cp.asarray(v) for k, v in inputs.items()}
+    ret = executor.runGraph(modu, gpu_inputs, cur_time=cur_time,
+                            length=length,
+                            use_cuda_graph=USE_CUDA_GRAPH,
+                            **kwargs)
     out_np = {}
     for k, v in ret.items():
         arr = v if isinstance(v, cp.ndarray) else cp.from_dlpack(v)
@@ -396,18 +407,29 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
     
     if not ischeck:
         out = run_graph(executor, False, modu, my_input, start_time,
-                        num_time-start_time, outbuffers)
+                        num_time-start_time, outbuffers,
+                        overlap_runner=None)
+        overlap_runner = None
+        if GPU_MODE:
+            overlap_runner = OverlapRunner(
+                modu, executor, num_slots=GPU_OVERLAP_SLOTS)
+            warmup_gpu_overlap_runner(overlap_runner, modu, my_input, start_time,
+                                      num_time-start_time)
         start = time.time()
         for _ in range(20):
             out = run_graph(executor, True, modu, my_input, start_time,
-                            num_time-start_time, outbuffers)
+                            num_time-start_time, outbuffers,
+                            overlap_runner=overlap_runner)
+        if GPU_MODE:
+            overlap_runner.synchronize()
+            out = out.wait()
         end = time.time()
         tdiff = (end-start)/20
     else:
         start = time.time()
         out = run_graph(executor, False, modu, my_input, start_time,
                         num_time-start_time, outbuffers,
-                        num_stocks=num_stock)
+                        overlap_runner=None, num_stocks=num_stock)
         end = time.time()
         tdiff = end-start
     print(f"Exec takes: {tdiff:.6f} seconds")
@@ -479,19 +501,29 @@ def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, isc
     # blocked = TS_STs(inp)
     if not ischeck:
         out = run_graph(executor, False, modu, my_input, start_time,
-                        num_time-start_time, outbuffers)
+                        num_time-start_time, outbuffers,
+                        overlap_runner=None)
+        overlap_runner = None
+        if GPU_MODE:
+            overlap_runner = OverlapRunner(
+                modu, executor, num_slots=GPU_OVERLAP_SLOTS)
+            warmup_gpu_overlap_runner(overlap_runner, modu, my_input, start_time,
+                                      num_time-start_time)
         start = time.time()
         for _ in range(20):
             out = run_graph(executor, True, modu, my_input, start_time,
-                            num_time-start_time, outbuffers)
+                            num_time-start_time, outbuffers,
+                            overlap_runner=overlap_runner)
         if GPU_MODE:
-            executor.synchronize()
+            overlap_runner.synchronize()
+            out = out.wait()
         end = time.time()
         tdiff = (end-start)/20
     else:
         start = time.time()
         out = run_graph(executor, False, modu, my_input, start_time,
-                        num_time-start_time, outbuffers)
+                        num_time-start_time, outbuffers,
+                        overlap_runner=None)
         end = time.time()
         tdiff = end-start
     print(f"Exec takes: {tdiff:.6f} seconds")
@@ -550,6 +582,7 @@ def do_compile(avx, keep, tempdir):
                 continue
             kcfg = dataclasses.replace(kcfg, input_layout="TS",
                                        output_layout="TS",
+                                       partition_factor=2,
                                        blocking_len=1)
             gpu_funclist.append((name, f, kcfg))
         ccfg = _cuda_jit.CudaCompilerConfig(gpu_arch=GPU_ARCH)
