@@ -33,6 +33,7 @@ option(KUN_AVX512DQ "Enable AVX512DQ instruction set" OFF)
 option(KUN_AVX512VL "Enable AVX512VL instruction set" OFF)
 option(KUN_NO_AVX2 "Disable AVX2 and FMA instruction set" OFF)
 option(KUN_SANITIZER "Enable sanitizer" OFF)
+option(KUN_BUILD_CPU_RUNNER "Build the CPU KunRunner extension/runtime" ON)
 
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|AppleClang)")
@@ -72,40 +73,81 @@ else()
     endif()
 endif()
 
-
-file(GLOB_RECURSE KunRuntimeSrc ${PROJECT_SOURCE_DIR}/cpp/Kun/*.cpp
-    ${PROJECT_SOURCE_DIR}/cpp/KunSIMD/*.cpp)
-add_library(KunRuntime SHARED ${KunRuntimeSrc})
-target_compile_definitions(KunRuntime PRIVATE KUN_CORE_LIB=1)
-if (NOT WIN32)
-    target_link_libraries(KunRuntime PRIVATE dl)
-endif()
-
-file(GLOB_RECURSE KunPythonSrc ${PROJECT_SOURCE_DIR}/cpp/Python/*.cpp)
-# STABLE_ABI: build a single Python-version-independent .abi3.so on
-# CPython ≥ 3.12; nanobind silently disables this and falls back to
-# regular ABI on older Pythons.  Saves us one rebuild per Python
-# minor we want to ship.
-nanobind_add_module(KunRunner STABLE_ABI ${KunPythonSrc})
-
-target_link_libraries(KunRunner PUBLIC KunRuntime)
-
-
-
-file(GLOB_RECURSE KunTestSrc ${PROJECT_SOURCE_DIR}/tests/cpp/*.cpp)
-add_library(KunTest SHARED EXCLUDE_FROM_ALL ${KunTestSrc})
-target_link_libraries(KunTest KunRuntime)
-
-
-file(GLOB_RECURSE KunCApiTestSrc ${PROJECT_SOURCE_DIR}/tests/capi/*.cpp)
-add_executable(KunCApiTest EXCLUDE_FROM_ALL ${KunCApiTestSrc})
-target_link_libraries(KunCApiTest KunRuntime)
-add_dependencies(KunCApiTest KunTest)
-
 if(NOT DEFINED PYTHON_EXECUTABLE)
     set(PYTHON_EXECUTABLE ${Python_EXECUTABLE})
 endif()
 
 message(STATUS "PYTHON_EXECUTABLE = ${PYTHON_EXECUTABLE}")
 
-add_custom_target(TestingTargets DEPENDS KunCApiTest KunTest KunRunner)
+if(KUN_BUILD_CPU_RUNNER)
+    file(GLOB_RECURSE KunRuntimeSrc ${PROJECT_SOURCE_DIR}/cpp/Kun/*.cpp
+        ${PROJECT_SOURCE_DIR}/cpp/KunSIMD/*.cpp)
+    add_library(KunRuntime SHARED ${KunRuntimeSrc})
+    target_compile_definitions(KunRuntime PRIVATE KUN_CORE_LIB=1)
+    if (NOT WIN32)
+        target_link_libraries(KunRuntime PRIVATE dl)
+    endif()
+
+    file(GLOB_RECURSE KunPythonSrc ${PROJECT_SOURCE_DIR}/cpp/Python/*.cpp)
+    # STABLE_ABI: build a single Python-version-independent .abi3.so on
+    # CPython ≥ 3.12; nanobind silently disables this and falls back to
+    # regular ABI on older Pythons.  Saves us one rebuild per Python
+    # minor we want to ship.
+    nanobind_add_module(KunRunner STABLE_ABI ${KunPythonSrc})
+
+    target_link_libraries(KunRunner PUBLIC KunRuntime)
+
+
+
+    file(GLOB_RECURSE KunTestSrc ${PROJECT_SOURCE_DIR}/tests/cpp/*.cpp)
+    add_library(KunTest SHARED EXCLUDE_FROM_ALL ${KunTestSrc})
+    target_link_libraries(KunTest KunRuntime)
+
+
+    file(GLOB_RECURSE KunCApiTestSrc ${PROJECT_SOURCE_DIR}/tests/capi/*.cpp)
+    add_executable(KunCApiTest EXCLUDE_FROM_ALL ${KunCApiTestSrc})
+    target_link_libraries(KunCApiTest KunRuntime)
+    add_dependencies(KunCApiTest KunTest)
+
+    add_custom_target(TestingTargets DEPENDS KunCApiTest KunTest KunRunner)
+endif()
+
+#===------------------------------------------------------------------------===#
+# Optional MLIR backend (kun-opt + kunir/kungpu dialects)
+#===------------------------------------------------------------------------===#
+option(KUN_BUILD_MLIR "Build MLIR backend with kunir/kungpu dialects" OFF)
+if(KUN_BUILD_MLIR)
+  set(KUN_MLIR_PYTHON_PACKAGE_DIR "${PROJECT_SOURCE_DIR}/KunQuantMLIR"
+      CACHE PATH "Output directory for the KunQuant-MLIR Python package binaries")
+
+  find_package(MLIR REQUIRED CONFIG)
+  find_package(CUDAToolkit REQUIRED)
+  message(STATUS "Using MLIRConfig.cmake in: ${MLIR_DIR}")
+  message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+
+  if(NOT CMAKE_CUDA_COMPILER)
+    set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}" CACHE FILEPATH
+        "nvcc used by CMake's CUDA-language support.")
+  endif()
+  get_filename_component(KUN_CUDA_TOOLKIT_ROOT
+                         "${CUDAToolkit_NVCC_EXECUTABLE}" DIRECTORY)
+  get_filename_component(KUN_CUDA_TOOLKIT_ROOT
+                         "${KUN_CUDA_TOOLKIT_ROOT}" DIRECTORY)
+  message(STATUS
+      "KunQuant MLIR CUDA toolkit = ${KUN_CUDA_TOOLKIT_ROOT} "
+      "(version ${CUDAToolkit_VERSION})")
+
+  set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/bin)
+  set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/lib)
+  set(MLIR_BINARY_DIR ${CMAKE_BINARY_DIR})
+
+  list(APPEND CMAKE_MODULE_PATH "${MLIR_CMAKE_DIR}")
+  list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
+
+  include(TableGen)
+  include(AddLLVM)
+  include(AddMLIR)
+  include(HandleLLVMOptions)
+
+  add_subdirectory(mlir)
+endif()

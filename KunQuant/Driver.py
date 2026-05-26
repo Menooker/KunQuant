@@ -29,6 +29,10 @@ def optimize(f: Function, options: dict)->Dict[str, int]:
     # optimize before decompose to let value ranges work
     special_optimize(f, options)
     decompose(f, options)
+    # Experimental: expand stateful ops (ExpMovingAvg / WindowedLinearRegression*)
+    # into Accumulator chains.  No-op on the CPU pipeline (gated on
+    # options["experimental_expand"]); currently enabled by the GPU backend.
+    experimental_expand(f, options)
     expr_fold(f, options)
     special_optimize(f, options)
     expr_fold(f, options)

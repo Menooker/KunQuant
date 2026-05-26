@@ -1,0 +1,1241 @@
+//===- Runtime.cpp - kun_cuda::Executable implementation ---------------===//
+//
+// The ctor pipeline is split into focused helpers — each step is small
+// enough to read top-to-bottom on its own:
+//
+//   buildBufferIndices   — assign integer indices to every named buffer
+//   resolveKernelIO      — translate per-kernel name lists to indices,
+//                           build producer-of-each-buffer table
+//   validateGraph        — check single producer, all consumers reachable,
+//                           graph_outputs all produced, no self-dependency
+//   topoSort             — Kahn's algorithm; rejects cycles
+//   planSlots            — refcount + LIFO free pool over the topo order
+//
+// The shared launch helpers live behind RuntimeUtil.h so the traditional
+// launcher and RuntimeCudaGraph.cpp use the same validation, buffer-pointer
+// resolution, chunk planning, and kernel argument construction.
+//
+//===----------------------------------------------------------------------===//
+
+#include "KunCuda/Runtime.h"
+#include "RuntimeUtil.h"
+
+#include <cuda.h>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+#include <unordered_map>
+#include <utility>
+
+// Pre-compiled cross-sectional PTX, embedded by EmbedFile.cmake.
+#include "cs_rank_ptx.inc"
+#include "cs_scale_ptx.inc"
+
+namespace kun_cuda {
+
+//===----------------------------------------------------------------------===//
+// CUDA driver helpers
+//===----------------------------------------------------------------------===//
+
+void checkCu(CUresult r, const char *what) {
+  if (r == CUDA_SUCCESS)
+    return;
+  const char *s = nullptr;
+  cuGetErrorString(r, &s);
+  throw std::runtime_error(std::string(what) + ": " +
+                            (s ? s : "unknown CUDA error"));
+}
+
+std::string joinNames(const std::vector<std::string> &v) {
+  std::string r;
+  for (size_t i = 0; i < v.size(); ++i) {
+    if (i) r += ", ";
+    r += v[i];
+  }
+  return r;
+}
+
+namespace {
+
+//===----------------------------------------------------------------------===//
+// Plan-building helpers — small POD intermediates so each helper is
+// independent and trivially testable.
+//===----------------------------------------------------------------------===//
+
+struct BufTable {
+  int numBuffers      = 0;
+  int numGraphInputs  = 0;
+  int numGraphOutputs = 0;
+  // Name → index for *every* buffer (graph IO + intermediates).  Used by
+  // resolveKernelIO; the per-role maps below are kept around for the
+  // launch-time user args dict lookup.
+  std::unordered_map<std::string, int> nameToIdx;
+  std::unordered_map<std::string, int> graphInputIdx;
+  std::unordered_map<std::string, int> graphOutputIdx;
+};
+
+struct KernelIO {
+  std::vector<std::vector<int>> kernelInputBufs;   // [kernel][argv pos]
+  std::vector<std::vector<int>> kernelOutputBufs;
+  // producerKernel[bufIdx] = kernel index that writes that buffer, or
+  // -1 if it's a graph input.
+  std::vector<int> producerKernel;
+};
+
+struct SlotPlan {
+  std::vector<int> intermediateBufToSlot;
+  int peakIntermediateSlots = 0;
+};
+
+/// Step 1 — assign buffer indices.  Layout:
+///   [0 .. numGraphInputs)                        graph inputs
+///   [numGraphInputs .. numGraphInputs+numGraphOutputs)  graph outputs
+///   [..numBuffers)                               intermediates
+/// Intermediates are everything a kernel produces that isn't a
+/// graph_output; they get consecutive indices in first-seen order.
+BufTable buildBufferIndices(const std::vector<std::string> &graphInputs,
+                              const std::vector<std::string> &graphOutputs,
+                              const std::vector<KernelMeta> &kernels) {
+  BufTable t;
+
+  for (const auto &n : graphInputs) {
+    if (t.nameToIdx.count(n))
+      throw std::runtime_error(
+          "kun_cuda::Executable: duplicate name in graph_inputs: '" + n + "'");
+    int idx = static_cast<int>(t.nameToIdx.size());
+    t.nameToIdx[n] = idx;
+    t.graphInputIdx[n] = idx;
+  }
+  t.numGraphInputs = static_cast<int>(t.nameToIdx.size());
+
+  for (const auto &n : graphOutputs) {
+    if (t.nameToIdx.count(n))
+      throw std::runtime_error(
+          "kun_cuda::Executable: name '" + n +
+          "' appears in both graph_inputs and graph_outputs (or twice in "
+          "one of them)");
+    int idx = static_cast<int>(t.nameToIdx.size());
+    t.nameToIdx[n] = idx;
+    t.graphOutputIdx[n] = idx;
+  }
+  t.numGraphOutputs =
+      static_cast<int>(t.nameToIdx.size()) - t.numGraphInputs;
+
+  // Walk every kernel output and assign new indices to anything we
+  // haven't seen yet (intermediates).  We don't validate single-producer
+  // here — that's `validateGraph`'s job — but we do need to avoid
+  // double-assigning if two kernels share an output name.
+  for (const auto &k : kernels)
+    for (const auto &outName : k.outputNames)
+      if (!t.nameToIdx.count(outName))
+        t.nameToIdx[outName] = static_cast<int>(t.nameToIdx.size());
+
+  t.numBuffers = static_cast<int>(t.nameToIdx.size());
+  return t;
+}
+
+/// Step 2 — resolve each kernel's I/O name list to int indices, plus
+/// build the producer-of-each-buffer table.  Throws on a kernel input
+/// that wasn't declared anywhere (neither graph input nor produced).
+KernelIO resolveKernelIO(const std::vector<KernelMeta> &kernels,
+                           const BufTable &tbl) {
+  KernelIO kio;
+  kio.kernelInputBufs.resize(kernels.size());
+  kio.kernelOutputBufs.resize(kernels.size());
+  kio.producerKernel.assign(tbl.numBuffers, -1);
+
+  for (int kIdx = 0; kIdx < static_cast<int>(kernels.size()); ++kIdx) {
+    const auto &k = kernels[kIdx];
+
+    kio.kernelInputBufs[kIdx].reserve(k.inputNames.size());
+    for (const auto &n : k.inputNames) {
+      auto it = tbl.nameToIdx.find(n);
+      if (it == tbl.nameToIdx.end())
+        throw std::runtime_error(
+            "kun_cuda::Executable: kernel '" + k.kernelName + "' consumes '" +
+            n + "' which is neither a graph_input nor produced by any kernel");
+      kio.kernelInputBufs[kIdx].push_back(it->second);
+    }
+
+    kio.kernelOutputBufs[kIdx].reserve(k.outputNames.size());
+    for (const auto &n : k.outputNames) {
+      // Index existence is guaranteed by buildBufferIndices.
+      int b = tbl.nameToIdx.at(n);
+      kio.kernelOutputBufs[kIdx].push_back(b);
+      kio.producerKernel[b] = kIdx;  // last writer wins; validateGraph
+                                      // catches multi-producer below.
+    }
+  }
+  return kio;
+}
+
+/// Step 3 — graph-level validation.  Catches the cases buildBufferIndices /
+/// resolveKernelIO can't, namely:
+///   * two kernels claim to produce the same buffer
+///   * a graph_output is declared but never produced
+///   * a graph_input is also produced by a kernel (overlap is silly)
+void validateGraph(const std::vector<KernelMeta> &kernels,
+                     const std::vector<std::string> &graphOutputs,
+                     const BufTable &tbl,
+                     const KernelIO &kio) {
+  // Multi-producer: count how many times each output name appears as a
+  // kernel output.
+  std::unordered_map<std::string, int> outCounts;
+  std::unordered_map<std::string, std::string> firstProducer;
+  for (const auto &k : kernels) {
+    for (const auto &n : k.outputNames) {
+      if (++outCounts[n] == 1)
+        firstProducer[n] = k.kernelName;
+      else if (outCounts[n] == 2)
+        throw std::runtime_error(
+            "kun_cuda::Executable: name '" + n +
+            "' is produced by both kernel '" + firstProducer[n] +
+            "' and kernel '" + k.kernelName + "'");
+    }
+  }
+
+  // graph_outputs must be produced.
+  for (const auto &n : graphOutputs) {
+    int b = tbl.nameToIdx.at(n);
+    if (kio.producerKernel[b] < 0)
+      throw std::runtime_error(
+          "kun_cuda::Executable: graph_output '" + n +
+          "' is not produced by any kernel");
+  }
+
+  // graph_inputs must NOT be produced by any kernel — an input is by
+  // definition supplied by the caller.
+  for (const auto &kv : tbl.graphInputIdx) {
+    if (kio.producerKernel[kv.second] >= 0)
+      throw std::runtime_error(
+          "kun_cuda::Executable: graph_input '" + kv.first +
+          "' is also produced by a kernel; use a different name for the "
+          "kernel output");
+  }
+}
+
+/// Step 4 — Kahn topological sort over kernel-to-kernel edges.  An edge
+/// `producer → consumer` exists whenever consumer reads any buffer that
+/// producer writes.  Multi-edges between the same pair count as one.
+/// Throws on cycle.
+std::vector<int> topoSort(const KernelIO &kio, int numKernels) {
+  std::vector<int> indeg(numKernels, 0);
+  std::vector<std::vector<int>> succ(numKernels);
+
+  // Build edges, deduped per (producer, consumer) pair.
+  for (int kIdx = 0; kIdx < numKernels; ++kIdx) {
+    std::vector<int> deps;
+    for (int b : kio.kernelInputBufs[kIdx]) {
+      int p = kio.producerKernel[b];
+      if (p < 0) continue;                   // graph input
+      if (p == kIdx)
+        throw std::runtime_error(
+            "kun_cuda::Executable: kernel index " + std::to_string(kIdx) +
+            " depends on its own output");
+      bool seen = false;
+      for (int d : deps) if (d == p) { seen = true; break; }
+      if (!seen) deps.push_back(p);
+    }
+    indeg[kIdx] = static_cast<int>(deps.size());
+    for (int p : deps) succ[p].push_back(kIdx);
+  }
+
+  std::vector<int> order;
+  order.reserve(numKernels);
+  std::vector<int> ready;
+  for (int i = 0; i < numKernels; ++i)
+    if (indeg[i] == 0) ready.push_back(i);
+  while (!ready.empty()) {
+    int k = ready.back();
+    ready.pop_back();
+    order.push_back(k);
+    for (int n : succ[k])
+      if (--indeg[n] == 0)
+        ready.push_back(n);
+  }
+  if (static_cast<int>(order.size()) != numKernels)
+    throw std::runtime_error(
+        "kun_cuda::Executable: cycle detected in kernel dependency graph");
+  return order;
+}
+
+/// Step 5 — slot allocation for intermediates.  Refcount = number of
+/// kernel-input slots that reference the buffer, plus +1 for graph
+/// outputs (so we never try to recycle them).  Walking the topo order:
+///   * before launching kernel K, allocate a fresh slot for each
+///     intermediate output of K (drawn from the LIFO free pool when
+///     possible),
+///   * after, decrement refcounts on K's inputs; any intermediate that
+///     hits zero returns its slot to the free pool.
+SlotPlan planSlots(const std::vector<int> &launchOrder,
+                    const BufTable &tbl,
+                    const KernelIO &kio) {
+  SlotPlan plan;
+  plan.intermediateBufToSlot.assign(tbl.numBuffers, -1);
+  const int firstIntermediate = tbl.numGraphInputs + tbl.numGraphOutputs;
+
+  // Initial refcounts.
+  std::vector<int> refcount(tbl.numBuffers, 0);
+  for (const auto &ins : kio.kernelInputBufs)
+    for (int b : ins)
+      refcount[b]++;
+  // graph_outputs are externally visible — pin them so we never try to
+  // reuse them (they don't have slots anyway, but this keeps the loop
+  // free of special cases).
+  for (int i = tbl.numGraphInputs; i < firstIntermediate; ++i)
+    refcount[i]++;
+
+  std::vector<int> freePool;
+  int nextNew = 0;
+
+  auto allocSlot = [&]() -> int {
+    if (!freePool.empty()) { int s = freePool.back(); freePool.pop_back(); return s; }
+    int s = nextNew++;
+    if (nextNew > plan.peakIntermediateSlots) plan.peakIntermediateSlots = nextNew;
+    return s;
+  };
+
+  for (int kIdx : launchOrder) {
+    // Allocate slots for this kernel's intermediate outputs.  Outputs
+    // that ARE graph_outputs use caller-owned buffers and don't need a
+    // slot.
+    for (int b : kio.kernelOutputBufs[kIdx]) {
+      if (b < firstIntermediate) continue;
+      plan.intermediateBufToSlot[b] = allocSlot();
+    }
+    // Decrement refcounts on inputs; intermediate slots whose refcount
+    // hits zero return to the free pool.
+    for (int b : kio.kernelInputBufs[kIdx]) {
+      if (--refcount[b] == 0 && b >= firstIntermediate) {
+        int s = plan.intermediateBufToSlot[b];
+        if (s >= 0) freePool.push_back(s);
+      }
+    }
+  }
+  return plan;
+}
+
+} // namespace
+
+//===----------------------------------------------------------------------===//
+// Launch helpers — pure functions used by launchOnStream below.
+//===----------------------------------------------------------------------===//
+
+KernelLaunchDesc::KernelLaunchDesc(
+    int kernelIndex, KernelKind kind, CUfunction fn, bool isKernelNode,
+    int32_t timeLenI32, int32_t numStocksI32, int32_t maskI32,
+    int32_t chunkSizeI32, int32_t warmupI32,
+    std::vector<CUdeviceptr> ptrs)
+    : kernelIndex(kernelIndex),
+      kind(kind),
+      isKernelNode(isKernelNode),
+      timeLenI32(timeLenI32),
+      numStocksI32(numStocksI32),
+      maskI32(maskI32),
+      chunkSizeI32(chunkSizeI32),
+      warmupI32(warmupI32),
+      ptrs_(std::move(ptrs)) {
+  params = {};
+  params.func = fn;
+  params.gridDimX = 1;
+  params.gridDimY = 1;
+  params.gridDimZ = 1;
+  params.blockDimX = 1;
+  params.blockDimY = 1;
+  params.blockDimZ = 1;
+  params.sharedMemBytes = 0;
+  rebuildKernelParamPointers();
+}
+
+KernelLaunchDesc::KernelLaunchDesc(KernelLaunchDesc &&other) noexcept
+    : kernelIndex(other.kernelIndex),
+      kind(other.kind),
+      isKernelNode(other.isKernelNode),
+      timeLenI32(other.timeLenI32),
+      numStocksI32(other.numStocksI32),
+      maskI32(other.maskI32),
+      chunkSizeI32(other.chunkSizeI32),
+      warmupI32(other.warmupI32),
+      params(other.params),
+      ptrs_(std::move(other.ptrs_)) {
+  rebuildKernelParamPointers();
+}
+
+KernelLaunchDesc &
+KernelLaunchDesc::operator=(KernelLaunchDesc &&other) noexcept {
+  if (this == &other)
+    return *this;
+  kernelIndex = other.kernelIndex;
+  kind = other.kind;
+  isKernelNode = other.isKernelNode;
+  timeLenI32 = other.timeLenI32;
+  numStocksI32 = other.numStocksI32;
+  maskI32 = other.maskI32;
+  chunkSizeI32 = other.chunkSizeI32;
+  warmupI32 = other.warmupI32;
+  params = other.params;
+  ptrs_ = std::move(other.ptrs_);
+  rebuildKernelParamPointers();
+  return *this;
+}
+
+void KernelLaunchDesc::rebuildKernelParamPointers() {
+  argPtrs_.clear();
+  params.kernelParams = nullptr;
+  params.extra = nullptr;
+  if (!isKernelNode)
+    return;
+
+  if (kind == KernelKind::Jit) {
+    argPtrs_.reserve(5 + ptrs_.size());
+    argPtrs_.push_back(&timeLenI32);
+    argPtrs_.push_back(&numStocksI32);
+    argPtrs_.push_back(&maskI32);
+    argPtrs_.push_back(&chunkSizeI32);
+    argPtrs_.push_back(&warmupI32);
+  } else {
+    argPtrs_.reserve(2 + ptrs_.size());
+    argPtrs_.push_back(&timeLenI32);
+    argPtrs_.push_back(&numStocksI32);
+  }
+  for (auto &p : ptrs_)
+    argPtrs_.push_back(&p);
+  params.kernelParams = argPtrs_.data();
+}
+
+int firstIntermediateBuffer(const GraphPlan &plan) noexcept {
+  return plan.numGraphInputs + plan.numGraphOutputs;
+}
+
+void validateLaunchInputs(const ExecutableData &data,
+                          int64_t timeLength, int64_t numStocks,
+                          int64_t mask) {
+  if (timeLength > std::numeric_limits<int32_t>::max() ||
+      numStocks  > std::numeric_limits<int32_t>::max() ||
+      timeLength < 0 || numStocks < 0)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: time_length / num_stocks out of i32 "
+        "range (kernel signature uses i32, i32)");
+  if (mask < 0 || (timeLength > 0 && mask >= timeLength))
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: mask must be in [0, time_length), got "
+        + std::to_string(mask) + " for time_length="
+        + std::to_string(timeLength));
+  if (data.warpsPerCta <= 0)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: warps_per_cta is " +
+        std::to_string(data.warpsPerCta));
+}
+
+/// Translate the user-supplied {name → device_ptr} args dict into a flat
+/// buffer-index → pointer array for graph inputs/outputs.  Intermediate slots
+/// are left as 0 and filled by the caller.
+std::vector<uintptr_t> resolveExternalBufferPointers(
+    const GraphPlan &plan,
+    const ExecutableData &data,
+    const std::vector<std::pair<std::string, uintptr_t>> &args) {
+  std::vector<uintptr_t> bufPtrs(plan.numBuffers, 0);
+  std::vector<bool>      filled(plan.numBuffers, false);
+
+  for (const auto &kv : args) {
+    auto itIn  = plan.graphInputIdx.find(kv.first);
+    auto itOut = plan.graphOutputIdx.find(kv.first);
+    int idx = -1;
+    if (itIn != plan.graphInputIdx.end())
+      idx = itIn->second;
+    else if (itOut != plan.graphOutputIdx.end())
+      idx = itOut->second;
+    else
+      throw std::runtime_error(
+          "kun_cuda::launchOnStream: unexpected argument '" + kv.first +
+          "' (expected: " + joinNames(data.graphInputs) + " | " +
+          joinNames(data.graphOutputs) + ")");
+    bufPtrs[idx] = kv.second;
+    filled[idx] = true;
+  }
+
+  // Confirm every graph_input + graph_output was supplied.
+  for (int i = 0; i < plan.numGraphInputs + plan.numGraphOutputs; ++i) {
+    if (filled[i]) continue;
+    std::string missing;
+    for (auto &kv : plan.graphInputIdx)  if (kv.second == i) missing = kv.first;
+    if (missing.empty())
+      for (auto &kv : plan.graphOutputIdx) if (kv.second == i) missing = kv.first;
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: missing argument '" + missing + "'");
+  }
+
+  return bufPtrs;
+}
+
+/// Translate the user-supplied {name → device_ptr} args dict into a
+/// flat buffer-index → pointer array, plug in the executable-owned
+/// intermediate-slot pointers, and verify every graph_input /
+/// graph_output the plan expects was provided.  Throws on unknown or
+/// missing names.
+std::vector<uintptr_t> resolveBufferPointers(
+    const GraphPlan &plan,
+    const ExecutableData &data,
+    const std::vector<std::pair<std::string, uintptr_t>> &args,
+    const std::vector<uintptr_t> &slotBufs) {
+  std::vector<uintptr_t> bufPtrs =
+      resolveExternalBufferPointers(plan, data, args);
+
+  // Intermediates: index into the pre-allocated slot pool.
+  for (int i = firstIntermediateBuffer(plan); i < plan.numBuffers; ++i) {
+    int slot = plan.intermediateBufToSlot[i];
+    bufPtrs[i] = slotBufs[slot];
+  }
+  return bufPtrs;
+}
+
+static void resetLaunchShape(KernelLaunchDesc &desc) {
+  desc.params.gridDimX = 1;
+  desc.params.gridDimY = 1;
+  desc.params.gridDimZ = 1;
+  desc.params.blockDimX = 1;
+  desc.params.blockDimY = 1;
+  desc.params.blockDimZ = 1;
+  desc.params.sharedMemBytes = 0;
+}
+
+static void computeJitLaunchShape(KernelLaunchDesc &desc,
+                                  int64_t numStocks,
+                                  int64_t warpsPerCta,
+                                  int64_t vectorSize,
+                                  unsigned numChunks) {
+  desc.params.blockDimX = static_cast<unsigned>(warpsPerCta * 32);
+  uint64_t stocksPerBlock =
+      static_cast<uint64_t>(desc.params.blockDimX) *
+      static_cast<uint64_t>(vectorSize);
+  desc.params.gridDimX = static_cast<unsigned>(
+      (static_cast<uint64_t>(numStocks) + stocksPerBlock - 1) /
+      stocksPerBlock);
+  desc.params.gridDimY = numChunks;
+}
+
+/// Chunk plan for a single JIT kernel.  `chunkSize` is the time-axis
+/// width of every chunk (last chunk gets clipped to `timeLength` by
+/// kungpu.time_ub at runtime, so we don't have to special-case that
+/// here).  `numChunks` is the y-dim of the launch grid.
+///
+/// Decision tree (per kernel, since per-partition `unreliableCount`
+/// varies):
+///
+///   1. target chunks   = ceil(smFillFactor * numSMs / stockTiles), ≥ 1
+///   2. cap by warmup   = floor(T / (factor * unreliableCount))
+///        — bounds the per-chunk overhead of chunks ≥ 1, which redo the
+///          trailing `unreliableCount` time steps to prime windowed
+///          rolling state.  mask is NOT included here: it's a one-time
+///          chunk-0 skip, not a per-chunk overhead.
+///   3. cap by mask     = floor((T - 1) / mask)
+///        — chunks ≥ 1 write output[t - mask] for t ∈ [cy*chunk_size, …);
+///          if chunk_size ≤ mask, chunk 1's first output index is
+///          negative (out-of-bounds gmem write).  Enforce chunk_size >
+///          mask by capping num_chunks here.
+///   4. numChunks       = clamp(target, 1, min(cap_warmup, cap_mask))
+///   5. chunkSize       = ceil(T / numChunks)
+///
+/// When both unreliable == 0 and mask == 0, the only cap is T itself.
+/// When numSMs == 0 (Executor couldn't query the device) or
+/// smFillFactor ≤ 0, fall back to single-chunk.
+ChunkPlan computeChunkPlan(int64_t timeLength, int64_t numStocks,
+                           int64_t warpsPerCta, int64_t vectorSize,
+                           int64_t unreliableCount, int64_t mask,
+                           int minChunkWarmupFactor,
+                           double smFillFactor, int numSMs) {
+  if (timeLength <= 0)
+    return {timeLength, 1u};
+  if (numSMs <= 0 || smFillFactor <= 0.0)
+    return {timeLength, 1u};
+  // unreliableCount = -1 sentinel → whole time history required, single
+  // chunk only.  Any other negative value is rejected by the IR verifier;
+  // we don't try to interpret it.
+  if (unreliableCount < 0)
+    return {timeLength, 1u};
+
+  int64_t blockX = warpsPerCta * 32;
+  int64_t stocksPerBlock = blockX * vectorSize;
+  int64_t stockTiles =
+      (numStocks + stocksPerBlock - 1) / stocksPerBlock;
+  if (stockTiles <= 0) stockTiles = 1;
+
+  // Target chunks just to fill the GPU.  Round up so we don't under-fill.
+  int64_t targetChunks = static_cast<int64_t>(
+      std::ceil(smFillFactor * static_cast<double>(numSMs) /
+                  static_cast<double>(stockTiles)));
+  if (targetChunks < 1) targetChunks = 1;
+
+  // Caps on numChunks.  Start at T (degenerate upper bound: ≥ 1 step per
+  // chunk) and tighten with each constraint; clamp to ≥ 1 once at the end.
+  int64_t cap = timeLength;
+
+  // Per-chunk warmup overhead bound (chunks ≥ 1 only).
+  if (unreliableCount > 0 && minChunkWarmupFactor > 0)
+    cap = std::min<int64_t>(
+        cap,
+        timeLength /
+            (static_cast<int64_t>(minChunkWarmupFactor) * unreliableCount));
+
+  // chunkSize > mask: chunks ≥ 1 compute output index t - mask, which
+  // must be ≥ 0 for their writes.  chunk_size = ceil(T / numChunks);
+  // we want ceil(T / numChunks) > mask, equivalently numChunks ≤
+  // (T - 1) / mask.
+  if (mask > 0)
+    cap = std::min<int64_t>(cap, (timeLength - 1) / mask);
+
+  if (cap < 1) cap = 1;
+
+  int64_t numChunks = std::min<int64_t>(targetChunks, cap);
+  if (numChunks < 1) numChunks = 1;
+
+  int64_t chunkSize = (timeLength + numChunks - 1) / numChunks;
+  return {chunkSize, static_cast<unsigned>(numChunks)};
+}
+
+/// External cross-sectional launch.
+///
+/// Block / grid both auto-tuned — these kernels are cross-sectional, so the
+/// graph-wide `warps_per_cta` hint doesn't apply.
+///
+///   blockX = clamp(round_up(numStocks, 32), 32, 1024)
+///       Each thread owns roughly one stock; when numStocks > 1024 the
+///       kernel falls back to its built-in `for (i = tid; i < S; i +=
+///       blockDim.x)` stride loop.
+///
+///   gridX  = min(timeLength, ceil(smFillFactor * numSMs))
+///       The kernel does a contiguous time-axis slice per CTA via a
+///       grid-stride loop (see kernels/cs_*.cu).  For small T the
+///       min clamps to 1 CTA per timestep (matches the pre-tuning
+///       launch shape); for large T fewer CTAs each do more time
+///       steps, reducing launch / scheduling overhead.
+///
+///   smem   = numStocks * sizeof(T)  (one cross-section, reused across
+///                                     the CTA's time slice)
+///
+/// Falls back to (gridX = timeLength, blockX = 32) when the executor
+/// couldn't query `numSMs` from the device — degenerate "one CTA per
+/// timestep, one warp per CTA" still works correctly.
+static bool isF64ExternalKind(KernelKind kind) {
+  return kind == KernelKind::ExtCsRankF64 ||
+         kind == KernelKind::ExtCsScaleF64;
+}
+
+static bool isCsRankKind(KernelKind kind) {
+  return kind == KernelKind::ExtCsRankF32 ||
+         kind == KernelKind::ExtCsRankF64;
+}
+
+static bool isCsScaleKind(KernelKind kind) {
+  return kind == KernelKind::ExtCsScaleF32 ||
+         kind == KernelKind::ExtCsScaleF64;
+}
+
+static void computeExtCsLaunchShape(KernelLaunchDesc &desc,
+                                    KernelKind kind,
+                                    const std::string &kernelName,
+                                    int64_t timeLength,
+                                    int64_t numStocks,
+                                    int devMaxSmemBytes,
+                                    double smFillFactor,
+                                    int numSMs) {
+  size_t elemSize = isF64ExternalKind(kind) ? 8u : 4u;
+  uint64_t smemElems = static_cast<uint64_t>(numStocks);
+  if (isCsScaleKind(kind))
+    smemElems += 1;
+  uint64_t smemBytes64 = smemElems * static_cast<uint64_t>(elemSize);
+
+  if (devMaxSmemBytes <= 0)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: external cross-sectional kernel '" +
+        kernelName +
+        "' requires Executor's devMaxSmemBytes to be set; got 0.  "
+        "Construct the Executable through Executor::runGraph, or pass "
+        "devMaxSmemBytes when calling launchOnStream directly.");
+  if (smemBytes64 > static_cast<uint64_t>(devMaxSmemBytes))
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: cross-sectional dynamic smem "
+        "(elements=" + std::to_string(smemElems) +
+        " * sizeof(T)=" + std::to_string(elemSize) + " = " +
+        std::to_string(smemBytes64) +
+        " bytes) exceeds this GPU's MAX_SHARED_MEMORY_PER_BLOCK_OPTIN (" +
+        std::to_string(devMaxSmemBytes) +
+        " bytes).  Reduce num_stocks or run on a GPU with a larger smem budget.");
+
+  if (timeLength <= 0)
+    return; // empty time chunk — nothing to launch
+
+  constexpr int kWarp = 32;
+  constexpr int kMaxBlock = 1024;
+  int64_t blockX64 =
+      ((std::max<int64_t>(numStocks, 1) + kWarp - 1) / kWarp) * kWarp;
+  if (blockX64 > kMaxBlock) blockX64 = kMaxBlock;
+  desc.params.blockDimX = static_cast<unsigned>(blockX64);
+
+  // Target gridX = sm_fill_factor * numSMs (capped at timeLength so we
+  // never launch idle CTAs).  numSMs == 0 (device query failed) →
+  // gridX = timeLength, one CTA per timestep.
+  if (numSMs > 0 && smFillFactor > 0.0) {
+    int64_t target = static_cast<int64_t>(
+        std::ceil(smFillFactor * static_cast<double>(numSMs)));
+    if (target < 1) target = 1;
+    if (target > timeLength) target = timeLength;
+    desc.params.gridDimX = static_cast<unsigned>(target);
+  } else {
+    desc.params.gridDimX = static_cast<unsigned>(timeLength);
+  }
+  desc.params.sharedMemBytes = static_cast<unsigned>(smemBytes64);
+}
+
+static std::pair<bool, bool>
+updateKernelArgPtrs(std::vector<CUdeviceptr> &ptrs,
+                    const std::vector<int> &ins,
+                    const std::vector<int> &outs,
+                    const std::vector<uintptr_t> &bufPtrs) {
+  const size_t numPtrs = ins.size() + outs.size();
+  const bool sizeChanged = ptrs.size() != numPtrs;
+  bool changed = sizeChanged;
+  if (!changed) {
+    size_t argIdx = 0;
+    for (int b : ins) {
+      if (ptrs[argIdx++] != static_cast<CUdeviceptr>(bufPtrs[b])) {
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) {
+      for (int b : outs) {
+        if (ptrs[argIdx++] != static_cast<CUdeviceptr>(bufPtrs[b])) {
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  if (!changed)
+    return {};
+
+  ptrs.resize(numPtrs);
+  size_t argIdx = 0;
+  for (int b : ins)
+    ptrs[argIdx++] = static_cast<CUdeviceptr>(bufPtrs[b]);
+  for (int b : outs)
+    ptrs[argIdx++] = static_cast<CUdeviceptr>(bufPtrs[b]);
+  return {true, sizeChanged};
+}
+
+bool KernelLaunchDesc::updateBuffer(
+    const GraphPlan &plan,
+    int kIdx,
+    const std::vector<uintptr_t> &bufPtrs) {
+  const auto &ins = plan.kernelInputBufs[kIdx];
+  const auto &outs = plan.kernelOutputBufs[kIdx];
+  const size_t numPtrs = ins.size() + outs.size();
+  if (ptrs_.size() != numPtrs)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream(cuda_graph): kernel buffer argument count "
+        "changed without graph rebuild");
+  auto [changed, reallocated] =
+      updateKernelArgPtrs(ptrs_, ins, outs, bufPtrs);
+  (void)reallocated;
+  return changed;
+}
+
+void KernelLaunchDesc::update(
+    const GraphPlan &plan,
+    const ExecutableData &data,
+    const std::vector<CUfunction> &cuFuncs,
+    int kIdx,
+    const CudaGraphLaunchParams &launch) {
+  const auto &ins  = plan.kernelInputBufs[kIdx];
+  const auto &outs = plan.kernelOutputBufs[kIdx];
+  const auto &meta = data.kernels[kIdx];
+
+  kernelIndex = kIdx;
+  kind = meta.kind;
+  isKernelNode = meta.kind == KernelKind::Jit || launch.timeLength > 0;
+  timeLenI32 = static_cast<int32_t>(launch.timeLength);
+  numStocksI32 = static_cast<int32_t>(launch.numStocks);
+  maskI32 = static_cast<int32_t>(launch.mask);
+  params.func = cuFuncs[kIdx];
+  auto [changed, reallocated] =
+      updateKernelArgPtrs(ptrs_, ins, outs, launch.bufPtrs);
+  (void)changed;
+
+  unsigned numChunks = 1;
+  chunkSizeI32 = 0;
+  warmupI32 = 0;
+  if (meta.kind == KernelKind::Jit) {
+    ChunkPlan cp = computeChunkPlan(
+        launch.timeLength, launch.numStocks, data.warpsPerCta,
+        data.vectorSize, meta.unreliableCount, launch.mask,
+        launch.minChunkWarmupFactor, launch.smFillFactor, launch.numSMs);
+    numChunks = cp.numChunks;
+    chunkSizeI32 = static_cast<int32_t>(cp.chunkSize);
+    warmupI32 = static_cast<int32_t>(
+        std::max<int64_t>(meta.unreliableCount, 0));
+  }
+
+  resetLaunchShape(*this);
+  if (meta.kind == KernelKind::Jit) {
+    computeJitLaunchShape(*this, launch.numStocks, data.warpsPerCta,
+                          data.vectorSize, numChunks);
+  } else if (isKernelNode) {
+    computeExtCsLaunchShape(*this, meta.kind, meta.kernelName,
+                            launch.timeLength, launch.numStocks,
+                            launch.devMaxSmemBytes,
+                            launch.smFillFactor, launch.numSMs);
+  }
+
+  if (reallocated)
+    rebuildKernelParamPointers();
+}
+
+static std::vector<KernelLaunchDesc> buildKernelLaunchDescs(
+    const GraphPlan &plan,
+    const ExecutableData &data,
+    const std::vector<CUfunction> &cuFuncs,
+    int64_t timeLength, int64_t numStocks,
+    const std::vector<uintptr_t> &bufPtrs,
+    int64_t mask,
+    int minChunkWarmupFactor,
+    double smFillFactor,
+    int devMaxSmemBytes,
+    int numSMs) {
+  CudaGraphLaunchParams launch;
+  launch.timeLength = timeLength;
+  launch.numStocks = numStocks;
+  launch.mask = mask;
+  launch.minChunkWarmupFactor = minChunkWarmupFactor;
+  launch.smFillFactor = smFillFactor;
+  launch.devMaxSmemBytes = devMaxSmemBytes;
+  launch.numSMs = numSMs;
+  launch.bufPtrs = bufPtrs;
+
+  std::vector<KernelLaunchDesc> descs;
+  descs.reserve(plan.launchOrder.size());
+  for (int kIdx : plan.launchOrder) {
+    KernelLaunchDesc desc;
+    desc.update(plan, data, cuFuncs, kIdx, launch);
+    descs.emplace_back(std::move(desc));
+  }
+  return descs;
+}
+
+void launchKernelDesc(const KernelLaunchDesc &desc, CUstream stream) {
+  if (!desc.isKernelNode)
+    return;
+  const char *what = desc.kind == KernelKind::Jit
+                         ? "cuLaunchKernel"
+                         : "cuLaunchKernel(external_cs)";
+  const CUDA_KERNEL_NODE_PARAMS &p = desc.params;
+  checkCu(cuLaunchKernel(p.func,
+                         p.gridDimX, p.gridDimY, p.gridDimZ,
+                         p.blockDimX, p.blockDimY, p.blockDimZ,
+                         p.sharedMemBytes, stream,
+                         p.kernelParams, p.extra),
+          what);
+}
+
+//===----------------------------------------------------------------------===//
+// Kernel-module / kernel-symbol helpers — read ExecutableData, mutate
+// the CUmodule and CUfunction handles the ctor is populating.
+//===----------------------------------------------------------------------===//
+
+namespace {
+
+/// Load the JIT'd cubin if non-empty; otherwise sanity-check that no
+/// kernel actually needs it (every `kind == Jit` requires a cubin).
+static void loadJitCubin(const ExecutableData &data, CUmodule &outModule) {
+  if (!data.cubin.empty()) {
+    checkCu(cuModuleLoadData(&outModule, data.cubin.data()),
+             "cuModuleLoadData");
+    return;
+  }
+  for (const auto &k : data.kernels)
+    if (k.kind == KernelKind::Jit)
+      throw std::runtime_error(
+          "kun_cuda::Executable: JIT kernel '" + k.kernelName +
+          "' declared but no cubin supplied — this is a compile-side bug");
+}
+
+/// Lazy-load bundled external cross-sectional PTX modules iff any
+/// kernel uses them.  The driver JITs PTX → SASS on first load (cached
+/// system-wide in ~/.nv/ComputeCache), so this is sub-ms after the
+/// first run on a given GPU.
+static void loadExternalCsPtxIfNeeded(const std::vector<KernelMeta> &kernels,
+                                      CUmodule &csRankModule,
+                                      CUmodule &csScaleModule) {
+  bool needRank = false;
+  bool needScale = false;
+  for (const auto &k : kernels) {
+    needRank |= isCsRankKind(k.kind);
+    needScale |= isCsScaleKind(k.kind);
+    if (needRank && needScale)
+      break;
+  }
+
+  if (needRank)
+    checkCu(cuModuleLoadData(&csRankModule, kun_cs_rank_ptx),
+             "cuModuleLoadData(cs_rank.ptx)");
+  if (needScale)
+    checkCu(cuModuleLoadData(&csScaleModule, kun_cs_scale_ptx),
+             "cuModuleLoadData(cs_scale.ptx)");
+}
+
+/// Pick the right CUmodule + symbol name for a kernel and resolve it.
+static CUfunction resolveOneKernelSymbol(const KernelMeta &k,
+                                          CUmodule jitModule,
+                                          CUmodule csRankModule,
+                                          CUmodule csScaleModule) {
+  CUmodule mod = nullptr;
+  const char *symbol = nullptr;
+  switch (k.kind) {
+    case KernelKind::Jit:
+      mod = jitModule;
+      symbol = k.kernelName.c_str();
+      break;
+    case KernelKind::ExtCsRankF32:
+      mod = csRankModule;
+      symbol = "kun_cs_rank_f32";
+      break;
+    case KernelKind::ExtCsRankF64:
+      mod = csRankModule;
+      symbol = "kun_cs_rank_f64";
+      break;
+    case KernelKind::ExtCsScaleF32:
+      mod = csScaleModule;
+      symbol = "kun_cs_scale_f32";
+      break;
+    case KernelKind::ExtCsScaleF64:
+      mod = csScaleModule;
+      symbol = "kun_cs_scale_f64";
+      break;
+  }
+  CUfunction fn = nullptr;
+  checkCu(cuModuleGetFunction(&fn, mod, symbol),
+           "cuModuleGetFunction");
+  return fn;
+}
+
+/// Opt every external (non-Jit) function into the device's full
+/// dynamic-smem budget up-front.  The attribute is purely a permission
+/// cap — raising it doesn't change the carveout or per-launch smem
+/// cost, so we do it eagerly here rather than per-launch.  No-op if
+/// there are no external kernels.
+static void optInExternalSmemMax(const std::vector<KernelMeta> &kernels,
+                                   const std::vector<CUfunction> &funcs) {
+  bool anyExternal = false;
+  for (const auto &k : kernels)
+    if (k.kind != KernelKind::Jit) { anyExternal = true; break; }
+  if (!anyExternal)
+    return;
+
+  CUdevice dev = 0;
+  checkCu(cuCtxGetDevice(&dev), "cuCtxGetDevice");
+  int maxOptIn = 0;
+  checkCu(cuDeviceGetAttribute(
+              &maxOptIn,
+              CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, dev),
+           "cuDeviceGetAttribute(MAX_SHARED_MEMORY_PER_BLOCK_OPTIN)");
+  for (size_t i = 0; i < funcs.size(); ++i) {
+    if (kernels[i].kind == KernelKind::Jit) continue;
+    int staticSmem = 0;
+    checkCu(cuFuncGetAttribute(&staticSmem,
+                                CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,
+                                funcs[i]),
+             "cuFuncGetAttribute(SHARED_SIZE_BYTES)");
+    int dynamicMax = maxOptIn - staticSmem;
+    if (dynamicMax < 0) dynamicMax = 0;
+    checkCu(cuFuncSetAttribute(
+                funcs[i],
+                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                dynamicMax),
+             "cuFuncSetAttribute(MAX_DYNAMIC_SHARED_SIZE_BYTES)");
+  }
+}
+
+/// Per-kernel-kind I/O arity check.  External cross-sectional kernels have a
+/// fixed signature `(T_in, T_out)` — the kernel signature is set in
+/// stone by `kernels/cs_*.cu`, so we know the wiring is wrong (not
+/// just unusual) the moment we see any other shape.  Static property
+/// of the graph, so done at construction.
+static void validateKernelIO(const std::vector<KernelMeta> &kernels,
+                               const std::vector<std::vector<int>> &kernelInputBufs,
+                               const std::vector<std::vector<int>> &kernelOutputBufs) {
+  for (size_t i = 0; i < kernels.size(); ++i) {
+    const auto &k    = kernels[i];
+    const size_t nIn = kernelInputBufs[i].size();
+    const size_t nOut = kernelOutputBufs[i].size();
+    switch (k.kind) {
+      case KernelKind::Jit:
+        // JIT kernels can have any arity — they're whatever the MLIR
+        // pipeline emitted.
+        break;
+      case KernelKind::ExtCsRankF32:
+      case KernelKind::ExtCsRankF64:
+      case KernelKind::ExtCsScaleF32:
+      case KernelKind::ExtCsScaleF64:
+        if (nIn != 1 || nOut != 1)
+          throw std::runtime_error(
+              "kun_cuda::Executable: external cross-sectional kernel '" +
+              k.kernelName +
+              "' must have exactly 1 input and 1 output (have " +
+              std::to_string(nIn) + " / " + std::to_string(nOut) + ")");
+        break;
+    }
+  }
+}
+
+} // namespace
+
+//===----------------------------------------------------------------------===//
+// Executable
+//===----------------------------------------------------------------------===//
+
+LoadedExecutable::LoadedExecutable(std::shared_ptr<const ExecutableData> dataIn)
+    : data(std::move(dataIn)) {
+  if (!data)
+    throw std::runtime_error(
+        "kun_cuda::LoadedExecutable: ExecutableData pointer is null");
+  const ExecutableData &d = *data;
+
+  // Require a primary context to already exist on the calling thread —
+  // the caller's job to set one up (e.g. by allocating any device memory
+  // through cupy / cudaMalloc).
+  CUcontext cur = nullptr;
+  checkCu(cuCtxGetCurrent(&cur), "cuCtxGetCurrent");
+  if (!cur)
+    throw std::runtime_error(
+        "kun_cuda::LoadedExecutable: no current CUDA context.  Initialise the "
+        "driver first (e.g. allocate any device memory via cupy or "
+        "cudaMalloc) before constructing an Executable.");
+  if (d.kernels.empty())
+    throw std::runtime_error(
+        "kun_cuda::Executable: ExecutableData has no kernels");
+  if (d.graphInputs.empty())
+    throw std::runtime_error(
+        "kun_cuda::Executable: graph_inputs must be non-empty");
+  if (d.graphOutputs.empty())
+    throw std::runtime_error(
+        "kun_cuda::Executable: graph_outputs must be non-empty");
+
+  // ── Build the runtime plan ───────────────────────────────────────
+  BufTable tbl  = buildBufferIndices(d.graphInputs, d.graphOutputs,
+                                       d.kernels);
+  KernelIO kio  = resolveKernelIO(d.kernels, tbl);
+  validateGraph(d.kernels, d.graphOutputs, tbl, kio);
+  std::vector<int> order = topoSort(kio, static_cast<int>(d.kernels.size()));
+  SlotPlan slots = planSlots(order, tbl, kio);
+
+  plan.numBuffers          = tbl.numBuffers;
+  plan.numGraphInputs      = tbl.numGraphInputs;
+  plan.numGraphOutputs     = tbl.numGraphOutputs;
+  plan.graphInputIdx       = std::move(tbl.graphInputIdx);
+  plan.graphOutputIdx      = std::move(tbl.graphOutputIdx);
+  plan.kernelInputBufs     = std::move(kio.kernelInputBufs);
+  plan.kernelOutputBufs    = std::move(kio.kernelOutputBufs);
+  plan.producerKernel      = std::move(kio.producerKernel);
+  plan.launchOrder         = std::move(order);
+  plan.intermediateBufToSlot = std::move(slots.intermediateBufToSlot);
+  plan.peakIntermediateSlots = slots.peakIntermediateSlots;
+
+  // ── Per-kernel I/O arity validation ──────────────────────────────
+  // Catches mis-wired external kernels (which have a fixed signature)
+  // at construction time, well before the launch path.
+  validateKernelIO(d.kernels, plan.kernelInputBufs, plan.kernelOutputBufs);
+
+  // ── Load cubin(s) + resolve every kernel symbol ──────────────────
+  try {
+    loadJitCubin(d, cuModule);
+    loadExternalCsPtxIfNeeded(d.kernels, csRankModule, csScaleModule);
+
+    cuFuncs.resize(d.kernels.size(), nullptr);
+    for (size_t i = 0; i < d.kernels.size(); ++i) {
+      cuFuncs[i] = resolveOneKernelSymbol(d.kernels[i],
+                                          cuModule, csRankModule,
+                                          csScaleModule);
+    }
+
+    // ── Opt external kernels into the device's full dynamic smem cap ──
+    optInExternalSmemMax(d.kernels, cuFuncs);
+  } catch (...) {
+    if (cuModule)
+      cuModuleUnload(cuModule);
+    if (csRankModule)
+      cuModuleUnload(csRankModule);
+    if (csScaleModule)
+      cuModuleUnload(csScaleModule);
+    cuModule = nullptr;
+    csRankModule = nullptr;
+    csScaleModule = nullptr;
+    throw;
+  }
+}
+
+LoadedExecutable::~LoadedExecutable() noexcept {
+  if (cuModule)
+    cuModuleUnload(cuModule);
+  if (csRankModule)
+    cuModuleUnload(csRankModule);
+  if (csScaleModule)
+    cuModuleUnload(csScaleModule);
+}
+
+Executable::Executable(std::shared_ptr<const ExecutableData> data)
+    : data_(std::move(data)),
+      loaded_(std::make_shared<LoadedExecutable>(data_)) {}
+
+Executable::Executable(std::shared_ptr<const ExecutableData> data,
+                       std::shared_ptr<LoadedExecutable> loaded)
+    : data_(std::move(data)), loaded_(std::move(loaded)) {
+  if (!data_)
+    throw std::runtime_error(
+        "kun_cuda::Executable: ExecutableData pointer is null");
+  if (!loaded_)
+    throw std::runtime_error(
+        "kun_cuda::Executable: LoadedExecutable pointer is null");
+}
+
+std::unique_ptr<Executable> Executable::clone() const {
+  return std::unique_ptr<Executable>(
+      new Executable(data_, loaded_));
+}
+
+Executable::~Executable() {
+  // Best-effort cleanup; we deliberately don't propagate driver errors
+  // out of a destructor.
+  resetCudaGraphState();
+  freeSlotPool();
+}
+
+void Executable::freeSlotPool() {
+  for (uintptr_t p : slotBufs_)
+    if (p) cuMemFree(static_cast<CUdeviceptr>(p));
+  slotBufs_.clear();
+  cachedT_ = -1;
+  cachedS_ = -1;
+}
+
+void Executable::ensureSlotPool(int64_t timeLength, int64_t numStocks) {
+  if (timeLength == cachedT_ && numStocks == cachedS_ &&
+      static_cast<int>(slotBufs_.size()) == loaded_->plan.peakIntermediateSlots)
+    return;
+  freeSlotPool();
+  if (loaded_->plan.peakIntermediateSlots == 0) {
+    cachedT_ = timeLength;
+    cachedS_ = numStocks;
+    return;
+  }
+  size_t bytesPerSlot = static_cast<size_t>(timeLength) *
+                          static_cast<size_t>(numStocks) *
+                          bytesPerElem(data_->dtype);
+  slotBufs_.resize(loaded_->plan.peakIntermediateSlots, 0);
+  for (int i = 0; i < loaded_->plan.peakIntermediateSlots; ++i) {
+    CUdeviceptr p = 0;
+    checkCu(cuMemAlloc(&p, bytesPerSlot), "cuMemAlloc(intermediate slot)");
+    slotBufs_[i] = static_cast<uintptr_t>(p);
+  }
+  cachedT_ = timeLength;
+  cachedS_ = numStocks;
+}
+
+//===----------------------------------------------------------------------===//
+// Out-of-line plan accessors (header forward-declares GraphPlan)
+//===----------------------------------------------------------------------===//
+
+const std::vector<int> &Executable::launchOrder() const noexcept {
+  return loaded_->plan.launchOrder;
+}
+int Executable::numBuffers() const noexcept { return loaded_->plan.numBuffers; }
+int Executable::peakIntermediateSlots() const noexcept {
+  return loaded_->plan.peakIntermediateSlots;
+}
+
+void Executable::launchOnStream(
+    Executor *exec,
+    int64_t timeLength, int64_t numStocks,
+    const std::vector<std::pair<std::string, uintptr_t>> &args,
+    int64_t mask,
+    int minChunkWarmupFactor,
+    double smFillFactor,
+    LaunchMode mode) {
+  if (!exec)
+    throw std::runtime_error(
+        "kun_cuda::launchOnStream: Executor pointer is null");
+
+  validateLaunchInputs(*data_, timeLength, numStocks, mask);
+
+  if (mode == LaunchMode::CudaGraph) {
+    launchCudaGraphOnStream(exec, timeLength, numStocks, args,
+                            mask, minChunkWarmupFactor, smFillFactor);
+    return;
+  }
+
+  CUstream stream      = exec->stream();
+  int devMaxSmemBytes  = exec->devMaxSmemBytes();
+  int numSMs           = exec->numSMs();
+
+  // ── Grow / reuse the intermediate slot pool for this shape ───────
+  ensureSlotPool(timeLength, numStocks);
+
+  // ── Map user args + slot pool into a flat buffer-index → ptr ─────
+  const std::vector<uintptr_t> bufPtrs =
+      resolveBufferPointers(loaded_->plan, *data_, args, slotBufs_);
+
+  std::vector<KernelLaunchDesc> descs =
+      buildKernelLaunchDescs(loaded_->plan, *data_, loaded_->cuFuncs,
+                             timeLength, numStocks, bufPtrs,
+                             mask, minChunkWarmupFactor, smFillFactor,
+                             devMaxSmemBytes, numSMs);
+  for (const auto &desc : descs)
+    launchKernelDesc(desc, stream);
+}
+
+//===----------------------------------------------------------------------===//
+// Executor — thin CUstream wrapper, mirrors the CPU `kun::Executor` shape.
+//===----------------------------------------------------------------------===//
+
+namespace {
+/// Query the current CUcontext's device for a single integer attribute.
+/// Returns 0 if no context is current — callers gate use on 0 == "unknown".
+int queryDevAttr(CUdevice_attribute attr) {
+  CUcontext cur = nullptr;
+  if (cuCtxGetCurrent(&cur) != CUDA_SUCCESS || !cur) return 0;
+  CUdevice dev = 0;
+  if (cuCtxGetDevice(&dev) != CUDA_SUCCESS) return 0;
+  int v = 0;
+  if (cuDeviceGetAttribute(&v, attr, dev) != CUDA_SUCCESS) return 0;
+  return v;
+}
+} // namespace
+
+Executor::Executor()
+    : stream_(nullptr),
+      devMaxSmemBytes_(
+          queryDevAttr(CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN)),
+      numSMs_(queryDevAttr(CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)) {}
+Executor::Executor(CUstream stream)
+    : stream_(stream),
+      devMaxSmemBytes_(
+          queryDevAttr(CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN)),
+      numSMs_(queryDevAttr(CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)) {}
+Executor::~Executor() = default;
+
+void Executor::runGraph(
+    Executable &exe, int64_t timeLength, int64_t numStocks,
+    const std::vector<std::pair<std::string, uintptr_t>> &args,
+    int64_t mask, int minChunkWarmupFactor, double smFillFactor,
+    LaunchMode mode) {
+  exe.launchOnStream(this, timeLength, numStocks, args,
+                      mask, minChunkWarmupFactor, smFillFactor, mode);
+}
+
+void Executor::synchronize() {
+  checkCu(cuStreamSynchronize(stream_), "cuStreamSynchronize");
+}
+
+} // namespace kun_cuda

@@ -104,3 +104,65 @@ def get_compiler_env():
                 print("Reset env", "PATH+=", extra_path, "INCLUDE=", env['INCLUDE'], "LIB=", env['LIB'])
     _env = env
     return env
+
+
+def _format_cuda_sm(major: int, minor: int) -> str:
+    return f"sm_{int(major)}{int(minor)}"
+
+
+def _format_cuda_sm_from_capability(capability) -> str:
+    if isinstance(capability, tuple):
+        if len(capability) != 2:
+            raise ValueError(f"unexpected CUDA capability tuple: {capability!r}")
+        return _format_cuda_sm(capability[0], capability[1])
+
+    text = str(capability).strip().lower()
+    if text.startswith("sm_"):
+        text = text[3:]
+    text = text.replace(".", "")
+    if not text or not text.isdigit():
+        raise ValueError(f"unexpected CUDA capability value: {capability!r}")
+    return f"sm_{text}"
+
+
+def get_cuda_compute_capability() -> str:
+    """Return the current CUDA device architecture as `sm_xx`.
+
+    CuPy is preferred because the CUDA JIT path already uses CuPy arrays in
+    tests and examples.  PyTorch is used as a fallback when CuPy is not
+    available or cannot query a CUDA device.
+    """
+    errors = []
+
+    try:
+        import cupy as cp
+        dev = cp.cuda.Device()
+        capability = getattr(dev, "compute_capability", None)
+        if capability is not None:
+            return _format_cuda_sm_from_capability(capability)
+
+        props = cp.cuda.runtime.getDeviceProperties(dev.id)
+        return _format_cuda_sm(props["major"], props["minor"])
+    except Exception as e:
+        errors.append(f"cupy: {type(e).__name__}: {e}")
+
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            raise RuntimeError("torch.cuda.is_available() is false")
+        major, minor = torch.cuda.get_device_capability()
+        return _format_cuda_sm(major, minor)
+    except Exception as e:
+        errors.append(f"torch: {type(e).__name__}: {e}")
+
+    raise RuntimeError(
+        "Could not determine CUDA compute capability from CuPy or PyTorch: "
+        + "; ".join(errors))
+
+
+def has_cuda_device() -> bool:
+    try:
+        get_cuda_compute_capability()
+        return True
+    except RuntimeError:
+        return False

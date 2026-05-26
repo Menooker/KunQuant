@@ -509,6 +509,14 @@ class StateConsumerTrait:
     '''
     pass
 
+class MayRequireWholeTime:
+    '''
+    Ops whose state may depend on the full time history (cannot be rebuilt
+    from a bounded warmup window).  Override to declare otherwise.
+    '''
+    def is_whole_time_required(self) -> bool:
+        return False
+
 class ReductionOp(OpBase, StatefulOpTrait):
     '''
     Base class of all reduction ops. A reduction op takes inputs that is originated from a IterValue. The input must be in a loop (v.get_parent() is a loop). The data produced

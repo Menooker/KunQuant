@@ -57,7 +57,7 @@ class ATR(CompositiveOp):
             tr = TRANGE(high, low, close)
 
             mask_true = Equals(ConstantOp(0), ConstantOp(0))
-            cnt_acc = Accumulator(tr, f"atr_cnt_{window}")
+            cnt_acc = Accumulator(tr, f"atr_cnt_{window}", is_whole_time_required=True)
             prev_cnt = cnt_acc
             new_cnt = prev_cnt + 1
             set_cnt = SetAccumulator(cnt_acc, mask_true, new_cnt)
@@ -102,15 +102,15 @@ class SAR(CompositiveOp):
 
             mask_true = Equals(ConstantOp(0), ConstantOp(0))
             dummy = ReturnFirstValue([high, low])
-            cnt_acc = Accumulator(dummy, f"sar_cnt_{af_init}_{af_step}_{af_max}")
+            cnt_acc = Accumulator(dummy, f"sar_cnt_{af_init}_{af_step}_{af_max}", is_whole_time_required=True)
             prev_cnt = cnt_acc
             set_cnt = SetAccumulator(cnt_acc, mask_true, prev_cnt + 1)
             is_bar_0 = Equals(prev_cnt, ConstantOp(0))
             is_bar_1 = Equals(prev_cnt, ConstantOp(1))
 
-            sar_acc = Accumulator(dummy, f"sar_value_{af_init}_{af_step}_{af_max}")
-            ep_acc = Accumulator(dummy, f"sar_ep_{af_init}_{af_step}_{af_max}")
-            af_acc = Accumulator(dummy, f"sar_af_{af_init}_{af_step}_{af_max}")
+            sar_acc = Accumulator(dummy, f"sar_value_{af_init}_{af_step}_{af_max}", is_whole_time_required=True)
+            ep_acc = Accumulator(dummy, f"sar_ep_{af_init}_{af_step}_{af_max}", is_whole_time_required=True)
+            af_acc = Accumulator(dummy, f"sar_af_{af_init}_{af_step}_{af_max}", is_whole_time_required=True)
 
             prev_sar = sar_acc
             prev_ep = ep_acc

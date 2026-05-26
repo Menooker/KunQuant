@@ -1,4 +1,5 @@
 .vscode/*
+.claude/*
 *.pyc
 build/*
 tests/cpp/generated/*
@@ -9,3 +10,6 @@ dist/*
 *.pyd
 *.dll
 *.lib
+.codex
+python/kunquant_mlir/build/*
+python/kunquant_mlir/KunQuant_MLIR.egg-info/*

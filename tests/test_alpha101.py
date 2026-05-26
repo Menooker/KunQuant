@@ -1,5 +1,7 @@
 from KunQuant.Driver import KunCompilerConfig
 from KunTestUtil import ref_alpha101, gen_data
+import argparse
+import dataclasses
 import numpy as np
 import pandas as pd
 import sys
@@ -10,9 +12,42 @@ from KunQuant.Op import Builder, Input, Output
 from KunQuant.Stage import Function
 from KunQuant.predefined.Alpha101 import AllData, all_alpha
 from KunQuant.runner import KunRunner as kr
-from KunQuant.jit.env import cpu_arch
+from KunQuant.jit.env import cpu_arch, get_cuda_compute_capability
 
 isx86 = cpu_arch != "aarch64"
+
+_argp = argparse.ArgumentParser(add_help=False)
+_argp.add_argument("action", nargs="?")
+_argp.add_argument("--gpu-arch", default="")
+_argp.add_argument("--benchmode", action="store_true")
+_argp.add_argument("--use-cuda-graph", action="store_true")
+_argp.add_argument("--time", type=int, default=260)
+_argp.add_argument("--num-stocks", type=int, default=64)
+_argp.add_argument("--num-threads", type=int, default=4)
+
+_args, _ = _argp.parse_known_args()
+action = _args.action or ("run_gpu" if _args.gpu_arch else "avx2")
+if _args.gpu_arch == "auto":
+    GPU_ARCH = get_cuda_compute_capability()
+else:
+    GPU_ARCH = _args.gpu_arch
+GPU_MODE = bool(GPU_ARCH)
+BENCHMODE = _args.benchmode
+USE_CUDA_GRAPH = _args.use_cuda_graph
+TIME = _args.time
+NUM_STOCKS = _args.num_stocks
+NUM_THREADS = _args.num_threads
+if GPU_MODE:
+    import cupy as cp
+    from KunQuant.jit import KunMLIR as _kr_mlir
+    from KunQuant.jit import cuda as _cuda_jit
+    from KunQuantMLIR.OverlapRunner import OverlapRunner
+    if BENCHMODE:
+        cuda_stream = cp.cuda.Stream(non_blocking=True)
+    else:
+        cuda_stream = None
+    cp.cuda.Device(0).use()
+    cp.zeros((1,), dtype=cp.float32)
 
 def get_simd_len(avx: str, dtype: str = "float"):
     element_width = 32 if dtype == "float" else 64
@@ -129,6 +164,65 @@ def TS_ST(data: np.ndarray) -> np.ndarray:
 
 def ST_TS(data: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(data.transpose())
+
+
+def get_output_layout(modu):
+    return "TS" if GPU_MODE else modu.output_layout
+
+
+def create_single_thread_executor():
+    return _kr_mlir.Executor(cuda_stream) if GPU_MODE else kr.createSingleThreadExecutor()
+
+
+def create_multi_thread_executor(n):
+    return _kr_mlir.Executor(cuda_stream) if GPU_MODE else kr.createMultiThreadExecutor(n)
+
+GPU_OVERLAP_SLOTS = 3
+
+def warmup_gpu_overlap_runner(overlap_runner, modu, inputs,
+                              cur_time, length, **kwargs):
+    last = None
+    for _ in range(GPU_OVERLAP_SLOTS):
+        last = run_graph(overlap_runner.executor, True, modu, inputs,
+                         cur_time, length, None,
+                         overlap_runner=overlap_runner, **kwargs)
+    return last.wait() if last is not None else None
+
+def run_graph(executor, benchmode, modu, inputs, cur_time, length, outputs=None,
+              overlap_runner=None, **kwargs):
+    if not GPU_MODE:
+        return kr.runGraph(executor, modu, inputs, cur_time, length,
+                           outputs if outputs is not None else {}, **kwargs)
+    if cur_time != 0:
+        raise RuntimeError("GPU alpha101 test only supports cur_time=0")
+    kwargs.pop("skip_check", None)
+    kwargs.pop("num_stocks", None)
+    if benchmode:
+        if overlap_runner is None:
+            raise RuntimeError("GPU benchmark mode requires overlap_runner")
+        return overlap_runner.submit(
+            inputs,
+            cur_time=cur_time,
+            length=length,
+            use_cuda_graph=USE_CUDA_GRAPH,
+            **kwargs,
+        )
+    gpu_inputs = {k: cp.asarray(v) for k, v in inputs.items()}
+    ret = executor.runGraph(modu, gpu_inputs, cur_time=cur_time,
+                            length=length,
+                            use_cuda_graph=USE_CUDA_GRAPH,
+                            **kwargs)
+    out_np = {}
+    for k, v in ret.items():
+        arr = v if isinstance(v, cp.ndarray) else cp.from_dlpack(v)
+        host = cp.asnumpy(arr)
+        if outputs is not None and k in outputs:
+            outputs[k][...] = host
+            out_np[k] = outputs[k]
+        else:
+            out_np[k] = host
+    return out_np
+
 
 def make_data_and_ref(num_stock, num_time, ischeck, input_ST8t, dtype="float32"):
     rng = np.random.get_state()
@@ -263,7 +357,9 @@ def check_result(out, ref, outnames, start_window, num_stock, start_time, num_ti
         cur_rtol = tolerance["rtol"].get(k, rtol)
         cur_atol = tolerance["atol"].get(k, atol)
         check_start = 0
-        if start_time or k in tolerance["skip_head"]:
+        # GPU kernels do not match the CPU/pandas partial-window warmup rows even
+        # when start_time == 0, so the nonzero start_time skip is not enough.
+        if GPU_MODE or start_time or k in tolerance["skip_head"]:
             check_start = start_window[k] + start_time
         v = out[k][:,check_start-start_time:]
         refv = ref[k][check_start:].to_numpy().transpose()
@@ -295,9 +391,12 @@ def check_result(out, ref, outnames, start_window, num_stock, start_time, num_ti
     return done
 
 def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ischeck, start_time):
+    if GPU_MODE and start_time != 0:
+        print(f"[skip on GPU] start_time={start_time}")
+        return True
     # prepare outputs
     outnames = modu.getOutputNames()
-    layout = modu.output_layout
+    layout = get_output_layout(modu)
     outbuffers = dict()
     print(layout)
     if layout == "TS":
@@ -310,15 +409,30 @@ def test(modu, executor, start_window, num_stock, num_time, my_input, ref, ische
     # blocked = TS_STs(inp)
     
     if not ischeck:
-        out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
+        out = run_graph(executor, False, modu, my_input, start_time,
+                        num_time-start_time, outbuffers,
+                        overlap_runner=None)
+        overlap_runner = None
+        if GPU_MODE:
+            overlap_runner = OverlapRunner(
+                modu, executor, num_slots=GPU_OVERLAP_SLOTS)
+            warmup_gpu_overlap_runner(overlap_runner, modu, my_input, start_time,
+                                      num_time-start_time)
         start = time.time()
         for _ in range(20):
-            out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers, skip_check = True)
+            out = run_graph(executor, True, modu, my_input, start_time,
+                            num_time-start_time, outbuffers,
+                            overlap_runner=overlap_runner)
+        if GPU_MODE:
+            overlap_runner.synchronize()
+            out = out.wait()
         end = time.time()
         tdiff = (end-start)/20
     else:
         start = time.time()
-        out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers, num_stocks = num_stock)
+        out = run_graph(executor, False, modu, my_input, start_time,
+                        num_time-start_time, outbuffers,
+                        overlap_runner=None, num_stocks=num_stock)
         end = time.time()
         tdiff = end-start
     print(f"Exec takes: {tdiff:.6f} seconds")
@@ -372,9 +486,12 @@ def streammain(num_stock):
 
 
 def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, ischeck, start_time):
+    if GPU_MODE and start_time != 0:
+        print(f"[skip on GPU] start_time={start_time}")
+        return True
     # prepare outputs
     outnames = modu.getOutputNames()
-    layout = modu.output_layout
+    layout = get_output_layout(modu)
     outbuffers = dict()
     print(layout)
     if layout == "TS":
@@ -386,15 +503,30 @@ def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, isc
     # print(ref.alpha001())
     # blocked = TS_STs(inp)
     if not ischeck:
-        out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
+        out = run_graph(executor, False, modu, my_input, start_time,
+                        num_time-start_time, outbuffers,
+                        overlap_runner=None)
+        overlap_runner = None
+        if GPU_MODE:
+            overlap_runner = OverlapRunner(
+                modu, executor, num_slots=GPU_OVERLAP_SLOTS)
+            warmup_gpu_overlap_runner(overlap_runner, modu, my_input, start_time,
+                                      num_time-start_time)
         start = time.time()
         for _ in range(20):
-            out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers, skip_check = True)
+            out = run_graph(executor, True, modu, my_input, start_time,
+                            num_time-start_time, outbuffers,
+                            overlap_runner=overlap_runner)
+        if GPU_MODE:
+            overlap_runner.synchronize()
+            out = out.wait()
         end = time.time()
         tdiff = (end-start)/20
     else:
         start = time.time()
-        out = kr.runGraph(executor, modu, my_input, start_time, num_time-start_time, outbuffers)
+        out = run_graph(executor, False, modu, my_input, start_time,
+                        num_time-start_time, outbuffers,
+                        overlap_runner=None)
         end = time.time()
         tdiff = end-start
     print(f"Exec takes: {tdiff:.6f} seconds")
@@ -411,22 +543,23 @@ def test64(modu, executor, start_window, num_stock, num_time, my_input, ref, isc
 def main(is64: bool, is_check: bool):
     modu = lib.getModule("alpha_101" if not is64 else "alpha_101_double")
     start_window = modu.getOutputUnreliableCount()
-    num_stock = 64
+    num_stock = NUM_STOCKS
     done = True
     testfunc = test64 if is64 else test
-    blocking_num = modu.blocking_len
+    blocking_num = 1 if GPU_MODE else modu.blocking_len
     # fp64 version is compiled with TS format
-    blocking = 0 if is64 else blocking_num
+    blocking = 0 if is64 or GPU_MODE else blocking_num
     def compute():
         nonlocal done
-        num_time = 260
+        num_time = TIME
         my_input, pd_ref = make_data_and_ref(num_stock, num_time, is_check, blocking, "float64" if is64 else "float32")
-        executor = kr.createSingleThreadExecutor()
+        if not GPU_MODE:
+            executor = create_single_thread_executor()
+            done = done & testfunc(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
+            if not BENCHMODE:
+                done = done & testfunc(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
+        executor = create_multi_thread_executor(NUM_THREADS)
         done = done & testfunc(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
-        done = done & testfunc(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 50)
-        executor = kr.createMultiThreadExecutor(4)
-        done = done & testfunc(modu, executor, start_window, num_stock, num_time, my_input, pd_ref, is_check, 0)
-    num_stock = 64
     compute()
     # skip benchmarking on unaligned mode
     if not is_check:
@@ -439,13 +572,24 @@ def main(is64: bool, is_check: bool):
     if not done:
         exit(1)
 
-action = sys.argv[1]
 def do_compile(avx, keep, tempdir):
     funclist = [
         check_alpha101(avx),
         check_alpha101_stream(avx),
         check_alpha101_double(avx)
         ]
+    if GPU_MODE:
+        gpu_funclist = []
+        for name, f, kcfg in funclist:
+            if name == "alpha_101_stream":
+                continue
+            kcfg = dataclasses.replace(kcfg, input_layout="TS",
+                                       output_layout="TS",
+                                       partition_factor=2,
+                                       blocking_len=1)
+            gpu_funclist.append((name, f, kcfg))
+        ccfg = _cuda_jit.CudaCompilerConfig(gpu_arch=GPU_ARCH)
+        return _cuda_jit.compileit(gpu_funclist, "test", ccfg)
     if avx == "avx512":
         machine = cfake.X64CPUFlags(avx512=True, avx512dq=True, avx512vl=True)
     else:
@@ -460,14 +604,15 @@ else:
     lib = do_compile(action, False, None)
 
 print("Check f64 batch")
-main(True, True)
+main(True, not BENCHMODE)
 print("======================================")
 print("Check f32 batch")
-main(False, True)
-print("======================================")
-print("Check f32 stream")
-streammain(64)
-if action != "run_avx512" and isx86:
+main(False, not BENCHMODE)
+if not GPU_MODE and not BENCHMODE:
+    print("======================================")
+    print("Check f32 stream")
+    streammain(64)
+if not GPU_MODE and action != "run_avx512" and isx86 and not BENCHMODE:
     print("======================================")
     print("Check f32 stream unaligned")
     streammain(63)

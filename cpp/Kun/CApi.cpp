@@ -36,7 +36,7 @@ static std::shared_ptr<Library> *unwrapLibrary(KunLibraryHandle ptr) {
 KUN_API KunModuleHandle kunGetModuleFromLibrary(KunLibraryHandle lib,
                                                 const char *name) {
     auto &plib = *unwrapLibrary(lib);
-    return (KunModuleHandle)plib->getModule(name);
+    return (KunModuleHandle)const_cast<Module *>(plib->getModule(name));
 }
 
 KUN_API void kunUnloadLibrary(KunLibraryHandle ptr) {

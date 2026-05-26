@@ -1,4 +1,4 @@
-from KunQuant.Op import OpBase, Output, Input, CrossSectionalOp, GraphSourceTrait, ConstantOp, ReductionOp, BoolOpTrait, GlobalStatefulProducerTrait, StateConsumerTrait
+from KunQuant.Op import OpBase, Output, Input, CrossSectionalOp, GraphSourceTrait, ConstantOp, ReductionOp, BoolOpTrait, GlobalStatefulProducerTrait, StateConsumerTrait, WindowedTempOutput
 from KunQuant.ops.MiscOp import ReturnFirstValue
 from KunQuant.Stage import Function, OpInfo
 from KunQuant.ops import GenericPartition
@@ -289,10 +289,34 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                 # input is shared by all ops
                 assert(op not in op_lookup_table)
                 op_lookup_table[op] = p
+    # Map output-name → producer partition.  Tracks the partition that
+    # owns the Output op for each cross-partition / graph name.  Used by
+    # the WTO(Input) peel below to record the real upstream dependency
+    # after dereferencing the WTO wrapper.
+    name_to_output_partition: Dict[str, _Partition] = {}
+    for op, owner in op_lookup_table.items():
+        if isinstance(op, Output):
+            name_to_output_partition[op.attrs["name"]] = owner
     hash_cache: Dict['OpBase', int] = dict()
     for p in partitions:
         name_to_input = dict()
         depending : typing.OrderedDict[_Partition, None] = OrderedDict()
+
+        def get_local_input(out_name: str, prefer: OpBase = None) -> OpBase:
+            """Return p's local `Input(out_name)`, creating it if needed.
+            If `prefer` is given and already lives in `p.ops`, reuse it
+            instead of allocating a new Input."""
+            inop = name_to_input.get(out_name)
+            if inop is not None:
+                return inop
+            if prefer is not None and prefer in p.ops:
+                inop = prefer
+            else:
+                inop = Input(out_name)
+                p.add(None, inop)
+            name_to_input[out_name] = inop
+            return inop
+
         # for each op in partition
         for op in list(p.ops):
             for idx, inp in enumerate(op.inputs):
@@ -300,6 +324,29 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                     # if the partition depends on an op of another partition
                     if inp.get_parent():
                         raise RuntimeError("Bad cross partition op: " + str(inp) + "\ncur op=" + str(op))
+                    # If the input of an op is a WindowedTempOutput wrapping an partition Input, peel it off.
+                    # original: Op(WindowedTempOutput(Input("xxx")))
+                    # peeled: Op(Input("xxx"))
+                    # Note that the WindowedTempOutput should be in another partition,
+                    # which has been processed already in the parent loop `for p in partitions`.
+                    # Input("xxx") should be an input of that partition
+                    orig_inp = inp
+                    while isinstance(inp, WindowedTempOutput) and \
+                            isinstance(inp.inputs[0], Input):
+                        inp = inp.inputs[0]
+                    # if Op(WindowedTempOutput(Input("xxx"))) pattern is found ...
+                    if inp is not orig_inp:
+                        # orig_inp is the WindowedTempOutput
+                        orig_info = f.op_to_id[orig_inp]
+                        if op in orig_info.uses:
+                            del orig_info.uses[op]
+                        # inp is the Input
+                        out_name = inp.attrs["name"]
+                        producer = name_to_output_partition.get(out_name)
+                        if producer is not None and producer != p:
+                            depending[producer] = None
+                        op.inputs[idx] = get_local_input(out_name, prefer=inp)
+                        continue
                     inp_info = f.op_to_id[inp]
                     if isinstance(inp, ConstantOp):
                         if op in inp_info.uses:
@@ -318,6 +365,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                             inp_partition = op_lookup_table[inp]
                             inp_partition.add(None, outop)
                             op_lookup_table[outop] = inp_partition
+                            name_to_output_partition[out_name] = inp_partition
                         else:
                             out_name = outop.attrs["name"]
                             inp_partition = op_lookup_table[outop]
@@ -327,13 +375,7 @@ def _transform_partitions(partitions: List[_Partition], f: Function) -> Tuple[Fu
                         out_name = inp.attrs["name"]
                     if op in inp_info.uses:
                         del inp_info.uses[op]
-                    
-                    inop = name_to_input.get(out_name, None)
-                    if not inop:
-                        inop = Input(out_name)
-                        p.add(None, inop)
-                        name_to_input[out_name] = inop
-                    op.inputs[idx] = inop
+                    op.inputs[idx] = get_local_input(out_name)
         p.depending = depending
         p.stage_op = GenericPartition([], None)
     

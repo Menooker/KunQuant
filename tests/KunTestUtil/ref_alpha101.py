@@ -193,7 +193,8 @@ def decay_linear(df, period=10):
     # The backtest engine should assure to be snooping bias free.
     for row in range(period - 1, df.shape[0]):
         x = na_series[row - period + 1: row + 1, :]
-        na_lwma[row, :] = (np.dot(x.T, y))
+        with np.errstate(invalid="ignore"):
+            na_lwma[row, :] = np.dot(x.T, y)
     return pd.DataFrame(na_lwma, index=df.index, columns=df.columns)  
 # endregion
 
@@ -834,5 +835,3 @@ class Alphas(object):
     # Alpha#101	 ((close - open) / ((high - low) + .001))
     def alpha101(self):
         return (self.close - self.open) /((self.high - self.low) + 0.001)
-     
-     

@@ -1,5 +1,5 @@
 import KunQuant
-from KunQuant.Op import AcceptSingleValueInputTrait, Input, OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GlobalStatefulProducerTrait, GloablStatefulOpTrait, StateConsumerTrait, UnaryElementwiseOp, BinaryElementwiseOp
+from KunQuant.Op import AcceptSingleValueInputTrait, Input, OpBase, WindowedTrait, SinkOpTrait, CrossSectionalOp, GlobalStatefulProducerTrait, GloablStatefulOpTrait, StateConsumerTrait, MayRequireWholeTime, UnaryElementwiseOp, BinaryElementwiseOp
 from typing import List, Tuple, Union
 
 class BackRef(OpBase, WindowedTrait):
@@ -29,15 +29,35 @@ class FastWindowedSum(OpBase, WindowedTrait, GloablStatefulOpTrait):
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str], buf_name: str) -> str:
         return f"auto v{idx} = sum_{idx}.step({buf_name}, {inputs[0]}, {time_idx});"
 
-class Accumulator(OpBase, GlobalStatefulProducerTrait):
+class Accumulator(OpBase, GlobalStatefulProducerTrait, MayRequireWholeTime):
     '''
     Accumulator is a stateful op that accumulates the input value over time.
-    It can be used to compute running totals, moving averages, etc.'''
-    def __init__(self, v: OpBase, name: str) -> None:
-        super().__init__([v], [("name", name)])
+    It can be used to compute running totals, moving averages, etc.
+
+    `init_val` is the initial scalar stored in the slot before the first
+    time step.  Pass a float (default 0) for a plain numeric init, or the
+    string "nan" for a NaN init (mirrors ConstantOp's "nan" handling).
+    '''
+    def __init__(self, v: OpBase, name: str,
+                  is_whole_time_required: bool = False,
+                  init_val: Union[float, str] = 0) -> None:
+        if isinstance(init_val, str) and init_val != "nan":
+            raise RuntimeError(
+                f"Accumulator init_val str must be 'nan', got {init_val!r}")
+        super().__init__([v],
+                          [("name", name),
+                           ("whole_time", is_whole_time_required),
+                           ("init_val", init_val)])
+    def is_whole_time_required(self) -> bool:
+        return self.attrs["whole_time"]
     def get_state_variable_name_prefix(self) -> str:
         return "accu_"
-    
+
+    def generate_init_code(self, idx: str, elem_type: str, simd_lanes: int, inputs: List[str], aligned: bool) -> str:
+        from KunQuant.passes.CodegenCpp import _float_value_to_float
+        init = _float_value_to_float(self.attrs["init_val"], elem_type)
+        return f"{self.get_func_or_class_full_name(elem_type, simd_lanes)} {self.get_state_variable_name_prefix()}{idx} {{ {init} }};"
+
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:
         return f"auto v{idx} = accu_{idx}.asValue();"
 
@@ -72,13 +92,20 @@ class SetAccumulator(OpBase, StateConsumerTrait):
     
 class ReturnFirstValue(OpBase):
     '''
-    Return the first value of the input. It is used keep the dependency of the input op, like SetAccumulator.
+    Return inputs[0] as this op's value; the remaining inputs are kept
+    only as dependencies (graph-level keep-alives).
+
+    KunQuant's Python IR is a graph IR — an op with no users is dropped
+    during topo sort / GC.  SetAccumulator is side-effecting but produces
+    no consumer-visible value, so attaching it as inputs[1:] of
+    ReturnFirstValue is how we keep it reachable from a graph output.
     '''
     def __init__(self, v: List[OpBase]) -> None:
         super().__init__(v, [])
     
 
-class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait):
+class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait,
+                    MayRequireWholeTime):
     '''
     Exponential Moving Average (EMA)
     Similar to pd.DataFrame.ewm(span=window, adjust=False, ignore_na=True).mean()
@@ -114,6 +141,9 @@ class ExpMovingAvg(OpBase, GloablStatefulOpTrait, AcceptSingleValueInputTrait):
     
     def generate_step_code(self, idx: str, time_idx: str, inputs: List[str]) -> str:
         return f"auto v{idx} = ema_{idx}.step({inputs[0]}, {time_idx});"
+
+    def is_whole_time_required(self) -> bool:
+        return True
 
 class WindowedLinearRegression(OpBase, WindowedTrait, GlobalStatefulProducerTrait):
     '''

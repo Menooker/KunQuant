@@ -148,8 +148,6 @@ struct SkipListImpl {
     }
 
     double get(int i, size_t &index, bool &ret) const {
-        int level;
-
         if (i < 0 || i >= size) {
             ret = false;
             return 0;
