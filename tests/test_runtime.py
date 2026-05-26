@@ -14,7 +14,7 @@ from KunQuant.ops import *
 from KunQuant.predefined.Alpha101 import *
 from KunQuant.runner import KunRunner as kr
 import sys
-from KunQuant.jit.env import cpu_arch
+from KunQuant.jit.env import cpu_arch, get_cuda_compute_capability
 
 
 # ── Backend dispatch (CPU vs GPU) ────────────────────────────────────
@@ -29,8 +29,11 @@ _argp = argparse.ArgumentParser()
 _argp.add_argument("--gpu-arch", default="",
                     help="GPU compute capability (e.g. sm_80).  Empty = CPU.")
 _args, _ = _argp.parse_known_args()
-GPU_MODE = bool(_args.gpu_arch)
-GPU_ARCH = _args.gpu_arch
+if _args.gpu_arch == "auto":
+    GPU_ARCH = get_cuda_compute_capability()
+else:
+    GPU_ARCH = _args.gpu_arch
+GPU_MODE = bool(GPU_ARCH)
 
 if GPU_MODE:
     import cupy as cp

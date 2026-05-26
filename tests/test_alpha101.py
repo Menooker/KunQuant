@@ -12,7 +12,7 @@ from KunQuant.Op import Builder, Input, Output
 from KunQuant.Stage import Function
 from KunQuant.predefined.Alpha101 import AllData, all_alpha
 from KunQuant.runner import KunRunner as kr
-from KunQuant.jit.env import cpu_arch
+from KunQuant.jit.env import cpu_arch, get_cuda_compute_capability
 
 isx86 = cpu_arch != "aarch64"
 
@@ -27,7 +27,10 @@ _argp.add_argument("--num-threads", type=int, default=4)
 
 _args, _ = _argp.parse_known_args()
 action = _args.action or ("run_gpu" if _args.gpu_arch else "avx2")
-GPU_ARCH = _args.gpu_arch or ("sm_80" if action == "run_gpu" else "")
+if _args.gpu_arch == "auto":
+    GPU_ARCH = get_cuda_compute_capability()
+else:
+    GPU_ARCH = _args.gpu_arch
 GPU_MODE = bool(GPU_ARCH)
 BENCHMODE = _args.benchmode
 USE_CUDA_GRAPH = _args.use_cuda_graph

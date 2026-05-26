@@ -10,7 +10,7 @@ from KunQuant.runner import KunRunner as kr
 from KunQuant.Op import Builder, Input, Output
 from KunQuant.Stage import Function
 from KunQuant.predefined.Alpha158 import AllData
-from KunQuant.jit.env import cpu_arch
+from KunQuant.jit.env import cpu_arch, get_cuda_compute_capability
 
 isx86 = cpu_arch != "aarch64"
 
@@ -223,6 +223,8 @@ if __name__ == "__main__":
         import cupy as cp
         cp.cuda.Device(0).use()
         cp.zeros((1,), dtype=cp.float64)
+        if args.gpu_arch == "auto":
+            args.gpu_arch = get_cuda_compute_capability()
         lib = check_alpha158(False, False, None, gpu_arch=args.gpu_arch)
         inp, ref = load(args.inputs, args.ref)
         test(_GpuBackend(lib, "alpha158"), inp, ref)
