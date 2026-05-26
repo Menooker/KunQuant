@@ -1,0 +1,125 @@
+name: Publish KunQuant-MLIR to PyPI and TestPyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Publish target
+        required: true
+        default: testpypi
+        type: choice
+        options:
+        - testpypi
+        - pypi
+        - both
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build KunQuant-MLIR wheel
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: pip
+    - name: Install build dependencies
+      run: |
+        set -eux
+        python -m pip install --upgrade pip
+        python -m pip install cibuildwheel
+    - name: Read LLVM tag
+      id: llvm_tag
+      run: |
+        tag="$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' mlir/llvm_commit.txt | head -n1 | tr -d '[:space:]')"
+        test -n "$tag"
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        echo "LLVM tag: $tag"
+    - name: Download prebuilt LLVM/MLIR
+      env:
+        LLVM_TAG: ${{ steps.llvm_tag.outputs.tag }}
+      run: |
+        set -eux
+        mkdir -p "$RUNNER_TEMP/llvm-mlir"
+        curl -fL --retry 3 \
+          "https://github.com/Menooker/KunQuant/releases/download/llvm-mlir-${LLVM_TAG}/llvm-mlir-install-static-${LLVM_TAG}.tar.gz" \
+          -o "$RUNNER_TEMP/llvm-mlir.tar.gz"
+        tar -xzf "$RUNNER_TEMP/llvm-mlir.tar.gz" -C "$RUNNER_TEMP/llvm-mlir" --strip-components=1
+        test -f "$RUNNER_TEMP/llvm-mlir/lib/cmake/mlir/MLIRConfig.cmake"
+        test -f "$RUNNER_TEMP/llvm-mlir/lib/cmake/llvm/LLVMConfig.cmake"
+        echo "LLVM_PREFIX=$RUNNER_TEMP/llvm-mlir" >> "$GITHUB_ENV"
+    - name: Build wheel
+      run: |
+        set -eux
+        export CIBW_BUILD="cp312-manylinux_x86_64"
+        export CIBW_BUILD_FRONTEND="build"
+        export CIBW_MANYLINUX_X86_64_IMAGE="ghcr.io/menooker/kunquant-mlir:main"
+        export CIBW_REPAIR_WHEEL_COMMAND_LINUX="auditwheel repair --exclude libcuda.so --exclude libcuda.so.1 -w {dest_dir} {wheel}"
+        export CIBW_ENVIRONMENT="KUN_USE_GIT_VERSION=0 CUDA_PATH=/usr/local/cuda-13.2 CUDA_HOME=/usr/local/cuda-13.2 CUDAToolkit_ROOT=/usr/local/cuda-13.2 CMAKE_CUDA_COMPILER=/usr/local/cuda-13.2/bin/nvcc LLVM_DIR=/host${LLVM_PREFIX}/lib/cmake/llvm MLIR_DIR=/host${LLVM_PREFIX}/lib/cmake/mlir LLVM_EXTERNAL_LIT=lit LD_LIBRARY_PATH=/usr/local/cuda-13.2/lib64:/usr/local/cuda-13.2/lib64/stubs"
+        python -m cibuildwheel python/kunquant_mlir --platform linux --output-dir wheelhouse
+    - name: Check wheel contents
+      run: |
+        python - <<'PY'
+        import glob
+        import zipfile
+
+        wheel, = glob.glob("wheelhouse/*.whl")
+        with zipfile.ZipFile(wheel) as zf:
+            names = set(zf.namelist())
+        assert "KunQuantMLIR/KunMLIR.abi3.so" in names
+        assert "KunQuantMLIR/libKunCudaRuntime.so" in names
+        print(wheel)
+        PY
+    - name: Store wheel
+      uses: actions/upload-artifact@v4
+      with:
+        name: kunquant-mlir-wheel
+        path: wheelhouse/*.whl
+        if-no-files-found: error
+
+  publish-to-testpypi:
+    name: Publish KunQuant-MLIR to TestPyPI
+    if: ${{ inputs.target == 'testpypi' || inputs.target == 'both' }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/KunQuant-MLIR
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+    - name: Download wheel
+      uses: actions/download-artifact@v4
+      with:
+        name: kunquant-mlir-wheel
+        path: dist/
+    - name: Publish wheel to TestPyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+
+  publish-to-pypi:
+    name: Publish KunQuant-MLIR to PyPI
+    if: ${{ inputs.target == 'pypi' || inputs.target == 'both' }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/KunQuant-MLIR
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+    - name: Download wheel
+      uses: actions/download-artifact@v4
+      with:
+        name: kunquant-mlir-wheel
+        path: dist/
+    - name: Publish wheel to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1

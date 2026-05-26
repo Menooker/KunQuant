@@ -141,7 +141,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: .cache/cuda-13.2
-        key: ${{ runner.os }}-${{ runner.arch }}-cuda-toolkit-13.2-v1
+        key: ${{ runner.os }}-${{ runner.arch }}-cuda-mlir-minimal-13.2-v1
     - name: Install CUDA 13.2
       if: steps.cache-cuda.outputs.cache-hit != 'true'
       run: |
@@ -155,7 +155,11 @@ jobs:
         echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/ /" \
           | sudo tee /etc/apt/sources.list.d/cuda-ubuntu2404-x86_64.list
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends cuda-toolkit-13-2
+        sudo apt-get install -y --no-install-recommends \
+          cuda-nvcc-13-2 \
+          cuda-cudart-dev-13-2 \
+          cuda-driver-dev-13-2 \
+          libnvvm-13-2
         mkdir -p .cache
         sudo tar -C /usr/local -cf "$RUNNER_TEMP/cuda-13.2.tar" cuda-13.2
         tar -C .cache -xf "$RUNNER_TEMP/cuda-13.2.tar"
@@ -166,6 +170,12 @@ jobs:
           sudo ln -s "$GITHUB_WORKSPACE/.cache/cuda-13.2" /usr/local/cuda-13.2
         fi
         sudo ln -sf libcuda.so /usr/local/cuda-13.2/lib64/stubs/libcuda.so.1
+        test -x /usr/local/cuda-13.2/bin/nvcc
+        test -x /usr/local/cuda-13.2/bin/ptxas
+        test -f /usr/local/cuda-13.2/include/cuda.h
+        test -f /usr/local/cuda-13.2/include/cuda_runtime.h
+        test -f /usr/local/cuda-13.2/lib64/stubs/libcuda.so
+        test -f /usr/local/cuda-13.2/nvvm/libdevice/libdevice.10.bc
         /usr/local/cuda-13.2/bin/nvcc --version
     - name: Install Python dependencies
       run: |

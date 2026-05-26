@@ -137,7 +137,6 @@ setup(
     python_requires=">=3.9",
     install_requires=[
         f"KunQuant=={version}",
-        "numpy",
     ],
     zip_safe=False,
 )
