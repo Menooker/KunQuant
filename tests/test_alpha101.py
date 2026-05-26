@@ -171,6 +171,7 @@ def create_multi_thread_executor(n):
     return _kr_mlir.Executor() if GPU_MODE else kr.createMultiThreadExecutor(n)
 
 gpu_inputs = None
+gpu_outputs = None
 def run_graph(executor, benchmode, modu, inputs, cur_time, length, outputs=None, **kwargs):
     if not GPU_MODE:
         return kr.runGraph(executor, modu, inputs, cur_time, length,
@@ -178,17 +179,25 @@ def run_graph(executor, benchmode, modu, inputs, cur_time, length, outputs=None,
     if cur_time != 0:
         raise RuntimeError("GPU alpha101 test only supports cur_time=0")
     global gpu_inputs
-    if not benchmode:
+    global gpu_outputs
+    if not benchmode or gpu_inputs is None:
         gpu_inputs = {k: cp.asarray(v) for k, v in inputs.items()}
-    ret = executor.runGraph(modu, gpu_inputs, cur_time=cur_time,
+    else:
+        for k, v in inputs.items():
+            gpu_inputs[k].set(v)
+    ret = executor.runGraph(modu, gpu_inputs, outputs=gpu_outputs, cur_time=cur_time,
                             length=length,
                             use_cuda_graph=USE_CUDA_GRAPH)
     if benchmode:
-        if USE_CUDA_GRAPH:
-            executor.synchronize()
-        return ret
-    executor.synchronize()
-
+        gpu_outputs = ret
+        out_np = {}
+        for k, v in ret.items():
+            arr = v if isinstance(v, cp.ndarray) else cp.from_dlpack(v)
+            ret[k] = arr
+            host = cp.asnumpy(arr, blocking=False)
+            out_np[k] = host
+        executor.synchronize()
+        return out_np
     out_np = {}
     for k, v in ret.items():
         arr = v if isinstance(v, cp.ndarray) else cp.from_dlpack(v)

@@ -130,7 +130,9 @@ if(KUN_BUILD_MLIR)
         "nvcc used by CMake's CUDA-language support.")
   endif()
   get_filename_component(KUN_CUDA_TOOLKIT_ROOT
-                         "${CUDAToolkit_BIN_DIR}" DIRECTORY)
+                         "${CUDAToolkit_NVCC_EXECUTABLE}" DIRECTORY)
+  get_filename_component(KUN_CUDA_TOOLKIT_ROOT
+                         "${KUN_CUDA_TOOLKIT_ROOT}" DIRECTORY)
   message(STATUS
       "KunQuant MLIR CUDA toolkit = ${KUN_CUDA_TOOLKIT_ROOT} "
       "(version ${CUDAToolkit_VERSION})")
