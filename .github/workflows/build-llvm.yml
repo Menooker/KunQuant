@@ -60,6 +60,7 @@ jobs:
       - name: Configure (static)
         if: matrix.link == 'static'
         run: |
+          install_prefix="$GITHUB_WORKSPACE/build-static/install"
           cmake -S llvm-project/llvm -B build-static -G Ninja \
             -DCMAKE_MAKE_PROGRAM=/usr/local/bin/ninja \
             -DCMAKE_C_COMPILER=/usr/bin/gcc \
@@ -73,13 +74,15 @@ jobs:
             -DLLVM_ENABLE_ZLIB=OFF \
             -DLLVM_ENABLE_ZSTD=OFF \
             -DLLVM_BUILD_TOOLS=OFF \
-            -DLLVM_BUILD_TESTS=ON \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_BUILD_TESTS=OFF \
             -DLLVM_INSTALL_UTILS=ON \
-            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/build-static/install
+            -DCMAKE_INSTALL_PREFIX="$install_prefix"
 
       - name: Configure (dynamic)
         if: matrix.link == 'dynamic'
         run: |
+          install_prefix="$GITHUB_WORKSPACE/build-dynamic/install"
           cmake -S llvm-project/llvm -B build-dynamic -G Ninja \
             -DCMAKE_MAKE_PROGRAM=/usr/local/bin/ninja \
             -DCMAKE_C_COMPILER=/usr/bin/gcc \
@@ -97,27 +100,27 @@ jobs:
             -DMLIR_LINK_MLIR_DYLIB=ON \
             -DLLVM_BUILD_LLVM_DYLIB=ON \
             -DLLVM_LINK_LLVM_DYLIB=ON \
-            -DLLVM_BUILD_TESTS=ON \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_BUILD_TESTS=OFF \
             -DLLVM_INSTALL_UTILS=ON \
-            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/build-dynamic/install
+            -DCMAKE_INSTALL_PREFIX="$install_prefix"
 
       - name: Build and install
         run: |
           cmake --build build-${{ matrix.link }} -j"$(nproc)" --target install
 
       - name: Create archive of install
-        working-directory: ${{ github.workspace }}
         run: |
-          mkdir -p artifacts
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
           COMMIT="${{ steps.read_commit.outputs.commit }}"
-          tar -C build-${{ matrix.link }} -czf artifacts/llvm-mlir-install-${{ matrix.link }}-${COMMIT}.tar.gz install
-          echo "Created artifacts/llvm-mlir-install-${{ matrix.link }}-${COMMIT}.tar.gz"
+          tar -C "$GITHUB_WORKSPACE/build-${{ matrix.link }}" -czf "$GITHUB_WORKSPACE/artifacts/llvm-mlir-install-${{ matrix.link }}-${COMMIT}.tar.gz" install
+          echo "Created $GITHUB_WORKSPACE/artifacts/llvm-mlir-install-${{ matrix.link }}-${COMMIT}.tar.gz"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: llvm-mlir-install-${{ matrix.link }}
-          path: ${{ github.workspace }}/artifacts/llvm-mlir-install-${{ matrix.link }}-*.tar.gz
+          path: artifacts/llvm-mlir-install-${{ matrix.link }}-*.tar.gz
 
   publish:
     name: Publish release with artifacts
