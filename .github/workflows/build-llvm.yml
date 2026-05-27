@@ -106,6 +106,7 @@ jobs:
           cmake --build build-${{ matrix.link }} -j"$(nproc)" --target install
 
       - name: Create archive of install
+        working-directory: ${{ github.workspace }}
         run: |
           mkdir -p artifacts
           COMMIT="${{ steps.read_commit.outputs.commit }}"
@@ -116,7 +117,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: llvm-mlir-install-${{ matrix.link }}
-          path: artifacts/llvm-mlir-install-${{ matrix.link }}-*.tar.gz
+          path: ${{ github.workspace }}/artifacts/llvm-mlir-install-${{ matrix.link }}-*.tar.gz
 
   publish:
     name: Publish release with artifacts
