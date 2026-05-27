@@ -6,26 +6,44 @@ on:
 jobs:
   build:
     name: Build (static & dynamic matrix)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64:2025.05.16-1
     strategy:
       fail-fast: false
       matrix:
         link: [static, dynamic]
     steps:
+      - name: Install build dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            ca-certificates \
+            cmake \
+            curl \
+            gcc \
+            gcc-c++ \
+            git \
+            gzip \
+            make \
+            ninja-build \
+            pkgconf-pkg-config \
+            python3 \
+            tar \
+            unzip \
+            which \
+            xz
+          dnf clean all
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Read LLVM commit from file
         id: read_commit
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const fs = require('fs');
-            const content = fs.readFileSync('mlir/llvm_commit.txt', 'utf8');
-            const commit = content.split(/\r?\n/).find(l => !/^\s*#/.test(l) && l.trim() !== '') || '';
-            if (!commit) throw new Error('No commit found in mlir/llvm_commit.txt');
-            core.setOutput('commit', commit.trim());
-            return commit.trim();
+        run: |
+          commit="$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' mlir/llvm_commit.txt | head -n1 | tr -d '[:space:]')"
+          test -n "$commit"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "LLVM commit/tag: $commit"
 
       - name: Checkout llvm-project at commit
         uses: actions/checkout@v4
@@ -37,21 +55,20 @@ jobs:
           fetch-depth: 1
           fetch-tags: true
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build git python3 ca-certificates pkg-config curl unzip
-
-      - name: Configure, build and install
-        run: echo "Using workflow steps for configure/build/install"
-
       - name: Configure (static)
         if: matrix.link == 'static'
         run: |
           cmake -S llvm-project/llvm -B build-static -G Ninja \
+            -DCMAKE_C_COMPILER=/usr/bin/gcc \
+            -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
             -DLLVM_ENABLE_PROJECTS="mlir" \
             -DLLVM_TARGETS_TO_BUILD="NVPTX" \
             -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DLLVM_ENABLE_LIBEDIT=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_TERMINFO=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF \
+            -DLLVM_ENABLE_ZSTD=OFF \
             -DLLVM_BUILD_TOOLS=OFF \
             -DLLVM_BUILD_TESTS=ON \
             -DLLVM_INSTALL_UTILS=ON \
@@ -61,9 +78,16 @@ jobs:
         if: matrix.link == 'dynamic'
         run: |
           cmake -S llvm-project/llvm -B build-dynamic -G Ninja \
+            -DCMAKE_C_COMPILER=/usr/bin/gcc \
+            -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
             -DLLVM_ENABLE_PROJECTS="mlir" \
             -DLLVM_TARGETS_TO_BUILD="NVPTX" \
             -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DLLVM_ENABLE_LIBEDIT=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_TERMINFO=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF \
+            -DLLVM_ENABLE_ZSTD=OFF \
             -DLLVM_BUILD_TOOLS=OFF \
             -DMLIR_BUILD_MLIR_DYLIB=ON \
             -DMLIR_LINK_MLIR_DYLIB=ON \
@@ -80,7 +104,7 @@ jobs:
       - name: Create archive of install
         run: |
           mkdir -p artifacts
-          COMMIT=${{ steps.read_commit.outputs.commit }}
+          COMMIT="${{ steps.read_commit.outputs.commit }}"
           tar -C build-${{ matrix.link }} -czf artifacts/llvm-mlir-install-${{ matrix.link }}-${COMMIT}.tar.gz install
           echo "Created artifacts/llvm-mlir-install-${{ matrix.link }}-${COMMIT}.tar.gz"
 
@@ -112,15 +136,11 @@ jobs:
 
       - name: Read LLVM commit from file
         id: read_commit_publish
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const fs = require('fs');
-            const content = fs.readFileSync('mlir/llvm_commit.txt', 'utf8');
-            const commit = content.split(/\r?\n/).find(l => !/^\s*#/.test(l) && l.trim() !== '') || '';
-            if (!commit) throw new Error('No commit found in mlir/llvm_commit.txt');
-            core.setOutput('commit', commit);
-            return commit;
+        run: |
+          commit="$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' mlir/llvm_commit.txt | head -n1 | tr -d '[:space:]')"
+          test -n "$commit"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "LLVM commit/tag: $commit"
       - name: Release
         uses: softprops/action-gh-release@v3
         with:
