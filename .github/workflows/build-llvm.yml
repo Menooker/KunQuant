@@ -25,13 +25,15 @@ jobs:
             git \
             gzip \
             make \
-            ninja-build \
             pkgconf-pkg-config \
             python3 \
             tar \
             unzip \
             which \
             xz
+          /opt/python/cp312-cp312/bin/python -m pip install --no-cache-dir ninja
+          ln -sf /opt/python/cp312-cp312/bin/ninja /usr/local/bin/ninja
+          ninja --version
           dnf clean all
 
       - name: Checkout repository
@@ -59,6 +61,7 @@ jobs:
         if: matrix.link == 'static'
         run: |
           cmake -S llvm-project/llvm -B build-static -G Ninja \
+            -DCMAKE_MAKE_PROGRAM=/usr/local/bin/ninja \
             -DCMAKE_C_COMPILER=/usr/bin/gcc \
             -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
             -DLLVM_ENABLE_PROJECTS="mlir" \
@@ -78,6 +81,7 @@ jobs:
         if: matrix.link == 'dynamic'
         run: |
           cmake -S llvm-project/llvm -B build-dynamic -G Ninja \
+            -DCMAKE_MAKE_PROGRAM=/usr/local/bin/ninja \
             -DCMAKE_C_COMPILER=/usr/bin/gcc \
             -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
             -DLLVM_ENABLE_PROJECTS="mlir" \
