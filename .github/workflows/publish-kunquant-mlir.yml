@@ -60,7 +60,7 @@ jobs:
         export CIBW_BUILD_FRONTEND="build"
         export CIBW_MANYLINUX_X86_64_IMAGE="ghcr.io/menooker/kunquant-mlir:main"
         export CIBW_REPAIR_WHEEL_COMMAND_LINUX="auditwheel repair --exclude libcuda.so --exclude libcuda.so.1 -w {dest_dir} {wheel}"
-        export CIBW_ENVIRONMENT="KUN_USE_GIT_VERSION=0 CUDA_PATH=/usr/local/cuda-13.2 CUDA_HOME=/usr/local/cuda-13.2 CUDAToolkit_ROOT=/usr/local/cuda-13.2 CMAKE_CUDA_COMPILER=/usr/local/cuda-13.2/bin/nvcc LLVM_DIR=/host${LLVM_PREFIX}/lib/cmake/llvm MLIR_DIR=/host${LLVM_PREFIX}/lib/cmake/mlir LLVM_EXTERNAL_LIT=lit LD_LIBRARY_PATH=/usr/local/cuda-13.2/lib64:/usr/local/cuda-13.2/lib64/stubs"
+        export CIBW_ENVIRONMENT="KUN_USE_GIT_VERSION=${{ startsWith(github.ref, 'refs/tags/') && '0' || '1' }} CUDA_PATH=/usr/local/cuda-13.2 CUDA_HOME=/usr/local/cuda-13.2 CUDAToolkit_ROOT=/usr/local/cuda-13.2 CMAKE_CUDA_COMPILER=/usr/local/cuda-13.2/bin/nvcc LLVM_DIR=/host${LLVM_PREFIX}/lib/cmake/llvm MLIR_DIR=/host${LLVM_PREFIX}/lib/cmake/mlir LLVM_EXTERNAL_LIT=lit LD_LIBRARY_PATH=/usr/local/cuda-13.2/lib64:/usr/local/cuda-13.2/lib64/stubs"
         python -m cibuildwheel python/kunquant_mlir --platform linux --output-dir wheelhouse
     - name: Check wheel contents
       run: |

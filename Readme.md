@@ -31,6 +31,7 @@ g++=11.4.0
  * TS or STs memory layout as input/output in batch mode
  * Python/C/C++ interfaces to call the factor computation functions
  * x86 and ARM CPUs are supported. Linux, Windows and macOS are supported.
+ * New in KunQuant-MLIR: Nvidia GPU support. See [cuda.md](./doc/cuda.md).
 
 **Important node**: For better performance compared with Pandas, KunQuant suggests to use a multiple of `{blocking_len}` as the number of stocks in inputs. For single-precision float type and AVX2 instruction set, `blocking_len=8`. That is, you are suggested to input 8, 16, 24, ..., etc. stocks in a batch, if your code is compiled with AVX2 (without AVX512) and `float` datatype. Other numbers of stocks **are supported**, with lower execution performance.
 
@@ -59,7 +60,7 @@ Install a released version:
 
 Or install the latest version on `main` branch
 
-`pip install -i https://testpypi.python.org/pypi KunQuant`
+`pip install -i https://testpypi.python.org/simple KunQuant`
 
 KunQuant supports Windows (MSVC needs to be installed) and Linux (g++ or clang needs to be installed). Please make sure a working C++ compiler with C++11 support is properly installed and configured in your system
 
@@ -228,6 +229,9 @@ out = kr.runGraph(executor, modu, input_dict, 0, num_time, out_dict)
 
 Note that the executors are reusable. A multithread executor is actually a thread pool inside. If you want to run on multiple batches of data, you don’t need to create new executors for each batch.
 
+## KunQuant-MLIR: Compute your factors on Nvidia GPUs
+
+You can run your factors on Nvidia GPUs for better performance. You need to install the package KunQuant-MLIR to enable the GPU backend. The usage and the interfaces of GPU backend is very similar to the CPU backend, which has been shown above. More on CUDA GPU backend, see [cuda.md](./doc/cuda.md).
 
 ## Customized factors
 
@@ -245,10 +249,10 @@ This section is for developer who would like to build KunQuant from source, inst
 
 ### Dependency
 
-* pybind11 (automatically cloned via git as a submodule)
-* Python (3.7+ with f-string and dataclass support)
+* nanobind, nlohmann_json (automatically cloned via git as a submodule)
+* Python (3.9+ with f-string and dataclass support)
 * cmake
-* A working C++ compiler with C++11 support (e.g. clang, g++, msvc)
+* A working C++ compiler with C++17 support (e.g. clang, g++, msvc)
 * x86-64 CPU with at least AVX instruction set (AVX2-FMA is preferred and required by default), or ARM CPU with NEON instruction set.
 * Optionally requires AVX512 on CPU for better performance
 
