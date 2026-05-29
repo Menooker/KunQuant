@@ -549,6 +549,60 @@ runner.synchronize()
 `runGraph`, and D2H copy, and returns a `PendingResult`. `PendingResult.wait()`
 waits for D2H completion and returns `{output_name: numpy.ndarray}`.
 
+## Saving and Loading Executables
+
+Compiling a factor graph to GPU code can take noticeable time. If the factor
+definition, compiler options, CUDA target architecture, and KunQuant-MLIR
+version are fixed, you can save the compiled `KunMLIR.Executable` and load it
+later without running the full compiler pipeline again.
+
+Use `Executable.save_to_files(dir, name)`:
+
+```python
+exe.save_to_files("/tmp/kunquant-cache", "alpha001_sm120")
+```
+
+This writes two files:
+
+```text
+/tmp/kunquant-cache/alpha001_sm120.json
+/tmp/kunquant-cache/alpha001_sm120.cubin
+```
+
+The JSON file stores graph metadata such as input/output names, kernel metadata,
+data type, launch parameters, and output warmup/unreliable counts. The CUBIN
+file stores the compiled GPU code.
+
+Load the saved executable with `KunMLIR.Executable.load_from_files`:
+
+```python
+from KunQuant.jit import KunMLIR
+
+exe = KunMLIR.Executable.load_from_files(
+    "/tmp/kunquant-cache",
+    "alpha001_sm120",
+)
+```
+
+After loading, run it like any freshly compiled executable:
+
+```python
+executor = KunMLIR.Executor()
+ret = executor.runGraph(exe, inputs, use_cuda_graph=True)
+executor.synchronize()
+```
+
+The loaded executable still validates input and output names through
+`exe.input_names` and `exe.output_names`, and `exe.getOutputUnreliableCount()`
+continues to report the leading rows that should be ignored for each output.
+
+Saved executables are not a source-level portability format. Treat them as a
+cache for a specific KunQuant-MLIR build and CUDA target. Recompile when the
+factor expression, `KunCompilerConfig`, `CudaCompilerConfig`, GPU architecture,
+or KunQuant-MLIR version changes. If you need to run the same compiled data
+concurrently on multiple streams, load once and use `exe.clone()` per concurrent
+executor.
+
 ## Building KunQuantMLIR from Source
 
 Source builds require:
