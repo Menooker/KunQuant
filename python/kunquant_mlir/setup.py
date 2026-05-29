@@ -18,7 +18,7 @@ _HAS_STABLE_ABI = (
 
 _PKG_ROOT = Path(__file__).resolve().parent
 _REPO_ROOT = _PKG_ROOT.parents[1]
-_VERSION_BASE = "0.1.10"
+_VERSION_BASE = "0.1.11"
 
 
 class CMakeExtension(Extension):
