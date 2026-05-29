@@ -27,7 +27,7 @@ g++=11.4.0
 We also support Nvidia GPU backend. Benchmarks show that RTX5080 can achieve ~5x performance of Intel 14900KF (8 P-cores + 16 E-cores, 32 threads in total) in single precision data. The following run-time is collected on Alpha101 (time-length=2600, num-stocks=1024):
 
 | Datatype | KunQuant on 32 threads 14900KF |  KunQuant-MLIR on RTX5080 |
-|---|---|---|---|
+|---|---|---|
 | Single precision | 1.04s |  0.22s  | 
 | Double precision | 1.67s |  2.67s  | 
 
