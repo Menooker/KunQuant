@@ -167,6 +167,7 @@ _GPU_SKIP_TESTS = {
     "test_stream_double",
     "test_repro_crash_gh_issue_71",
     "test_generic_cross_sectional",
+    "test_hang_ghissue_80",
 }
 
 # Names from `check_xxx()` factory tuples that GPU can actually compile.
@@ -201,6 +202,10 @@ def _run(fn, *args, **kwargs):
             print(f"[skip on GPU] {name}")
             return
     fn(*args, **kwargs)
+
+def test_hang_ghissue_80():
+    for i in range(200_000):
+        executor = kr.createMultiThreadExecutor(4)
 
 def test_aggregrate(dtype):
     a = np.random.rand(240, 16).astype(dtype)
@@ -932,6 +937,7 @@ def test_loop_index():
         expected[:,i] = rolling_max_dd(inp[:,i], 5, min_periods=1)
     np.testing.assert_allclose(output[5:], expected[5:], equal_nan=True, atol=1e-7, rtol=1e-7)
 
+_run(test_hang_ghissue_80)
 _run(test_stream_lifetime_gh_issue_41)
 _run(test_corrwith)
 _run(test_aggregrate, "float32")
