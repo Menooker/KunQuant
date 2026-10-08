@@ -61,7 +61,7 @@ struct MultiThreadExecutor : Executor {
             ++idle_count;
             count = 0;
             std::unique_lock<std::mutex> lk{cv_lock};
-            cv.wait(lk, [&] { return closing || num_stages.load(std::memory_order_relaxed) > 0; })
+            cv.wait(lk, [&] { return closing || num_stages.load(std::memory_order_relaxed) > 0; });
             --idle_count;
         }
     }
