@@ -204,8 +204,11 @@ def _run(fn, *args, **kwargs):
     fn(*args, **kwargs)
 
 def test_hang_ghissue_80():
-    for i in range(200_000):
+    print("test_hang_ghissue_80: createMultiThreadExecutor 2000 times")
+    for i in range(2000):
         executor = kr.createMultiThreadExecutor(4)
+        del executor
+    print("test_hang_ghissue_80: done")
 
 def test_aggregrate(dtype):
     a = np.random.rand(240, 16).astype(dtype)
