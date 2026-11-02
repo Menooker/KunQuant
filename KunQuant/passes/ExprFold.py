@@ -21,10 +21,33 @@ class _OpProxy:
             return False
         if self.op.inputs == o.op.inputs:
             return True
-        for x,y in zip(self.op.items(), o.op.items()):
-            if x != y:
-                return False
-        return True
+        return _is_same(self.op, o.op)
+
+def _is_same(x: OpBase, y: OpBase) -> bool:
+    '''
+    Returns whether x.items() and y.items() are equal. It walks the two graphs side by side and
+    visits each pair of ops once, so that a value used by many ops is not walked once per path
+    to it.
+    '''
+    stack = [(x, {}, y, {})]
+    visited = set()
+    while stack:
+        a, akwargs, b, bkwargs = stack.pop()
+        if a is b and akwargs.keys() == bkwargs.keys() and all(akwargs[k] is bkwargs[k] for k in akwargs):
+            continue
+        key = (id(a), id(b), *map(id, akwargs.values()), *map(id, bkwargs.values()))
+        if key in visited:
+            continue
+        visited.add(key)
+        if a.__class__ != b.__class__ or a.attrs != b.attrs:
+            return False
+        aargs = a.get_args(True, **akwargs)
+        bargs = b.get_args(True, **bkwargs)
+        if len(aargs) != len(bargs):
+            return False
+        for (aarg, aargkwargs), (barg, bargkwargs) in zip(aargs, bargs):
+            stack.append((aarg, aargkwargs, barg, bargkwargs))
+    return True
     
 def fold_impl(ops: List[OpBase]) -> List[OpBase]:
     replace_map = dict()
