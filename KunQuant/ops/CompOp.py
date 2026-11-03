@@ -675,9 +675,10 @@ class WindowedMaxDrawdown(WindowedCompositiveOp):
             peak = WindowedMax(v, window)
             max_bar_index = TsArgMax(v, window) - 1 # tsargmax starts from 1
             inf = ConstantOp(float('inf'))
-            with ForeachBackWindow(v, window) as each:
+            v0 = WindowedTempOutput(v, window)
+            with ForeachBackWindow(v0, window) as each:
                 index = WindowLoopIndex(each)
-                filtered = Select(index >= max_bar_index, IterValue(each, v), inf)
+                filtered = Select(index >= max_bar_index, IterValue(each, v0), inf)
             trough = ReduceMin(filtered)
             (peak - trough) / peak
         return b.ops

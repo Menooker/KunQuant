@@ -903,6 +903,7 @@ def create_loop_index():
     with builder:
         inp1 = Input("a")
         Output(WindowedMaxDrawdown(inp1, 5), "out")
+        Output(WindowedMaxDrawdown(inp1 * inp1, 5), "gh_issue_84")
     f = Function(builder.ops)
     return "test_max_drawdown", f, KunCompilerConfig(input_layout="TS", output_layout="TS")
 
@@ -939,6 +940,9 @@ def test_loop_index():
     for i in range(inp.shape[1]):
         expected[:,i] = rolling_max_dd(inp[:,i], 5, min_periods=1)
     np.testing.assert_allclose(output[5:], expected[5:], equal_nan=True, atol=1e-7, rtol=1e-7)
+    for i in range(inp.shape[1]):
+        expected[:,i] = rolling_max_dd(inp[:,i] * inp[:,i], 5, min_periods=1)
+    np.testing.assert_allclose(out["gh_issue_84"][5:], expected[5:], equal_nan=True, atol=1e-7, rtol=1e-7)
 
 _run(test_hang_ghissue_80)
 _run(test_stream_lifetime_gh_issue_41)
