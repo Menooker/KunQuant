@@ -35,7 +35,11 @@ class _OpProxy:
             lhs_replaced = self.replace_map.get(lhs_op)
             if lhs_replaced is not None and lhs_replaced == self.replace_map.get(rhs_op) and lhs_kwargs == rhs_kwargs:
                 continue   #fast path
-            key = (lhs_op, rhs_op, *lhs_kwargs.values(), *rhs_kwargs.values())
+            key = (
+                lhs_op, rhs_op,
+                frozenset(lhs_kwargs.items()),
+                frozenset(rhs_kwargs.items()),
+            )
             if key in checked:
                 continue
             if not _OpProxy(lhs_op, self.cache, self.parent, self.replace_map).__eq__(_OpProxy(rhs_op, self.cache, self.parent, self.replace_map), lhs_kwargs, rhs_kwargs, checked):
