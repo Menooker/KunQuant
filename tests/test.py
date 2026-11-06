@@ -428,6 +428,39 @@ v30 = Output@{name:ou2}(v28)''')
   )
 )''')
 
+def check_fold_shared_values():
+    # a value used twice at each of 40 levels, upstream of two equal loops: comparing the
+    # ops after the loops as trees would walk 2^40 paths
+    builder = Builder()
+    with builder:
+        v = Input("a")
+        for _ in range(40):
+            v = Add(v, v)
+        out1 = Output(WindowedAvg(v, 5), "ou1")
+        out2 = Output(WindowedAvg(v, 5), "ou2")
+    f = Function(builder.ops)
+    decompose(f)
+    expr_fold(f)
+    strf = str(f)
+    if strf.count("ForeachBackWindow") != 1:
+        raise RuntimeError(f"expecting the two windowed averages folded into one\nbut got\n{strf}")
+    # the same inside two equal loop bodies, whose ops are not the same objects
+    builder = Builder()
+    with builder:
+        inp = Input("a")
+        for name in ("ou1", "ou2"):
+            w = WindowedTempOutput(inp, 5)
+            with ForeachBackWindow(w, 5) as loop:
+                v = IterValue(loop, w)
+                for _ in range(40):
+                    v = Add(v, v)
+            Output(ReduceAdd(v), name)
+    f = Function(builder.ops)
+    expr_fold(f)
+    strf = str(f)
+    if strf.count("ReduceAdd") != 1:
+        raise RuntimeError(f"expecting the two reductions folded into one\nbut got\n{strf}")
+
 def check_div_cmp():
     builder = Builder()
     with builder:
@@ -617,6 +650,7 @@ if __name__ == "__main__":
     check_tempwindow_elim()
     check_opt_sum()
     check_fold_window()
+    check_fold_shared_values()
     check_div_cmp()
     check_mergeLoop()
     check_toposort()
